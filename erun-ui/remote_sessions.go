@@ -7,16 +7,17 @@ import (
 
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/primitive/open/appsession"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // ListRemoteAppSessions reports the live persistent sessions in the env's pod.
 // Fail-soft: unreachable envs yield nil so the open flow never stalls.
-func (a *App) ListRemoteAppSessions(selection uiSelection) []string {
-	selection = normalizeSelection(selection)
+func (a *App) ListRemoteAppSessions(selection uimodel.Selection) []string {
+	selection = uimodel.NormalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(a.backgroundContext(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(a.context(), 5*time.Second)
 	defer cancel()
 	output, err := a.execInRuntimePod(ctx, selection,
 		activity.RemoteAppSessionHeartbeatScript(selection.Tenant, selection.Environment))
@@ -34,12 +35,12 @@ func (a *App) ListRemoteAppSessions(selection uiSelection) []string {
 
 // endRemoteAppSession ends a session when the user closes its tab, so it is not
 // rebuilt on the next open. Fail-soft.
-func (a *App) endRemoteAppSession(selection uiSelection, sessionID string) {
-	selection = normalizeSelection(selection)
+func (a *App) endRemoteAppSession(selection uimodel.Selection, sessionID string) {
+	selection = uimodel.NormalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" || strings.TrimSpace(sessionID) == "" {
 		return
 	}
-	ctx, cancel := context.WithTimeout(a.backgroundContext(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(a.context(), 10*time.Second)
 	defer cancel()
 	_, _ = a.execInRuntimePod(ctx, selection,
 		appsession.RemoteAppSessionEndScript(selection.Tenant, selection.Environment, sessionID))

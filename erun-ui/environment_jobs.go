@@ -13,6 +13,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // A remote-agent/runtime env's jobs run in its pod, so reads go through its MCP
@@ -24,7 +25,7 @@ import (
 func (a *App) LoadEnvironmentJobs(tenant, environment string) ([]uiEnvironmentJob, error) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
-	if err := errMissingTenantOrEnvironment("load environment jobs", tenant, environment); err != nil {
+	if err := uimodel.ErrMissingTenantOrEnvironment("load environment jobs", tenant, environment); err != nil {
 		return nil, err
 	}
 	result, useMCP, err := a.jobsReachability(tenant, environment)
@@ -38,7 +39,7 @@ func (a *App) LoadEnvironmentJobs(tenant, environment string) ([]uiEnvironmentJo
 		}
 		return environmentJobsToUI(jobs), nil
 	}
-	jobs, err := a.deps.loadEnvironmentJobs(a.backgroundContext(), mcpEndpointForOpenResult(result), a.mcpBearer(tenant, environment))
+	jobs, err := a.deps.loadEnvironmentJobs(a.context(), mcpEndpointForOpenResult(result), a.mcpBearer(tenant, environment))
 	if err != nil {
 		return nil, a.wrapJobMCPErr(result, err)
 	}
@@ -75,7 +76,7 @@ func (a *App) ReadEnvironmentJobOutput(input uiJobOutputInput) (uiEnvironmentJob
 		}
 		return jobOutputToUI(page), nil
 	}
-	page, err := a.deps.readEnvironmentJobOutput(a.backgroundContext(), mcpEndpointForOpenResult(result), a.mcpBearer(tenant, environment), params)
+	page, err := a.deps.readEnvironmentJobOutput(a.context(), mcpEndpointForOpenResult(result), a.mcpBearer(tenant, environment), params)
 	if err != nil {
 		return uiEnvironmentJobOutput{}, a.wrapJobMCPErr(result, err)
 	}
@@ -108,7 +109,7 @@ func (a *App) CancelEnvironmentJob(input uiCancelJobInput) (uiEnvironmentJob, er
 		}
 		return environmentJobToUI(cancel.Job), nil
 	}
-	cancel, err := a.deps.cancelEnvironmentJob(a.backgroundContext(), mcpEndpointForOpenResult(result), a.mcpBearer(tenant, environment), params)
+	cancel, err := a.deps.cancelEnvironmentJob(a.context(), mcpEndpointForOpenResult(result), a.mcpBearer(tenant, environment), params)
 	if err != nil {
 		return uiEnvironmentJob{}, a.wrapJobMCPErr(result, err)
 	}

@@ -9,6 +9,7 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestStartSessionLeavesCloudContextStartupToErunCommand(t *testing.T) {
@@ -57,7 +58,7 @@ func TestStartSessionLeavesCloudContextStartupToErunCommand(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	if _, err := app.StartSession(uiSelection{Tenant: "frs", Environment: "prod"}, 0, 80, 24); err != nil {
+	if _, err := app.StartSession(uimodel.Selection{Tenant: "frs", Environment: "prod"}, 0, 80, 24); err != nil {
 		t.Fatalf("StartSession failed: %v", err)
 	}
 
@@ -98,15 +99,15 @@ func TestStartSessionAllocatesIndependentSlots(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	first, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "local"}, 0, 80, 24)
+	first, err := app.StartSession(uimodel.Selection{Tenant: "erun", Environment: "local"}, 0, 80, 24)
 	if err != nil {
 		t.Fatalf("first StartSession failed: %v", err)
 	}
-	second, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "local"}, 1, 80, 24)
+	second, err := app.StartSession(uimodel.Selection{Tenant: "erun", Environment: "local"}, 1, 80, 24)
 	if err != nil {
 		t.Fatalf("second StartSession failed: %v", err)
 	}
-	reuse, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "local"}, 0, 80, 24)
+	reuse, err := app.StartSession(uimodel.Selection{Tenant: "erun", Environment: "local"}, 0, 80, 24)
 	if err != nil {
 		t.Fatalf("third StartSession failed: %v", err)
 	}
@@ -149,11 +150,11 @@ func TestSendSessionInputRoutesPerSession(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	first, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "local"}, 0, 80, 24)
+	first, err := app.StartSession(uimodel.Selection{Tenant: "erun", Environment: "local"}, 0, 80, 24)
 	if err != nil {
 		t.Fatalf("first StartSession failed: %v", err)
 	}
-	second, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "local"}, 1, 80, 24)
+	second, err := app.StartSession(uimodel.Selection{Tenant: "erun", Environment: "local"}, 1, 80, 24)
 	if err != nil {
 		t.Fatalf("second StartSession failed: %v", err)
 	}
@@ -206,12 +207,12 @@ func TestStartSessionReusesExistingSessionForSelection(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	first, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "local"}, 0, 80, 24)
+	first, err := app.StartSession(uimodel.Selection{Tenant: "erun", Environment: "local"}, 0, 80, 24)
 	if err != nil {
 		t.Fatalf("first StartSession failed: %v", err)
 	}
 
-	second, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "local"}, 0, 80, 24)
+	second, err := app.StartSession(uimodel.Selection{Tenant: "erun", Environment: "local"}, 0, 80, 24)
 	if err != nil {
 		t.Fatalf("second StartSession failed: %v", err)
 	}
@@ -260,7 +261,7 @@ func TestSendSessionInputRecordsCLIActivityForCurrentEnvironment(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	started, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "local"}, 0, 80, 24)
+	started, err := app.StartSession(uimodel.Selection{Tenant: "erun", Environment: "local"}, 0, 80, 24)
 	if err != nil {
 		t.Fatalf("StartSession failed: %v", err)
 	}
@@ -301,7 +302,7 @@ func TestSendSessionInputClearsAwaitingPostRespawnInputFlag(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	started, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "local"}, 0, 80, 24)
+	started, err := app.StartSession(uimodel.Selection{Tenant: "erun", Environment: "local"}, 0, 80, 24)
 	if err != nil {
 		t.Fatalf("StartSession failed: %v", err)
 	}

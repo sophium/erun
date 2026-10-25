@@ -16,18 +16,19 @@ import (
 	"github.com/sophium/erun/erun-common/command/podruntime"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 const runtimeUsageTimeout = 10 * time.Second
 
 // LoadRuntimeUsage reports the environment's CPU, memory and disk usage against its
 // cgroup limits; it fails soft to an unavailable report.
-func (a *App) LoadRuntimeUsage(selection uiSelection) (uiRuntimeUsage, error) {
-	selection = normalizeSelection(selection)
-	if err := errMissingTenantOrEnvironment("load runtime usage", selection.Tenant, selection.Environment); err != nil {
+func (a *App) LoadRuntimeUsage(selection uimodel.Selection) (uiRuntimeUsage, error) {
+	selection = uimodel.NormalizeSelection(selection)
+	if err := uimodel.ErrMissingTenantOrEnvironment("load runtime usage", selection.Tenant, selection.Environment); err != nil {
 		return uiRuntimeUsage{}, err
 	}
-	usage, err := a.deps.loadRuntimeUsage(a.backgroundContext(), selection)
+	usage, err := a.deps.loadRuntimeUsage(a.context(), selection)
 	if err != nil {
 		return uiRuntimeUsage{
 			Tenant:      selection.Tenant,
@@ -38,7 +39,7 @@ func (a *App) LoadRuntimeUsage(selection uiSelection) (uiRuntimeUsage, error) {
 	return usage, nil
 }
 
-func loadRuntimeUsageViaKubectl(parent context.Context, store erunUIStore, selection uiSelection) (uiRuntimeUsage, error) {
+func loadRuntimeUsageViaKubectl(parent context.Context, store erunUIStore, selection uimodel.Selection) (uiRuntimeUsage, error) {
 	if store == nil {
 		return uiRuntimeUsage{}, fmt.Errorf("configuration store is unavailable")
 	}

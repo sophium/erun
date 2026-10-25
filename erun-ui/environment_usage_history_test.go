@@ -5,11 +5,13 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestEnvironmentUsageHistorySurvivesRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "environment-usage-history.json")
-	selection := uiSelection{Tenant: "acme", Environment: "dev"}
+	selection := uimodel.Selection{Tenant: "acme", Environment: "dev"}
 	before := &App{deps: erunUIDeps{environmentUsageHistoryPath: path}}
 	reading := environmentUsageReading{
 		usage:      uiRuntimeUsage{Available: true, CPU: uiRuntimeCPUUsage{Available: true, Utilization: "17.0%"}},
@@ -46,7 +48,7 @@ func TestEnvironmentUsageHistoryFreshEnvironmentStartsUnobserved(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "environment-usage-history.json")
 	app := NewApp(erunUIDeps{environmentUsageHistoryPath: path})
 
-	if _, ok := app.envUsage[selectionKey(uiSelection{Tenant: "acme", Environment: "dev"})]; ok {
+	if _, ok := app.envUsage[selectionKey(uimodel.Selection{Tenant: "acme", Environment: "dev"})]; ok {
 		t.Fatal("expected no persisted reading for an environment that was never sampled")
 	}
 }
@@ -66,8 +68,8 @@ func TestEnvironmentUsageHistoryUnreadableDoesNotFabricateAReading(t *testing.T)
 
 func TestWriteEnvironmentUsageHistoryEntryUpsertsWithoutClobberingOthers(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "environment-usage-history.json")
-	first := uiSelection{Tenant: "acme", Environment: "dev"}
-	second := uiSelection{Tenant: "acme", Environment: "staging"}
+	first := uimodel.Selection{Tenant: "acme", Environment: "dev"}
+	second := uimodel.Selection{Tenant: "acme", Environment: "staging"}
 	reading := environmentUsageReading{usage: uiRuntimeUsage{Available: true}, observedAt: time.Now().Truncate(time.Second)}
 
 	if err := writeEnvironmentUsageHistoryEntry(path, first, reading); err != nil {

@@ -11,9 +11,10 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
-func (a *App) StartInitSession(selection uiSelection, cols, rows int) (startSessionResult, error) {
+func (a *App) StartInitSession(selection uimodel.Selection, cols, rows int) (uimodel.StartSessionResult, error) {
 	// Init owns the env's single deploy, so it carries the MCP-auth key; a later
 	// redeploy would roll the new pod.
 	return a.runErunCommandInLocal(selection, cols, rows, a.appendMCPAuthPublicKeyFlag(buildInitArgs(selection)))
@@ -21,43 +22,43 @@ func (a *App) StartInitSession(selection uiSelection, cols, rows int) (startSess
 
 // StartDeploySession installs a published version and never builds; with no
 // picked version it redeploys the current one.
-func (a *App) StartDeploySession(selection uiSelection, cols, rows int) (startSessionResult, error) {
+func (a *App) StartDeploySession(selection uimodel.Selection, cols, rows int) (uimodel.StartSessionResult, error) {
 	return a.runErunCommandInLocal(selection, cols, rows, a.appendMCPAuthPublicKeyFlag(buildDeployArgs(selection)))
 }
 
 // StartCreateVersionSession builds, pushes and deploys the working tree. Only a
 // local-agent env qualifies; ResolvedType is checked because a host env also
 // builds here but has no pod.
-func (a *App) StartCreateVersionSession(selection uiSelection, cols, rows int) (startSessionResult, error) {
-	selection = normalizeSelection(selection)
-	if err := errMissingTenantOrEnvironment("start create-version session", selection.Tenant, selection.Environment); err != nil {
-		return startSessionResult{}, err
+func (a *App) StartCreateVersionSession(selection uimodel.Selection, cols, rows int) (uimodel.StartSessionResult, error) {
+	selection = uimodel.NormalizeSelection(selection)
+	if err := uimodel.ErrMissingTenantOrEnvironment("start create-version session", selection.Tenant, selection.Environment); err != nil {
+		return uimodel.StartSessionResult{}, err
 	}
 	if a.ctx == nil {
-		return startSessionResult{}, fmt.Errorf("start create-version session: application context is not ready")
+		return uimodel.StartSessionResult{}, fmt.Errorf("start create-version session: application context is not ready")
 	}
 	result, err := resolve.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
 	if err != nil {
-		return startSessionResult{}, err
+		return uimodel.StartSessionResult{}, err
 	}
 	if result.EnvConfig.ResolvedType() == configpkg.EnvironmentTypeHost {
-		return startSessionResult{}, fmt.Errorf("%s/%s is a host environment; it has no pod and no cluster to deploy to", selection.Tenant, selection.Environment)
+		return uimodel.StartSessionResult{}, fmt.Errorf("%s/%s is a host environment; it has no pod and no cluster to deploy to", selection.Tenant, selection.Environment)
 	}
 	if !result.EnvConfig.BuildsHere() || result.RemoteRepo() {
-		return startSessionResult{}, fmt.Errorf("%s/%s has no local source to build; deploy a published version instead", selection.Tenant, selection.Environment)
+		return uimodel.StartSessionResult{}, fmt.Errorf("%s/%s has no local source to build; deploy a published version instead", selection.Tenant, selection.Environment)
 	}
 	go func() {
-		_ = a.runDeployOrchestration(a.activityWatcherCtx(), selection, result, false)
+		_ = a.runDeployOrchestration(a.context(), selection, result, false)
 	}()
-	return startSessionResult{Selection: normalizeSelection(selection), Orchestrated: true}, nil
+	return uimodel.StartSessionResult{Selection: uimodel.NormalizeSelection(selection), Orchestrated: true}, nil
 }
 
 // StartInitialDeploySession deploys a freshly created env's first version,
 // building only when the env builds here.
-func (a *App) StartInitialDeploySession(selection uiSelection, cols, rows int) (startSessionResult, error) {
+func (a *App) StartInitialDeploySession(selection uimodel.Selection, cols, rows int) (uimodel.StartSessionResult, error) {
 	if result, ok := a.maybeStartDeployOrchestration(selection, false); ok {
 		return result, nil
 	}
@@ -65,7 +66,7 @@ func (a *App) StartInitialDeploySession(selection uiSelection, cols, rows int) (
 }
 
 // StartForceDeploySession runs `erun deploy --force` to recover a missing image.
-func (a *App) StartForceDeploySession(selection uiSelection, cols, rows int) (startSessionResult, error) {
+func (a *App) StartForceDeploySession(selection uimodel.Selection, cols, rows int) (uimodel.StartSessionResult, error) {
 	if result, ok := a.maybeStartDeployOrchestration(selection, true); ok {
 		return result, nil
 	}
@@ -74,44 +75,44 @@ func (a *App) StartForceDeploySession(selection uiSelection, cols, rows int) (st
 }
 
 // StartUpgradeEnvironmentSession runs `erun upgrade` in the env's own Local shell.
-func (a *App) StartUpgradeEnvironmentSession(selection uiSelection, cols, rows int) (startSessionResult, error) {
+func (a *App) StartUpgradeEnvironmentSession(selection uimodel.Selection, cols, rows int) (uimodel.StartSessionResult, error) {
 	return a.runErunCommandInLocal(selection, cols, rows, buildUpgradeArgs(selection))
 }
 
-func (a *App) StartSSHDInitSession(selection uiSelection, cols, rows int) (startSessionResult, error) {
+func (a *App) StartSSHDInitSession(selection uimodel.Selection, cols, rows int) (uimodel.StartSessionResult, error) {
 	return a.runErunCommandInLocal(selection, cols, rows, buildSSHDInitArgs(selection))
 }
 
-func (a *App) StartDoctorSession(selection uiSelection, cols, rows int) (startSessionResult, error) {
+func (a *App) StartDoctorSession(selection uimodel.Selection, cols, rows int) (uimodel.StartSessionResult, error) {
 	return a.runErunCommandInLocal(selection, cols, rows, buildDoctorArgs(selection))
 }
 
-func (a *App) runErunCommandInLocal(selection uiSelection, cols, rows int, args []string) (startSessionResult, error) {
-	selection = normalizeSelection(selection)
-	if err := errMissingTenantOrEnvironment("run erun command in local session", selection.Tenant, selection.Environment); err != nil {
-		return startSessionResult{}, err
+func (a *App) runErunCommandInLocal(selection uimodel.Selection, cols, rows int, args []string) (uimodel.StartSessionResult, error) {
+	selection = uimodel.NormalizeSelection(selection)
+	if err := uimodel.ErrMissingTenantOrEnvironment("run erun command in local session", selection.Tenant, selection.Environment); err != nil {
+		return uimodel.StartSessionResult{}, err
 	}
 
 	local, err := a.ensureLocalSession(selection, 0, cols, rows)
 	if err != nil {
-		return startSessionResult{}, err
+		return uimodel.StartSessionResult{}, err
 	}
 
 	a.mu.Lock()
 	target := local.session
 	a.mu.Unlock()
 	if target == nil {
-		return startSessionResult{}, fmt.Errorf("local session is not ready")
+		return uimodel.StartSessionResult{}, fmt.Errorf("local session is not ready")
 	}
 
 	command := buildLocalErunCommand(a.deps.resolveCLIPath(), args)
 	if _, err := io.WriteString(target, command); err != nil {
-		return startSessionResult{}, err
+		return uimodel.StartSessionResult{}, err
 	}
 
 	a.recordTerminalActivity(selection)
 
-	return startSessionResult{
+	return uimodel.StartSessionResult{
 		SessionID: local.serial,
 		Selection: selection,
 		Slot:      local.slot,
@@ -119,7 +120,7 @@ func (a *App) runErunCommandInLocal(selection uiSelection, cols, rows int, args 
 	}, nil
 }
 
-func (a *App) ensureLocalSession(selection uiSelection, slot, cols, rows int) (*managedTerminal, error) {
+func (a *App) ensureLocalSession(selection uimodel.Selection, slot, cols, rows int) (*managedTerminal, error) {
 	key := localSessionKey(selection, slot)
 
 	a.mu.Lock()
@@ -209,14 +210,14 @@ func shellQuoteSafeRune(r rune) bool {
 	}
 }
 
-func (a *App) StartCloudInitAWSSession(cols, rows int) (startSessionResult, error) {
+func (a *App) StartCloudInitAWSSession(cols, rows int) (uimodel.StartSessionResult, error) {
 	cols, rows = clampTerminalSize(cols, rows)
 	key := "cloud/init/aws"
 
 	a.mu.Lock()
 	if existing := a.sessions[key]; existing != nil && !existing.closed && existing.session != nil {
 		a.mu.Unlock()
-		return startSessionResult{
+		return uimodel.StartSessionResult{
 			SessionID: existing.serial,
 			Selection: existing.selection,
 		}, nil
@@ -232,7 +233,7 @@ func (a *App) StartCloudInitAWSSession(cols, rows int) (startSessionResult, erro
 		Rows:       rows,
 	})
 	if err != nil {
-		return startSessionResult{}, err
+		return uimodel.StartSessionResult{}, err
 	}
 
 	a.mu.Lock()
@@ -249,19 +250,19 @@ func (a *App) StartCloudInitAWSSession(cols, rows int) (startSessionResult, erro
 
 	a.spawnStreamSession(managed)
 
-	return startSessionResult{SessionID: serial}, nil
+	return uimodel.StartSessionResult{SessionID: serial}, nil
 }
 
 // StartCloudInitCloudflareSession runs `erun cloud init cloudflare`; the CLI owns
 // the flow.
-func (a *App) StartCloudInitCloudflareSession(cols, rows int) (startSessionResult, error) {
+func (a *App) StartCloudInitCloudflareSession(cols, rows int) (uimodel.StartSessionResult, error) {
 	cols, rows = clampTerminalSize(cols, rows)
 	key := "cloud/init/cloudflare"
 
 	a.mu.Lock()
 	if existing := a.sessions[key]; existing != nil && !existing.closed && existing.session != nil {
 		a.mu.Unlock()
-		return startSessionResult{
+		return uimodel.StartSessionResult{
 			SessionID: existing.serial,
 			Selection: existing.selection,
 		}, nil
@@ -277,7 +278,7 @@ func (a *App) StartCloudInitCloudflareSession(cols, rows int) (startSessionResul
 		Rows:       rows,
 	})
 	if err != nil {
-		return startSessionResult{}, err
+		return uimodel.StartSessionResult{}, err
 	}
 
 	a.mu.Lock()
@@ -294,10 +295,10 @@ func (a *App) StartCloudInitCloudflareSession(cols, rows int) (startSessionResul
 
 	a.spawnStreamSession(managed)
 
-	return startSessionResult{SessionID: serial}, nil
+	return uimodel.StartSessionResult{SessionID: serial}, nil
 }
 
-func (a *App) logSpawnedCommandToLocal(selection uiSelection, dedupKey, line string) {
+func (a *App) logSpawnedCommandToLocal(selection uimodel.Selection, dedupKey, line string) {
 	a.mu.Lock()
 	var local *managedTerminal
 	for _, m := range a.sessions {
@@ -325,7 +326,7 @@ func (a *App) logSpawnedCommandToLocal(selection uiSelection, dedupKey, line str
 	local.loggedCommands[dedupKey] = struct{}{}
 	serial := local.serial
 	a.mu.Unlock()
-	a.emitEvent(terminalOutputEvent, terminalOutputPayload{
+	a.emitEvent(uimodel.TerminalOutputEvent, terminalOutputPayload{
 		SessionID: serial,
 		Data:      base64.StdEncoding.EncodeToString([]byte(line)),
 	})

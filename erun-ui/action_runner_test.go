@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func newRunnerTestApp(t *testing.T) *App {
@@ -30,7 +32,7 @@ func TestRunnerSerializesSameEnv(t *testing.T) {
 		_, err := app.enqueueDesktopAction(desktopAction{
 			id:        fmt.Sprintf("serialize-%d", i),
 			kind:      "open",
-			selection: uiSelection{Tenant: "erun", Environment: "local"},
+			selection: uimodel.Selection{Tenant: "erun", Environment: "local"},
 			run: func(ctx context.Context) error {
 				mu.Lock()
 				sequence = append(sequence, i)
@@ -88,7 +90,7 @@ func TestRunnerDifferentEnvsRunConcurrently(t *testing.T) {
 
 	_, err := app.enqueueDesktopAction(desktopAction{
 		kind:      "open",
-		selection: uiSelection{Tenant: "a", Environment: "dev"},
+		selection: uimodel.Selection{Tenant: "a", Environment: "dev"},
 		run: func(ctx context.Context) error {
 			bothStarted <- struct{}{}
 			<-releaseA
@@ -100,7 +102,7 @@ func TestRunnerDifferentEnvsRunConcurrently(t *testing.T) {
 	}
 	_, err = app.enqueueDesktopAction(desktopAction{
 		kind:      "open",
-		selection: uiSelection{Tenant: "b", Environment: "dev"},
+		selection: uimodel.Selection{Tenant: "b", Environment: "dev"},
 		run: func(ctx context.Context) error {
 			bothStarted <- struct{}{}
 			<-releaseB
@@ -131,7 +133,7 @@ func TestRunnerCancelWaitingActionRemovesEntry(t *testing.T) {
 
 	firstID, err := app.enqueueDesktopAction(desktopAction{
 		kind:      "open",
-		selection: uiSelection{Tenant: "erun", Environment: "local"},
+		selection: uimodel.Selection{Tenant: "erun", Environment: "local"},
 		run: func(ctx context.Context) error {
 			close(firstStarted)
 			<-gate
@@ -145,7 +147,7 @@ func TestRunnerCancelWaitingActionRemovesEntry(t *testing.T) {
 
 	secondID, err := app.enqueueDesktopAction(desktopAction{
 		kind:      "deploy",
-		selection: uiSelection{Tenant: "erun", Environment: "local"},
+		selection: uimodel.Selection{Tenant: "erun", Environment: "local"},
 		run: func(ctx context.Context) error {
 			t.Fatal("cancelled action should not run")
 			return nil
@@ -183,7 +185,7 @@ func TestRunnerActionErrorFinalizesAsFailed(t *testing.T) {
 
 	id, err := app.enqueueDesktopAction(desktopAction{
 		kind:      "open",
-		selection: uiSelection{Tenant: "erun", Environment: "local"},
+		selection: uimodel.Selection{Tenant: "erun", Environment: "local"},
 		run: func(ctx context.Context) error {
 			return errors.New("boom")
 		},
@@ -210,7 +212,7 @@ func TestRunnerCancelledRunningActionFinalizesAsCancelled(t *testing.T) {
 	started := make(chan struct{})
 	id, err := app.enqueueDesktopAction(desktopAction{
 		kind:      "open",
-		selection: uiSelection{Tenant: "erun", Environment: "local"},
+		selection: uimodel.Selection{Tenant: "erun", Environment: "local"},
 		run: func(ctx context.Context) error {
 			close(started)
 			<-ctx.Done()

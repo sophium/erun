@@ -9,6 +9,7 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/mcpauth"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestStartInitSessionPipesCommandToLocal(t *testing.T) {
@@ -35,7 +36,7 @@ func TestStartInitSessionPipesCommandToLocal(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	result, err := app.StartInitSession(uiSelection{
+	result, err := app.StartInitSession(uimodel.Selection{
 		Tenant:            " erun ",
 		Environment:       " remote ",
 		Version:           " 1.0.19 ",
@@ -91,10 +92,10 @@ func TestStartInitSessionUsesSeparateSessionKey(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	if _, err := app.StartInitSession(uiSelection{Tenant: "erun", Environment: "remote"}, 80, 24); err != nil {
+	if _, err := app.StartInitSession(uimodel.Selection{Tenant: "erun", Environment: "remote"}, 80, 24); err != nil {
 		t.Fatalf("StartInitSession failed: %v", err)
 	}
-	if _, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
+	if _, err := app.StartSession(uimodel.Selection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
 		t.Fatalf("StartSession failed: %v", err)
 	}
 	if startCalls != 2 {
@@ -127,10 +128,10 @@ func TestStartInitSessionReusesLocalAcrossInvocations(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	if _, err := app.StartInitSession(uiSelection{Tenant: "erun", Environment: "remote", Version: "1.0.18"}, 80, 24); err != nil {
+	if _, err := app.StartInitSession(uimodel.Selection{Tenant: "erun", Environment: "remote", Version: "1.0.18"}, 80, 24); err != nil {
 		t.Fatalf("first StartInitSession failed: %v", err)
 	}
-	if _, err := app.StartInitSession(uiSelection{Tenant: "erun", Environment: "remote", Version: "1.0.19"}, 80, 24); err != nil {
+	if _, err := app.StartInitSession(uimodel.Selection{Tenant: "erun", Environment: "remote", Version: "1.0.19"}, 80, 24); err != nil {
 		t.Fatalf("second StartInitSession failed: %v", err)
 	}
 	if startCalls != 1 {
@@ -169,7 +170,7 @@ func TestStartSSHDInitSessionPipesCommandToLocal(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	result, err := app.StartSSHDInitSession(uiSelection{Tenant: " erun ", Environment: " remote "}, 80, 24)
+	result, err := app.StartSSHDInitSession(uimodel.Selection{Tenant: " erun ", Environment: " remote "}, 80, 24)
 	if err != nil {
 		t.Fatalf("StartSSHDInitSession failed: %v", err)
 	}
@@ -208,7 +209,7 @@ func TestStartDoctorSessionPipesCommandToLocal(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	result, err := app.StartDoctorSession(uiSelection{Tenant: " erun ", Environment: " remote "}, 80, 24)
+	result, err := app.StartDoctorSession(uimodel.Selection{Tenant: " erun ", Environment: " remote "}, 80, 24)
 	if err != nil {
 		t.Fatalf("StartDoctorSession failed: %v", err)
 	}
@@ -249,7 +250,7 @@ func TestStartDeploySessionPipesCommandToLocal(t *testing.T) {
 	app.identity = nil
 	defer app.shutdown(context.Background())
 
-	result, err := app.StartDeploySession(uiSelection{Tenant: " erun ", Environment: " remote ", Version: " 1.0.19 "}, 80, 24)
+	result, err := app.StartDeploySession(uimodel.Selection{Tenant: " erun ", Environment: " remote ", Version: " 1.0.19 "}, 80, 24)
 	if err != nil {
 		t.Fatalf("StartDeploySession failed: %v", err)
 	}
@@ -289,7 +290,7 @@ func TestStartDeploySessionInjectsMCPAuthPublicKey(t *testing.T) {
 	app.identity = newDesktopIdentity(identityDir)
 	defer app.shutdown(context.Background())
 
-	if _, err := app.StartDeploySession(uiSelection{Tenant: "erun", Environment: "remote", Version: "1.0.19"}, 80, 24); err != nil {
+	if _, err := app.StartDeploySession(uimodel.Selection{Tenant: "erun", Environment: "remote", Version: "1.0.19"}, 80, 24); err != nil {
 		t.Fatalf("StartDeploySession failed: %v", err)
 	}
 	wantPath := mcpauth.DesktopIdentityPublicKeyPath(identityDir)
@@ -330,7 +331,7 @@ func TestStartInitSessionInjectsMCPAuthPublicKey(t *testing.T) {
 	app.identity = newDesktopIdentity(identityDir)
 	defer app.shutdown(context.Background())
 
-	if _, err := app.StartInitSession(uiSelection{Tenant: "erun", Environment: "remote", Version: "1.0.19", NoGit: true}, 80, 24); err != nil {
+	if _, err := app.StartInitSession(uimodel.Selection{Tenant: "erun", Environment: "remote", Version: "1.0.19", NoGit: true}, 80, 24); err != nil {
 		t.Fatalf("StartInitSession failed: %v", err)
 	}
 	wantPath := mcpauth.DesktopIdentityPublicKeyPath(identityDir)
@@ -367,13 +368,13 @@ func TestRunErunCommandReusesLocalAndERunSpawnsSeparately(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	if _, err := app.StartInitSession(uiSelection{Tenant: "erun", Environment: "remote", Version: "1.0.19"}, 80, 24); err != nil {
+	if _, err := app.StartInitSession(uimodel.Selection{Tenant: "erun", Environment: "remote", Version: "1.0.19"}, 80, 24); err != nil {
 		t.Fatalf("StartInitSession failed: %v", err)
 	}
-	if _, err := app.StartDeploySession(uiSelection{Tenant: "erun", Environment: "remote", Version: "1.0.19"}, 80, 24); err != nil {
+	if _, err := app.StartDeploySession(uimodel.Selection{Tenant: "erun", Environment: "remote", Version: "1.0.19"}, 80, 24); err != nil {
 		t.Fatalf("StartDeploySession failed: %v", err)
 	}
-	if _, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
+	if _, err := app.StartSession(uimodel.Selection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
 		t.Fatalf("StartSession failed: %v", err)
 	}
 	if startCalls != 2 {

@@ -11,6 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/open/runtimeref"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestLoadAndSaveTenantConfig(t *testing.T) {
@@ -303,7 +304,7 @@ func TestSaveRemoteEnvironmentConfigSetsCloudAliasViaMCP(t *testing.T) {
 		},
 	})
 
-	saved, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "dev"}, uiEnvironmentConfig{
+	saved, err := app.SaveEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "dev"}, uiEnvironmentConfig{
 		Name:               "dev",
 		CloudProviderAlias: "team-cloud",
 	})

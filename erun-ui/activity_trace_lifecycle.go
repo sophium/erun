@@ -2,11 +2,13 @@ package main
 
 import (
 	"strings"
+
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // finishDeployByTenantEnv finalizes by the tenant/env parsed from the trace line,
 // falling back to the selection, since the observing tab may target another env.
-func (a *App) finishDeployByTenantEnv(selection uiSelection, tenant, environment string, status activityQueueStatus, errMsg string) {
+func (a *App) finishDeployByTenantEnv(selection uimodel.Selection, tenant, environment string, status activityQueueStatus, errMsg string) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
 	if tenant == "" || environment == "" {
@@ -24,7 +26,7 @@ func (a *App) finishDeployByTenantEnv(selection uiSelection, tenant, environment
 		a.unlockTerminalsForActivity(final)
 		if status == activityQueueStatusSucceeded {
 			// A successful deploy clears any stale 'failed' flag on the row.
-			a.emitEnvStatus(uiSelection{Tenant: tenant, Environment: environment}, "")
+			a.emitEnvStatus(uimodel.Selection{Tenant: tenant, Environment: environment}, "")
 		}
 		if status == activityQueueStatusSucceeded || status == activityQueueStatusSkipped {
 			// Releases the create→deploy→open gate only once the runtime exists.
@@ -35,7 +37,7 @@ func (a *App) finishDeployByTenantEnv(selection uiSelection, tenant, environment
 
 // startInitFromTrace registers the umbrella init entry; init's helm step still
 // gets its own deploy entry.
-func (a *App) startInitFromTrace(selection uiSelection, tenant, environment string) {
+func (a *App) startInitFromTrace(selection uimodel.Selection, tenant, environment string) {
 	if a.activityQueue == nil {
 		return
 	}
@@ -83,7 +85,7 @@ func (a *App) finishInitByTenantEnv(tenant, environment string, status activityQ
 
 // startDoctorFromTrace never locks terminals: doctor prompts interactively in the
 // terminal it runs in.
-func (a *App) startDoctorFromTrace(selection uiSelection, tenant, environment string) {
+func (a *App) startDoctorFromTrace(selection uimodel.Selection, tenant, environment string) {
 	if a.activityQueue == nil {
 		return
 	}
@@ -125,7 +127,7 @@ func (a *App) finishDoctorByTenantEnv(tenant, environment string, status activit
 }
 
 // startSSHDInitFromTrace locks terminals like init/deploy; it has no interactive prompts.
-func (a *App) startSSHDInitFromTrace(selection uiSelection, tenant, environment string) {
+func (a *App) startSSHDInitFromTrace(selection uimodel.Selection, tenant, environment string) {
 	if a.activityQueue == nil {
 		return
 	}
@@ -171,7 +173,7 @@ func (a *App) finishSSHDInitByTenantEnv(tenant, environment string, status activ
 }
 
 // startDeployFromTrace is a no-op when an active entry exists, so poller and trace converge.
-func (a *App) startDeployFromTrace(selection uiSelection, tenant, environment, release, version string) {
+func (a *App) startDeployFromTrace(selection uimodel.Selection, tenant, environment, release, version string) {
 	if a.activityQueue == nil {
 		return
 	}
@@ -217,7 +219,7 @@ func (a *App) startDeployFromTrace(selection uiSelection, tenant, environment, r
 // startCommandFromTrace keys build/release/push on the selection, since their
 // trace lines carry no tenant/env; no-op without one. It never locks: these run
 // in the terminal the user is reading.
-func (a *App) startCommandFromTrace(selection uiSelection, command string) {
+func (a *App) startCommandFromTrace(selection uimodel.Selection, command string) {
 	if a.activityQueue == nil {
 		return
 	}
@@ -244,7 +246,7 @@ func (a *App) startCommandFromTrace(selection uiSelection, command string) {
 }
 
 // finishCommandBySelection's unlock is idempotent.
-func (a *App) finishCommandBySelection(selection uiSelection, command string, status activityQueueStatus, errMsg string) {
+func (a *App) finishCommandBySelection(selection uimodel.Selection, command string, status activityQueueStatus, errMsg string) {
 	if a.activityQueue == nil {
 		return
 	}

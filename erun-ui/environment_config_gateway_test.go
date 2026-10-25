@@ -6,6 +6,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestEnvironmentConfigGatewayChoiceReachesTheLaunch(t *testing.T) {
@@ -21,7 +22,7 @@ func TestEnvironmentConfigGatewayChoiceReachesTheLaunch(t *testing.T) {
 		},
 	}
 	app := NewApp(erunUIDeps{store: store})
-	selection := uiSelection{Tenant: "frs", Environment: "local"}
+	selection := uimodel.Selection{Tenant: "frs", Environment: "local"}
 
 	onGateway, err := app.LoadEnvironmentConfig(selection)
 	if err != nil {

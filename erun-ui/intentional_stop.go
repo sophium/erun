@@ -2,6 +2,8 @@ package main
 
 import (
 	"strings"
+
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // The stop intent is latched at click time because on-disk status lags the AWS
@@ -33,7 +35,7 @@ func (a *App) clearIntentionalStopForCloudContext(name string) {
 }
 
 // Not consumed: several sessions for one env each check it.
-func (a *App) isIntentionalStop(selection uiSelection) bool {
+func (a *App) isIntentionalStop(selection uimodel.Selection) bool {
 	key := selectionKey(selection)
 	a.mu.Lock()
 	_, ok := a.intentionalStops[key]
@@ -51,7 +53,7 @@ func (a *App) selectionsLinkedToCloudContext(name string) []string {
 	return keys
 }
 
-func (a *App) selectionsForCloudContext(name string) []uiSelection {
+func (a *App) selectionsForCloudContext(name string) []uimodel.Selection {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil
@@ -60,7 +62,7 @@ func (a *App) selectionsForCloudContext(name string) []uiSelection {
 	if err != nil {
 		return nil
 	}
-	selections := make([]uiSelection, 0)
+	selections := make([]uimodel.Selection, 0)
 	for _, tenant := range tenants {
 		envs, err := a.deps.store.ListEnvConfigs(tenant.Name)
 		if err != nil {
@@ -71,7 +73,7 @@ func (a *App) selectionsForCloudContext(name string) []uiSelection {
 			if err != nil || !ok || strings.TrimSpace(cloudContext.Name) != name {
 				continue
 			}
-			selections = append(selections, uiSelection{Tenant: tenant.Name, Environment: env.Name})
+			selections = append(selections, uimodel.Selection{Tenant: tenant.Name, Environment: env.Name})
 		}
 	}
 	return selections

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -10,9 +9,10 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
-func (a *App) saveRemoteCloudAlias(selection uiSelection, existing, updated configpkg.EnvConfig) error {
+func (a *App) saveRemoteCloudAlias(selection uimodel.Selection, existing, updated configpkg.EnvConfig) error {
 	if !existing.RemoteWorktree() || strings.TrimSpace(updated.CloudProviderAlias) == strings.TrimSpace(existing.CloudProviderAlias) {
 		return nil
 	}
@@ -23,10 +23,7 @@ func (a *App) saveRemoteCloudAlias(selection uiSelection, existing, updated conf
 	if err != nil {
 		return err
 	}
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	if err := a.ensureMCPAvailable(ctx, result); err != nil {
 		return err
 	}
@@ -197,10 +194,7 @@ func (a *App) ensureLinkedCloudContextRunning(config configpkg.EnvConfig) (model
 }
 
 func (a *App) stopCloudContext(name string) (model.CloudContextStatus, error) {
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	status, err := a.deps.stopCloudContext(ctx, name)
 	if err != nil {
 		return status, err

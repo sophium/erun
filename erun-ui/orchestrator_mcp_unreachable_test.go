@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestOrchestratorMCPUnreachableEnv(t *testing.T) {
@@ -53,11 +54,11 @@ func TestWireOrchestratorMCPWiresAnUnreachableEnvAndSaysSo(t *testing.T) {
 		t.Fatalf("expected the unreachable env still wired into the config:\n%s", data)
 	}
 
-	events := emits.events(appNotificationEvent)
+	events := emits.events(uimodel.AppNotificationEvent)
 	if len(events) != 1 {
 		t.Fatalf("expected exactly one notice about the unreachable edge, got %+v", events)
 	}
-	payload, ok := events[0].(appNotificationPayload)
+	payload, ok := events[0].(uimodel.AppNotificationPayload)
 	if !ok {
 		t.Fatalf("unexpected payload type: %T", events[0])
 	}
@@ -84,7 +85,7 @@ func TestWireOrchestratorMCPMultipleUnreachableEnvsAreEachActionable(t *testing.
 		{Tenant: "frs", Environment: "laptop"},
 	})
 
-	events := emits.events(appNotificationEvent)
+	events := emits.events(uimodel.AppNotificationEvent)
 	if len(events) != 2 {
 		t.Fatalf("expected one notice per unreachable env, got %+v", events)
 	}
@@ -102,7 +103,7 @@ func TestWireOrchestratorMCPMultipleUnreachableEnvsAreEachActionable(t *testing.
 // assertActionableUnreachableNotice returns the env the notice names and targets with a deploy action.
 func assertActionableUnreachableNotice(t *testing.T, event any, orchestrator string) string {
 	t.Helper()
-	payload, ok := event.(appNotificationPayload)
+	payload, ok := event.(uimodel.AppNotificationPayload)
 	if !ok {
 		t.Fatalf("unexpected payload type: %T", event)
 	}

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // desktopAction's run closure must honour ctx cancellation.
@@ -13,7 +15,7 @@ type desktopAction struct {
 	id        string
 	kind      string
 	summary   string
-	selection uiSelection
+	selection uimodel.Selection
 	run       func(ctx context.Context) error
 }
 
@@ -26,7 +28,7 @@ type envActionQueue struct {
 const desktopActionQueueDepth = 64
 
 // Tenant/env-less actions share one global queue.
-func envActionQueueKey(selection uiSelection) string {
+func envActionQueueKey(selection uimodel.Selection) string {
 	tenant := strings.TrimSpace(selection.Tenant)
 	env := strings.TrimSpace(selection.Environment)
 	if tenant == "" && env == "" {
@@ -152,7 +154,7 @@ func (a *App) executeDesktopAction(action *desktopAction) {
 	a.emitActivityState(promoted)
 	a.lockTerminalsForActivity(promoted)
 	a.startActivityStatusPollerForAction(action, current)
-	ctx, cancel := context.WithCancel(a.activityWatcherCtx())
+	ctx, cancel := context.WithCancel(a.context())
 	a.registerCancel(action.id, cancel)
 	defer a.clearCancel(action.id)
 	defer cancel()
@@ -239,7 +241,7 @@ func (s *activityQueueStore) findByID(id string) (activityQueueEntry, bool) {
 	return activityQueueEntry{}, false
 }
 
-type gatedSessionStarter func(ctx context.Context) (startSessionResult, *managedTerminal, error)
+type gatedSessionStarter func(ctx context.Context) (uimodel.StartSessionResult, *managedTerminal, error)
 
 // gatedSessionMaxSetup is a safety net so the queue drains if every ready marker
 // is missed; it spans a cold build+deploy.
@@ -269,12 +271,12 @@ func isGatedSessionSetupEntry(entry activityQueueEntry) bool {
 
 // enqueueGatedSession blocks until the session is created, then holds the gate
 // until it signals ready.
-func (a *App) enqueueGatedSession(selection uiSelection, kind gatedSessionKind, start gatedSessionStarter) (startSessionResult, error) {
+func (a *App) enqueueGatedSession(selection uimodel.Selection, kind gatedSessionKind, start gatedSessionStarter) (uimodel.StartSessionResult, error) {
 	if !isGatedSessionKind(string(kind)) {
-		return startSessionResult{}, fmt.Errorf("unregistered gated session kind %q", kind)
+		return uimodel.StartSessionResult{}, fmt.Errorf("unregistered gated session kind %q", kind)
 	}
 	type spawnOutcome struct {
-		result startSessionResult
+		result uimodel.StartSessionResult
 		err    error
 	}
 	ready := make(chan spawnOutcome, 1)
@@ -300,7 +302,7 @@ func (a *App) enqueueGatedSession(selection uiSelection, kind gatedSessionKind, 
 			return waitErr
 		},
 	}); err != nil {
-		return startSessionResult{}, err
+		return uimodel.StartSessionResult{}, err
 	}
 
 	outcome := <-ready

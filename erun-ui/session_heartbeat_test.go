@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestSessionRunningFollowsHeartbeatNotStreamSilence(t *testing.T) {
@@ -32,7 +34,7 @@ func TestSessionRunningFollowsHeartbeatNotStreamSilence(t *testing.T) {
 				sessionHeartbeats: make(map[string]sessionHeartbeat),
 				emitFn:            emits.fn(),
 			}
-			selection := uiSelection{Tenant: "petios", Environment: "local"}
+			selection := uimodel.Selection{Tenant: "petios", Environment: "local"}
 			managed := &managedTerminal{
 				kind:       sessionKindAI,
 				selection:  selection,
@@ -48,9 +50,9 @@ func TestSessionRunningFollowsHeartbeatNotStreamSilence(t *testing.T) {
 
 			app.clearAIActivityIfQuiet(managed)
 
-			cleared := len(emits.events(aiActivityEvent)) > 0
+			cleared := len(emits.events(uimodel.AIActivityEvent)) > 0
 			if cleared != tc.wantBusyClear {
-				t.Fatalf("busy cleared = %v, want %v (events: %+v)", cleared, tc.wantBusyClear, emits.events(aiActivityEvent))
+				t.Fatalf("busy cleared = %v, want %v (events: %+v)", cleared, tc.wantBusyClear, emits.events(uimodel.AIActivityEvent))
 			}
 			if managed.aiBusyEmitted == tc.wantBusyClear {
 				t.Fatalf("latch state %v contradicts the emitted signal", managed.aiBusyEmitted)
@@ -61,7 +63,7 @@ func TestSessionRunningFollowsHeartbeatNotStreamSilence(t *testing.T) {
 
 func TestHeartbeatReleasesBusyWhenThePodReportsTheSessionFinished(t *testing.T) {
 	emits := newCapturedEmits()
-	selection := uiSelection{Tenant: "petios", Environment: "local"}
+	selection := uimodel.Selection{Tenant: "petios", Environment: "local"}
 	app := &App{
 		sessions:          make(map[string]*managedTerminal),
 		sessionHeartbeats: make(map[string]sessionHeartbeat),
@@ -82,16 +84,16 @@ func TestHeartbeatReleasesBusyWhenThePodReportsTheSessionFinished(t *testing.T) 
 		Sessions:        []uiRuntimeSession{{ID: "ai", Running: true, Program: "claude"}},
 		SessionsRunning: 1,
 	})
-	if len(emits.events(aiActivityEvent)) != 0 {
-		t.Fatalf("a running session must not be released: %+v", emits.events(aiActivityEvent))
+	if len(emits.events(uimodel.AIActivityEvent)) != 0 {
+		t.Fatalf("a running session must not be released: %+v", emits.events(uimodel.AIActivityEvent))
 	}
 
 	app.applySessionHeartbeat(selection, uiRuntimeActivity{
 		Sessions:        []uiRuntimeSession{{ID: "ai", Running: false}},
 		SessionsRunning: 0,
 	})
-	if len(emits.events(aiActivityEvent)) != 1 {
-		t.Fatalf("a finished session must be released once: %+v", emits.events(aiActivityEvent))
+	if len(emits.events(uimodel.AIActivityEvent)) != 1 {
+		t.Fatalf("a finished session must be released once: %+v", emits.events(uimodel.AIActivityEvent))
 	}
 	if managed.aiBusyEmitted {
 		t.Fatalf("latch must be down after the pod reports the program gone")
@@ -99,7 +101,7 @@ func TestHeartbeatReleasesBusyWhenThePodReportsTheSessionFinished(t *testing.T) 
 }
 
 func TestHeartbeatObservationExpires(t *testing.T) {
-	selection := uiSelection{Tenant: "petios", Environment: "local"}
+	selection := uimodel.Selection{Tenant: "petios", Environment: "local"}
 	app := &App{
 		sessions:          make(map[string]*managedTerminal),
 		sessionHeartbeats: make(map[string]sessionHeartbeat),
@@ -124,7 +126,7 @@ func TestRuntimeActivityCountMatchesRunningSessions(t *testing.T) {
 		"erun-session\topen-0\t901\tbash\n" +
 		"erun-session\topen-3\t0\t\n"
 
-	activity := runtimeActivityFromProbe(uiSelection{Tenant: "petios", Environment: "local"}, probe)
+	activity := runtimeActivityFromProbe(uimodel.Selection{Tenant: "petios", Environment: "local"}, probe)
 	if activity.SessionsRunning != 2 {
 		t.Fatalf("expected 2 running sessions, got %d (%+v)", activity.SessionsRunning, activity.Sessions)
 	}
@@ -144,9 +146,9 @@ func TestRuntimeActivityCountMatchesRunningSessions(t *testing.T) {
 
 func TestSelectionsWithPodSessionsSkipsSessionsWithoutAPodSession(t *testing.T) {
 	app := &App{sessions: make(map[string]*managedTerminal)}
-	app.sessions["local"] = &managedTerminal{kind: sessionKindLocal, selection: uiSelection{Tenant: "petios", Environment: "local"}}
-	app.sessions["ai"] = &managedTerminal{kind: sessionKindAI, appSession: "ai", selection: uiSelection{Tenant: "petios", Environment: "remote"}}
-	app.sessions["open"] = &managedTerminal{kind: sessionKindOpen, appSession: "open-0", selection: uiSelection{Tenant: "petios", Environment: "remote"}}
+	app.sessions["local"] = &managedTerminal{kind: sessionKindLocal, selection: uimodel.Selection{Tenant: "petios", Environment: "local"}}
+	app.sessions["ai"] = &managedTerminal{kind: sessionKindAI, appSession: "ai", selection: uimodel.Selection{Tenant: "petios", Environment: "remote"}}
+	app.sessions["open"] = &managedTerminal{kind: sessionKindOpen, appSession: "open-0", selection: uimodel.Selection{Tenant: "petios", Environment: "remote"}}
 
 	selections := app.selectionsWithPodSessions()
 	if len(selections) != 1 || selections[0].Environment != "remote" {
@@ -169,7 +171,7 @@ func heartbeatFor(running bool) sessionHeartbeat {
 func TestReclaimRuntimeResourcesRunsTheNamedActionOnly(t *testing.T) {
 	var ran []string
 	app := NewApp(erunUIDeps{
-		execRuntimePod: func(_ context.Context, _ uiSelection, script string) (string, error) {
+		execRuntimePod: func(_ context.Context, _ uimodel.Selection, script string) (string, error) {
 			ran = append(ran, script)
 			return "", nil
 		},
@@ -245,7 +247,7 @@ func TestReconcileOrchestratorActivityReEmitsEveryTick(t *testing.T) {
 	app.reconcileOrchestratorActivity()
 	app.reconcileOrchestratorActivity()
 
-	events := emits.events(aiActivityEvent)
+	events := emits.events(uimodel.AIActivityEvent)
 	if len(events) != 3 {
 		t.Fatalf("expected one emit per tick even with no state change, got %d: %+v", len(events), events)
 	}
@@ -335,7 +337,7 @@ func TestReconcileOrchestratorActivityReEmitsShellStateEveryTick(t *testing.T) {
 	app.reconcileOrchestratorActivity()
 	app.reconcileOrchestratorActivity()
 
-	events := emits.events(orchestratorShellEvent)
+	events := emits.events(uimodel.OrchestratorShellEvent)
 	if len(events) != 3 {
 		t.Fatalf("expected one emit per tick even with no state change, got %d: %+v", len(events), events)
 	}

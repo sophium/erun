@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // Stream silence is not evidence an AI session finished, so the busy latch is
@@ -90,13 +92,13 @@ func (a *App) reconcileOrchestratorActivity() {
 			session.shellStartedAtUnix = shell.AtUnix
 		}
 		a.mu.Unlock()
-		a.emitAIActivity(r.serial, uiSelection{}, busy)
+		a.emitAIActivity(r.serial, uimodel.Selection{}, busy)
 		a.emitOrchestratorShellActivity(r.serial, shellRunning, shell.Command, shell.AtUnix)
 	}
 }
 
 func (a *App) emitOrchestratorShellActivity(sessionID int, running bool, command string, startedAtUnix int64) {
-	a.emitEvent(orchestratorShellEvent, orchestratorShellActivityPayload{
+	a.emitEvent(uimodel.OrchestratorShellEvent, orchestratorShellActivityPayload{
 		SessionID:     sessionID,
 		Running:       running,
 		Command:       command,
@@ -150,9 +152,9 @@ func (a *App) aiLatchStillSupportedLocked(managed *managedTerminal) bool {
 	return ok && time.Since(heartbeat.observedAt) <= sessionHeartbeatTTL
 }
 
-func (a *App) selectionsWithPodSessions() []uiSelection {
+func (a *App) selectionsWithPodSessions() []uimodel.Selection {
 	seen := make(map[string]struct{})
-	var out []uiSelection
+	var out []uimodel.Selection
 	a.mu.Lock()
 	for _, managed := range a.sessions {
 		if managed == nil || managed.closed || strings.TrimSpace(managed.appSession) == "" {
@@ -169,7 +171,7 @@ func (a *App) selectionsWithPodSessions() []uiSelection {
 	return out
 }
 
-func (a *App) applySessionHeartbeat(selection uiSelection, activity uiRuntimeActivity) {
+func (a *App) applySessionHeartbeat(selection uimodel.Selection, activity uiRuntimeActivity) {
 	heartbeat := sessionHeartbeat{
 		observedAt: time.Now(),
 		running:    make(map[string]struct{}, len(activity.Sessions)),
@@ -236,7 +238,7 @@ func (a *App) heartbeatSaysRunning(managed *managedTerminal) bool {
 	return running
 }
 
-func (a *App) forgetSessionHeartbeats(selection uiSelection) {
+func (a *App) forgetSessionHeartbeats(selection uimodel.Selection) {
 	key := selectionKey(selection)
 	a.mu.Lock()
 	delete(a.sessionHeartbeats, key)

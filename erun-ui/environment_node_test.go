@@ -8,6 +8,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func nodeTestApp(t *testing.T, contextStatus string, envs map[string]configpkg.EnvConfig) *App {
@@ -107,7 +108,7 @@ func TestEnvironmentNodeSnapshotCarriesAStaleReadingAsUnknown(t *testing.T) {
 func collectEnvNodeEvents(app *App) *[]envNodePayload {
 	events := make([]envNodePayload, 0)
 	app.SetEmitter(func(name string, args ...any) {
-		if name != envNodeEvent || len(args) != 1 {
+		if name != uimodel.EnvNodeEvent || len(args) != 1 {
 			return
 		}
 		if payload, ok := args[0].(envNodePayload); ok {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // The AI badge asks the pod's `erun activity ai-session status` (output volume cannot
@@ -30,7 +31,7 @@ type aiSessionReading struct {
 
 // aiSessionStatusScript discards erun's stderr; a pod without the verb prints
 // nothing between the markers, which reads as no reading.
-func aiSessionStatusScript(selection uiSelection) string {
+func aiSessionStatusScript(selection uimodel.Selection) string {
 	return fmt.Sprintf(
 		"printf '%s\\tbegin\\n'; erun activity ai-session status --tenant %s --environment %s --output json 2>/dev/null; printf '%s\\tend\\n'",
 		aiSessionStatusMarker,
@@ -104,8 +105,8 @@ func (a *App) openAITabs() []*managedTerminal {
 
 // readAISessionStatusOnce keeps the previous reading on failure: an unreachable
 // pod is not evidence a turn ended.
-func (a *App) readAISessionStatusOnce(selection uiSelection) {
-	ctx, cancel := context.WithTimeout(a.backgroundContext(), aiSessionStatusTimeout)
+func (a *App) readAISessionStatusOnce(selection uimodel.Selection) {
+	ctx, cancel := context.WithTimeout(a.context(), aiSessionStatusTimeout)
 	defer cancel()
 	output, err := a.execInRuntimePod(ctx, selection, aiSessionStatusScript(selection))
 	if err != nil {
@@ -118,7 +119,7 @@ func (a *App) readAISessionStatusOnce(selection uiSelection) {
 	a.recordAISessionReading(selection, sessions)
 }
 
-func (a *App) recordAISessionReading(selection uiSelection, sessions []model.AISessionStatus) {
+func (a *App) recordAISessionReading(selection uimodel.Selection, sessions []model.AISessionStatus) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.aiSessionReadings == nil {
@@ -131,7 +132,7 @@ func (a *App) recordAISessionReading(selection uiSelection, sessions []model.AIS
 }
 
 // aiSessionReadingForLocked treats an expired reading as absent. Caller holds a.mu.
-func (a *App) aiSessionReadingForLocked(selection uiSelection) (aiSessionReading, bool) {
+func (a *App) aiSessionReadingForLocked(selection uimodel.Selection) (aiSessionReading, bool) {
 	reading, ok := a.aiSessionReadings[selectionKey(selection)]
 	if !ok || time.Since(reading.observedAt) > aiSessionStatusTTL {
 		return aiSessionReading{}, false

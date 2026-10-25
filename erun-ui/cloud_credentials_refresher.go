@@ -11,6 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 const (
@@ -29,14 +30,14 @@ type cloudCredentialsRefresher struct {
 	done   chan struct{}
 }
 
-func (a *App) cloudCredentialsRefresherKey(selection uiSelection) string {
+func (a *App) cloudCredentialsRefresherKey(selection uimodel.Selection) string {
 	return strings.TrimSpace(selection.Tenant) + "/" + strings.TrimSpace(selection.Environment)
 }
 
 // startCloudCredentialsRefresherForSelection pushes temporary host credentials to
 // the env's pod; an attached AWS alias is the opt-in. Idempotent per selection.
-func (a *App) startCloudCredentialsRefresherForSelection(selection uiSelection) {
-	selection = normalizeSelection(selection)
+func (a *App) startCloudCredentialsRefresherForSelection(selection uimodel.Selection) {
+	selection = uimodel.NormalizeSelection(selection)
 	alias, result, ok := a.resolveCloudCredentialsRefreshTarget(selection)
 	if !ok {
 		return
@@ -62,7 +63,7 @@ func (a *App) startCloudCredentialsRefresherForSelection(selection uiSelection) 
 	}()
 }
 
-func (a *App) resolveCloudCredentialsRefreshTarget(selection uiSelection) (string, config.OpenResult, bool) {
+func (a *App) resolveCloudCredentialsRefreshTarget(selection uimodel.Selection) (string, config.OpenResult, bool) {
 	if selection.Tenant == "" || selection.Environment == "" {
 		return "", config.OpenResult{}, false
 	}
@@ -91,8 +92,8 @@ func (a *App) resolveCloudCredentialsRefreshTarget(selection uiSelection) (strin
 }
 
 // stopCloudCredentialsRefresherForSelection stops the refresher and clears the in-pod credentials.
-func (a *App) stopCloudCredentialsRefresherForSelection(selection uiSelection) {
-	selection = normalizeSelection(selection)
+func (a *App) stopCloudCredentialsRefresherForSelection(selection uimodel.Selection) {
+	selection = uimodel.NormalizeSelection(selection)
 	key := a.cloudCredentialsRefresherKey(selection)
 	a.mu.Lock()
 	refresher, ok := a.credentialRefreshers[key]
@@ -126,14 +127,14 @@ func (a *App) stopAllCloudCredentialsRefreshersLocked() {
 }
 
 // reconcileCloudCredentialsRefresherForSelection applies a saved setting without re-opening the env.
-func (a *App) reconcileCloudCredentialsRefresherForSelection(selection uiSelection, enabled bool) {
+func (a *App) reconcileCloudCredentialsRefresherForSelection(selection uimodel.Selection, enabled bool) {
 	a.stopCloudCredentialsRefresherForSelection(selection)
 	if enabled {
 		a.startCloudCredentialsRefresherForSelection(selection)
 	}
 }
 
-func (a *App) runCloudCredentialsRefresher(ctx context.Context, selection uiSelection, alias string, result config.OpenResult) {
+func (a *App) runCloudCredentialsRefresher(ctx context.Context, selection uimodel.Selection, alias string, result config.OpenResult) {
 	endpoint := mcpEndpointForOpenResult(result)
 	mcpPort := config.MCPPortForResult(result)
 	notifiedFailure := false
@@ -186,7 +187,7 @@ func (a *App) waitForMCPReady(ctx context.Context, port int) error {
 	}
 }
 
-func (a *App) surfaceCredentialRefreshFailure(selection uiSelection, err error, notified *bool) {
+func (a *App) surfaceCredentialRefreshFailure(selection uimodel.Selection, err error, notified *bool) {
 	if notified != nil && *notified {
 		return
 	}

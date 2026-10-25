@@ -11,6 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/kube"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // Activity is observed from the environment itself (edge reachability, idle
@@ -21,7 +22,7 @@ const environmentActivityInterval = 20 * time.Second
 const environmentActivityTimeout = 5 * time.Second
 
 type environmentActivity struct {
-	selection uiSelection
+	selection uimodel.Selection
 	// state is comparable so the sweep can tell a transition from a restatement.
 	state environmentActivityState
 }
@@ -78,7 +79,7 @@ func (a *App) ResetEnvironmentActivityObservations() {
 }
 
 // configuredSelections lists every configured environment, not only open tabs.
-func (a *App) configuredSelections() []uiSelection {
+func (a *App) configuredSelections() []uimodel.Selection {
 	if a.deps.store == nil {
 		return nil
 	}
@@ -86,20 +87,20 @@ func (a *App) configuredSelections() []uiSelection {
 	if err != nil {
 		return nil
 	}
-	var out []uiSelection
+	var out []uimodel.Selection
 	for _, tenant := range tenants {
 		envs, err := a.deps.store.ListEnvConfigs(tenant.Name)
 		if err != nil {
 			continue
 		}
 		for _, env := range envs {
-			out = append(out, uiSelection{Tenant: tenant.Name, Environment: env.Name})
+			out = append(out, uimodel.Selection{Tenant: tenant.Name, Environment: env.Name})
 		}
 	}
 	return out
 }
 
-func (a *App) observeEnvironmentActivity(selection uiSelection) environmentActivity {
+func (a *App) observeEnvironmentActivity(selection uimodel.Selection) environmentActivity {
 	observation := environmentActivity{selection: selection}
 	// The state file, written by `erun open` whoever ran it, distinguishes an
 	// established forward from any process holding the port.
@@ -151,7 +152,7 @@ const environmentActivityPodProbeTimeout = 8 * time.Second
 
 // observeEnvironmentActivityViaPod reads the activity lease over kubectl exec
 // when this desktop has no local forward; no forward does not mean unused.
-func (a *App) observeEnvironmentActivityViaPod(selection uiSelection, observation environmentActivity) environmentActivity {
+func (a *App) observeEnvironmentActivityViaPod(selection uimodel.Selection, observation environmentActivity) environmentActivity {
 	if a.deps.store == nil {
 		return observation
 	}
@@ -255,7 +256,7 @@ func (a *App) seedEnvironmentActivitySnapshots(state *uiState) {
 		tenant := &state.Tenants[ti]
 		for ei := range tenant.Environments {
 			env := &tenant.Environments[ei]
-			key := selectionKey(uiSelection{Tenant: tenant.Name, Environment: env.Name})
+			key := selectionKey(uimodel.Selection{Tenant: tenant.Name, Environment: env.Name})
 			observed, ok := a.envActivity[key]
 			if !ok {
 				continue
@@ -287,7 +288,7 @@ func (a *App) envActivitySnapshot() map[string]environmentActivityState {
 }
 
 func (a *App) emitEnvActivity(observation environmentActivity) {
-	a.emitEvent(envActivityEvent, envActivityPayload{
+	a.emitEvent(uimodel.EnvActivityEvent, envActivityPayload{
 		Tenant:      observation.selection.Tenant,
 		Environment: observation.selection.Environment,
 		Reachable:   observation.state.reachable,

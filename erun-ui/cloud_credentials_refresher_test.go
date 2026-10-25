@@ -6,6 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func credentialRefreshTargetApp(t *testing.T, envType config.EnvironmentType, alias string) *App {
@@ -46,7 +47,7 @@ func TestResolveCloudCredentialsRefreshTargetCoversEveryEnvTypeWithAnAWSAlias(t 
 	} {
 		t.Run(string(envType), func(t *testing.T) {
 			app := credentialRefreshTargetApp(t, envType, "op+123@aws")
-			alias, _, ok := app.resolveCloudCredentialsRefreshTarget(uiSelection{Tenant: "team", Environment: "dev"})
+			alias, _, ok := app.resolveCloudCredentialsRefreshTarget(uimodel.Selection{Tenant: "team", Environment: "dev"})
 			if !ok {
 				t.Fatalf("expected an AWS alias on a %s env to start the refresher", envType)
 			}
@@ -61,7 +62,7 @@ func TestResolveCloudCredentialsRefreshTargetSkipsWithoutAnAWSAlias(t *testing.T
 	for name, alias := range map[string]string{"no_alias": "", "cloudflare_alias": "op@cloudflare"} {
 		t.Run(name, func(t *testing.T) {
 			app := credentialRefreshTargetApp(t, config.EnvironmentTypeLocalAgent, alias)
-			if _, _, ok := app.resolveCloudCredentialsRefreshTarget(uiSelection{Tenant: "team", Environment: "dev"}); ok {
+			if _, _, ok := app.resolveCloudCredentialsRefreshTarget(uimodel.Selection{Tenant: "team", Environment: "dev"}); ok {
 				t.Fatalf("expected alias %q to leave the refresher stopped", alias)
 			}
 		})

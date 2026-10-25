@@ -29,7 +29,7 @@ func (a *App) UploadHostedDefinition(tenant, environment string) (uiHostedDefini
 		return uiHostedDefinitionUpload{}, fmt.Errorf(
 			"no environment selected to upload: open an environment's Manage dialog and use its hosted panel, or run `erun platform env push TENANT ENVIRONMENT` from a terminal")
 	}
-	ctx, cancel := context.WithTimeout(a.activityWatcherCtx(), hostedDefinitionUploadTimeout)
+	ctx, cancel := context.WithTimeout(a.context(), hostedDefinitionUploadTimeout)
 	defer cancel()
 	return a.uploadHostedDefinition(ctx, tenant, environment)
 }
@@ -100,7 +100,7 @@ func (a *App) autoUploadHostedDefinition(tenant, environment string) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(a.activityWatcherCtx(), hostedDefinitionUploadTimeout)
+	ctx, cancel := context.WithTimeout(a.context(), hostedDefinitionUploadTimeout)
 	defer cancel()
 	if _, err := a.uploadHostedDefinition(ctx, tenant, environment); err != nil {
 		a.emitAppNotification("warning", fmt.Sprintf(

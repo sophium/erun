@@ -5,6 +5,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestLoadEnvironmentConfigUsesProjectContainerRegistryForAllEnvironments(t *testing.T) {
@@ -38,7 +39,7 @@ func TestLoadEnvironmentConfigUsesProjectContainerRegistryForAllEnvironments(t *
 	}
 	app := NewApp(erunUIDeps{store: store})
 
-	local, err := app.LoadEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "local"})
+	local, err := app.LoadEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "local"})
 	if err != nil {
 		t.Fatalf("LoadEnvironmentConfig local failed: %v", err)
 	}
@@ -46,7 +47,7 @@ func TestLoadEnvironmentConfigUsesProjectContainerRegistryForAllEnvironments(t *
 		t.Fatalf("expected local env to use project-wide registry, got %+v", local)
 	}
 
-	prod, err := app.LoadEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "prod"})
+	prod, err := app.LoadEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "prod"})
 	if err != nil {
 		t.Fatalf("LoadEnvironmentConfig prod failed: %v", err)
 	}
@@ -80,7 +81,7 @@ func TestSaveEnvironmentConfigPreservesProjectContainerRegistryReadModel(t *test
 	}
 	app := NewApp(erunUIDeps{store: store})
 
-	saved, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "local"}, uiEnvironmentConfig{
+	saved, err := app.SaveEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "local"}, uiEnvironmentConfig{
 		Name:              "local",
 		RepoPath:          projectRoot,
 		KubernetesContext: "cluster-local",
@@ -119,7 +120,7 @@ func TestSaveEnvironmentConfigWritesLocalAgentRegistryListToProjectConfig(t *tes
 	}
 	app := NewApp(erunUIDeps{store: store})
 
-	saved, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "local"}, uiEnvironmentConfig{
+	saved, err := app.SaveEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "local"}, uiEnvironmentConfig{
 		Name:              "local",
 		RepoPath:          projectRoot,
 		KubernetesContext: "c",
@@ -158,7 +159,7 @@ func TestSaveEnvironmentConfigRejectsInvalidRegistryList(t *testing.T) {
 	}
 	app := NewApp(erunUIDeps{store: store})
 
-	_, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "local"}, uiEnvironmentConfig{
+	_, err := app.SaveEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "local"}, uiEnvironmentConfig{
 		Name:     "local",
 		RepoPath: projectRoot,
 		Type:     configpkg.EnvironmentTypeLocalAgent,
@@ -183,7 +184,7 @@ func TestSaveEnvironmentConfigAcceptsDeployOnlyRegistry(t *testing.T) {
 	}
 	app := NewApp(erunUIDeps{store: store})
 
-	saved, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "prod"}, uiEnvironmentConfig{
+	saved, err := app.SaveEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "prod"}, uiEnvironmentConfig{
 		Name: "prod",
 		Type: configpkg.EnvironmentTypeRuntime,
 		ContainerRegistries: []uiContainerRegistryEntry{
@@ -217,7 +218,7 @@ func TestSaveEnvironmentConfigRoundTripsRuntimeChart(t *testing.T) {
 	}
 	app := NewApp(erunUIDeps{store: store})
 
-	loaded, err := app.LoadEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "local"})
+	loaded, err := app.LoadEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "local"})
 	if err != nil {
 		t.Fatalf("LoadEnvironmentConfig failed: %v", err)
 	}
@@ -226,7 +227,7 @@ func TestSaveEnvironmentConfigRoundTripsRuntimeChart(t *testing.T) {
 	}
 
 	loaded.RuntimeChart = "  oci://registry.example/charts/erun-devops:1.2.3  "
-	saved, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "local"}, loaded)
+	saved, err := app.SaveEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "local"}, loaded)
 	if err != nil {
 		t.Fatalf("SaveEnvironmentConfig failed: %v", err)
 	}
@@ -238,7 +239,7 @@ func TestSaveEnvironmentConfigRoundTripsRuntimeChart(t *testing.T) {
 	}
 
 	saved.RuntimeChart = ""
-	if _, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "local"}, saved); err != nil {
+	if _, err := app.SaveEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "local"}, saved); err != nil {
 		t.Fatalf("SaveEnvironmentConfig failed clearing the chart: %v", err)
 	}
 	if stored := store.envs["frs/local"].RuntimeChart; stored != "" {

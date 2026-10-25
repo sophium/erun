@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"os"
 	"strings"
 	"sync"
@@ -9,15 +8,16 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	componentspkg "github.com/sophium/erun/erun-common/primitive/deploy/components"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // LoadDeployComponents lists what an equivalent `erun deploy` would roll out, limited
 // to component charts published at the deploy version. Read-only.
-func (a *App) LoadDeployComponents(selection uiSelection) (uiDeployComponents, error) {
-	selection = normalizeSelection(selection)
+func (a *App) LoadDeployComponents(selection uimodel.Selection) (uiDeployComponents, error) {
+	selection = uimodel.NormalizeSelection(selection)
 	tenant := strings.TrimSpace(selection.Tenant)
 	environment := strings.TrimSpace(selection.Environment)
-	if err := errMissingTenantOrEnvironment("load deploy components", tenant, environment); err != nil {
+	if err := uimodel.ErrMissingTenantOrEnvironment("load deploy components", tenant, environment); err != nil {
 		return uiDeployComponents{}, err
 	}
 	components, err := componentspkg.ResolveDeployableComponents(
@@ -104,10 +104,7 @@ func (a *App) publishedComponentChartAvailability(tenant, environment, version s
 	if override, ok := chartAvailabilityOverride(version); ok {
 		return override
 	}
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	namespace := strings.TrimSpace(a.runtimeRegistryNamespace(tenant, environment))
 	if namespace == "" {
 		namespace = config.DefaultContainerRegistry

@@ -4,12 +4,13 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // Doctor runs piped into the Local shell with no PTY exit; trace lines are its only completion signal.
 func TestActivityTraceLineHandlerStartsAndFinishesDoctor(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
-	selection := uiSelection{Tenant: "team", Environment: "dev"}
+	selection := uimodel.Selection{Tenant: "team", Environment: "dev"}
 	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
 
 	handler("==> Doctor team/dev")
@@ -33,7 +34,7 @@ func TestActivityTraceLineHandlerStartsAndFinishesDoctor(t *testing.T) {
 
 func TestActivityTraceLineHandlerFinalizesDoctorOnFailure(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
-	selection := uiSelection{Tenant: "team", Environment: "dev"}
+	selection := uimodel.Selection{Tenant: "team", Environment: "dev"}
 	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
 
 	handler("==> Doctor team/dev")
@@ -51,7 +52,7 @@ func TestActivityTraceLineHandlerFinalizesDoctorOnFailure(t *testing.T) {
 // Locking would block doctor's interactive prompts.
 func TestStartDoctorFromTraceDoesNotLockTerminal(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
-	selection := uiSelection{Tenant: "team", Environment: "dev"}
+	selection := uimodel.Selection{Tenant: "team", Environment: "dev"}
 	localSession := &managedTerminal{selection: selection, key: "local\x00team\x00dev", serial: 1, kind: sessionKindLocal}
 	app.sessions[localSession.key] = localSession
 	app.startDoctorFromTrace(selection, "team", "dev")
@@ -64,13 +65,13 @@ func TestDoctorCompletedEventRecordsLastRunOutcome(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	emits := newCapturedEmits()
 	app.SetEmitter(emits.fn())
-	selection := uiSelection{Tenant: "team", Environment: "dev"}
+	selection := uimodel.Selection{Tenant: "team", Environment: "dev"}
 	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
 
 	handler("==> Doctor team/dev")
 	handler("==> Doctor failed team/dev: kubectl not reachable")
 
-	events := emits.events(doctorCompletedEvent)
+	events := emits.events(uimodel.DoctorCompletedEvent)
 	if len(events) != 1 {
 		t.Fatalf("doctor-completed emitted %d times, want exactly 1", len(events))
 	}
@@ -91,7 +92,7 @@ func TestDoctorCompletedEventRecordsLastRunOutcome(t *testing.T) {
 
 func TestActivityTraceLineHandlerStartsAndFinishesSSHDInit(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
-	selection := uiSelection{Tenant: "team", Environment: "dev"}
+	selection := uimodel.Selection{Tenant: "team", Environment: "dev"}
 	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
 
 	handler("==> SSHD init team/dev")
@@ -115,7 +116,7 @@ func TestActivityTraceLineHandlerStartsAndFinishesSSHDInit(t *testing.T) {
 
 func TestActivityTraceLineHandlerFinalizesSSHDInitOnFailure(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
-	selection := uiSelection{Tenant: "team", Environment: "dev"}
+	selection := uimodel.Selection{Tenant: "team", Environment: "dev"}
 	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
 
 	handler("==> SSHD init team/dev")
@@ -132,7 +133,7 @@ func TestActivityTraceLineHandlerFinalizesSSHDInitOnFailure(t *testing.T) {
 
 func TestStartSSHDInitFromTraceLocksTerminals(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
-	selection := uiSelection{Tenant: "team", Environment: "dev"}
+	selection := uimodel.Selection{Tenant: "team", Environment: "dev"}
 	localSession := &managedTerminal{selection: selection, key: "local\x00team\x00dev", serial: 1, kind: sessionKindLocal}
 	app.sessions[localSession.key] = localSession
 	app.startSSHDInitFromTrace(selection, "team", "dev")
@@ -145,13 +146,13 @@ func TestSSHDInitCompletedEventRecordsLastRunOutcome(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	emits := newCapturedEmits()
 	app.SetEmitter(emits.fn())
-	selection := uiSelection{Tenant: "team", Environment: "dev"}
+	selection := uimodel.Selection{Tenant: "team", Environment: "dev"}
 	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
 
 	handler("==> SSHD init team/dev")
 	handler("==> SSHD init failed team/dev: kubectl not reachable")
 
-	events := emits.events(sshdInitCompletedEvent)
+	events := emits.events(uimodel.SSHDInitCompletedEvent)
 	if len(events) != 1 {
 		t.Fatalf("sshd-init-completed emitted %d times, want exactly 1", len(events))
 	}
@@ -174,7 +175,7 @@ func TestStartCommandFromTraceDoesNotLockTerminal(t *testing.T) {
 	// Locking would freeze the tab showing their output.
 	for _, command := range []string{"build", "release", "push"} {
 		app := newTestAppForActivityQueue(t)
-		selection := uiSelection{Tenant: "erun", Environment: "local"}
+		selection := uimodel.Selection{Tenant: "erun", Environment: "local"}
 		envSession := &managedTerminal{selection: selection, key: "env\x00erun\x00local", serial: 1, kind: sessionKindOpen}
 		app.sessions[envSession.key] = envSession
 		app.startCommandFromTrace(selection, command)
@@ -188,7 +189,7 @@ func TestStartCommandFromTraceDoesNotLockTerminal(t *testing.T) {
 // lines would trigger a deploy→reopen loop.
 func TestActivityTraceLineHandlerIgnoresInitFromNonLocalSession(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
-	selection := uiSelection{Tenant: "erun", Environment: "local"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "local"}
 
 	openHandler := newActivityTraceLineHandler(app, selection, sessionKindOpen)
 	openHandler("==> Initializing erun/local")
@@ -222,19 +223,19 @@ func TestEmitEnvironmentInitializedFiresOncePerEnv(t *testing.T) {
 	app.emitEnvironmentInitialized("frs", "dev")
 	app.emitEnvironmentInitialized("frs", "dev")
 	app.emitEnvironmentInitialized("frs", "dev")
-	if got := len(emits.events(environmentInitializedEvent)); got != 1 {
+	if got := len(emits.events(uimodel.EnvironmentInitializedEvent)); got != 1 {
 		t.Fatalf("environment-initialized fired %d times for one env, want 1 (repaints must not re-fire)", got)
 	}
 
 	app.emitEnvironmentInitialized("frs", "other")
-	if got := len(emits.events(environmentInitializedEvent)); got != 2 {
+	if got := len(emits.events(uimodel.EnvironmentInitializedEvent)); got != 2 {
 		t.Fatalf("distinct env total = %d, want 2", got)
 	}
 
 	// Delete/failure resets, so a re-create fires again.
 	app.clearInitEmitted("frs", "dev")
 	app.emitEnvironmentInitialized("frs", "dev")
-	if got := len(emits.events(environmentInitializedEvent)); got != 3 {
+	if got := len(emits.events(uimodel.EnvironmentInitializedEvent)); got != 3 {
 		t.Fatalf("re-create after reset total = %d, want 3", got)
 	}
 }
@@ -247,11 +248,11 @@ func TestResolveActivityKubeContextFallsBackToEnvConfig(t *testing.T) {
 			"erun/ux": {Name: "ux", KubernetesContext: "erun"},
 		},
 	}
-	got := app.resolveActivityKubeContext(uiSelection{}, "erun", "ux")
+	got := app.resolveActivityKubeContext(uimodel.Selection{}, "erun", "ux")
 	if got != "erun" {
 		t.Fatalf("kube context = %q, want %q", got, "erun")
 	}
-	got = app.resolveActivityKubeContext(uiSelection{KubernetesContext: "session-context"}, "erun", "ux")
+	got = app.resolveActivityKubeContext(uimodel.Selection{KubernetesContext: "session-context"}, "erun", "ux")
 	if got != "session-context" {
 		t.Fatalf("selection should win when present, got %q", got)
 	}

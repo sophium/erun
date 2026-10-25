@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 const (
@@ -68,11 +70,11 @@ func (a *App) ForceDismissActivity(id string) bool {
 }
 
 // FindActiveDeployForSelection returns the active entry for the selection, if any.
-func (a *App) FindActiveDeployForSelection(selection uiSelection) activityQueueEntry {
+func (a *App) FindActiveDeployForSelection(selection uimodel.Selection) activityQueueEntry {
 	if a.activityQueue == nil {
 		return activityQueueEntry{}
 	}
-	selection = normalizeSelection(selection)
+	selection = uimodel.NormalizeSelection(selection)
 	if entry, ok := a.activityQueue.findActive(selection.Tenant, selection.Environment); ok {
 		return entry
 	}
@@ -81,7 +83,7 @@ func (a *App) FindActiveDeployForSelection(selection uiSelection) activityQueueE
 
 // finishActivityTracking finalizes the selection's "deploy" entry, keyed by command
 // so a concurrent build's entry is never finalized instead.
-func (a *App) finishActivityTracking(selection uiSelection, status activityQueueStatus, errMsg string) {
+func (a *App) finishActivityTracking(selection uimodel.Selection, status activityQueueStatus, errMsg string) {
 	if a.activityQueue == nil {
 		return
 	}
@@ -171,7 +173,7 @@ func (a *App) lockTerminalForActivity(sessionID int, entry activityQueueEntry) {
 
 // lockNewlyJoinedSessionIfDeployInFlight locks a session as it joins, since
 // lockTerminalsForActivity only covered sessions present at deploy start.
-func (a *App) lockNewlyJoinedSessionIfDeployInFlight(selection uiSelection, sessionID int) {
+func (a *App) lockNewlyJoinedSessionIfDeployInFlight(selection uimodel.Selection, sessionID int) {
 	if a.activityQueue == nil {
 		return
 	}

@@ -9,6 +9,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestSavePastedFileCopiesIntoCurrentRuntime(t *testing.T) {
@@ -40,7 +41,7 @@ func TestSavePastedFileCopiesIntoCurrentRuntime(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	selection := uiSelection{Tenant: "erun", Environment: "local"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "local"}
 	app.mu.Lock()
 	app.nextSerial++
 	serial := app.nextSerial

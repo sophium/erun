@@ -14,6 +14,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 const forwardRepairTestPort = 17500
@@ -105,7 +106,7 @@ func forwardRepairTestApp(
 		},
 		readRuntimeRunState: readRunState,
 		// Only "erun/fresh" reaches the pod fallback; answer idle as a neutral default.
-		execRuntimePod: func(context.Context, uiSelection, string) (string, error) {
+		execRuntimePod: func(context.Context, uimodel.Selection, string) (string, error) {
 			data, err := json.Marshal(model.EnvironmentIdleStatus{
 				Markers: []model.EnvironmentIdleMarker{{Name: activity.ActivityKindProcess, Idle: true}},
 			})
@@ -123,8 +124,8 @@ func forwardRepairTestApp(
 	return app, emits
 }
 
-func forwardRepairSelection() uiSelection {
-	return uiSelection{Tenant: "erun", Environment: "remote"}
+func forwardRepairSelection() uimodel.Selection {
+	return uimodel.Selection{Tenant: "erun", Environment: "remote"}
 }
 
 // sweepUntilRebindSettles waits for the started rebind so the in-flight latch
@@ -134,7 +135,7 @@ func sweepUntilRebindSettles(t *testing.T, app *App) environmentActivityState {
 	return sweepEnvUntilRebindSettles(t, app, forwardRepairSelection())
 }
 
-func sweepEnvUntilRebindSettles(t *testing.T, app *App, selection uiSelection) environmentActivityState {
+func sweepEnvUntilRebindSettles(t *testing.T, app *App, selection uimodel.Selection) environmentActivityState {
 	t.Helper()
 	state := app.observeEnvironmentActivity(selection).state
 	key := selectionKey(selection)
@@ -208,7 +209,7 @@ func TestDroppedForwardIsNotRestartedTwiceByOverlappingSweeps(t *testing.T) {
 func TestUnopenedEnvironmentIsProbedButNeverRebound(t *testing.T) {
 	probe := &forwardRepairProbe{forwardDropped: true, repairs: true}
 	app, emits := forwardRepairTestApp(t, probe, nil)
-	unopened := uiSelection{Tenant: "erun", Environment: "fresh"}
+	unopened := uimodel.Selection{Tenant: "erun", Environment: "fresh"}
 
 	for range forwardRepairAttempts + 2 {
 		state := sweepEnvUntilRebindSettles(t, app, unopened)
@@ -394,10 +395,10 @@ func TestStoppedEnvironmentIsNotResurrected(t *testing.T) {
 	}
 }
 
-func notificationsFromSource(emits *capturedEmits, source string) []appNotificationPayload {
-	var out []appNotificationPayload
-	for _, event := range emits.events(appNotificationEvent) {
-		note, ok := event.(appNotificationPayload)
+func notificationsFromSource(emits *capturedEmits, source string) []uimodel.AppNotificationPayload {
+	var out []uimodel.AppNotificationPayload
+	for _, event := range emits.events(uimodel.AppNotificationEvent) {
+		note, ok := event.(uimodel.AppNotificationPayload)
 		if ok && note.Source == source {
 			out = append(out, note)
 		}
@@ -405,10 +406,10 @@ func notificationsFromSource(emits *capturedEmits, source string) []appNotificat
 	return out
 }
 
-func clearedNotificationSources(emits *capturedEmits, source string) []appNotificationClearPayload {
-	var out []appNotificationClearPayload
-	for _, event := range emits.events(appNotificationClearEvent) {
-		cleared, ok := event.(appNotificationClearPayload)
+func clearedNotificationSources(emits *capturedEmits, source string) []uimodel.AppNotificationClearPayload {
+	var out []uimodel.AppNotificationClearPayload
+	for _, event := range emits.events(uimodel.AppNotificationClearEvent) {
+		cleared, ok := event.(uimodel.AppNotificationClearPayload)
 		if ok && cleared.Source == source {
 			out = append(out, cleared)
 		}

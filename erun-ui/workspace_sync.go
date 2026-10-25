@@ -11,6 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/command/workspace"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
 	"github.com/sophium/erun/erun-common/primitive/open/sshconn"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 const defaultWorkspaceSyncInterval = 2 * time.Second
@@ -28,8 +29,8 @@ type workspaceSyncStatus struct {
 	Files      int
 }
 
-func (a *App) startWorkspaceSyncForSelection(selection uiSelection) {
-	selection = normalizeSelection(selection)
+func (a *App) startWorkspaceSyncForSelection(selection uimodel.Selection) {
+	selection = uimodel.NormalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" {
 		return
 	}
@@ -53,10 +54,7 @@ func (a *App) startWorkspaceSyncForSelection(selection uiSelection) {
 		a.mu.Unlock()
 		return
 	}
-	ctx := context.Background()
-	if a.ctx != nil {
-		ctx = a.ctx
-	}
+	ctx := a.context()
 	ctx, cancel := context.WithCancel(ctx)
 	a.workspaceSyncs[key] = &workspaceSyncWorker{
 		cancel: cancel,
@@ -96,8 +94,8 @@ func (a *App) reconcileWorkspaceSyncForConfiguredEnvs() {
 
 // desiredWorkspaceSyncSelections reports completeness: an unreadable tenant
 // must not read as "not wanted".
-func (a *App) desiredWorkspaceSyncSelections(tenants []model.TenantConfig) (map[string]uiSelection, bool) {
-	desired := map[string]uiSelection{}
+func (a *App) desiredWorkspaceSyncSelections(tenants []model.TenantConfig) (map[string]uimodel.Selection, bool) {
+	desired := map[string]uimodel.Selection{}
 	complete := true
 	for _, tenant := range tenants {
 		envs, err := a.deps.store.ListEnvConfigs(tenant.Name)
@@ -110,7 +108,7 @@ func (a *App) desiredWorkspaceSyncSelections(tenants []model.TenantConfig) (map[
 			if !env.SSHD.Enabled || !env.SSHD.WorkspaceSync.Enabled {
 				continue
 			}
-			selection := uiSelection{Tenant: tenant.Name, Environment: env.Name}
+			selection := uimodel.Selection{Tenant: tenant.Name, Environment: env.Name}
 			desired[selectionKey(selection)] = selection
 		}
 	}
@@ -128,14 +126,14 @@ func (a *App) runningWorkspaceSyncKeys() []string {
 	return keys
 }
 
-func (a *App) reconcileWorkspaceSyncForSelection(selection uiSelection, enabled bool) {
+func (a *App) reconcileWorkspaceSyncForSelection(selection uimodel.Selection, enabled bool) {
 	a.stopWorkspaceSyncForSelection(selection)
 	if enabled {
 		a.startWorkspaceSyncForSelection(selection)
 	}
 }
 
-func (a *App) stopWorkspaceSyncForSelection(selection uiSelection) {
+func (a *App) stopWorkspaceSyncForSelection(selection uimodel.Selection) {
 	a.stopWorkspaceSyncForKey(selectionKey(selection))
 }
 
@@ -151,7 +149,7 @@ func (a *App) stopWorkspaceSyncForKey(key string) {
 	}
 }
 
-func (a *App) runWorkspaceSyncLoop(ctx context.Context, key string, selection uiSelection, result config.OpenResult, localPath string) {
+func (a *App) runWorkspaceSyncLoop(ctx context.Context, key string, selection uimodel.Selection, result config.OpenResult, localPath string) {
 	params := workspace.WorkspaceSyncParams{
 		HostAlias:  sshconn.SSHConnectionInfoForResult(result).HostAlias,
 		RemotePath: sshconn.SSHConnectionInfoForResult(result).WorkspacePath,
@@ -260,7 +258,7 @@ func (a *App) setWorkspaceSyncStatus(key string, status workspaceSyncStatus) {
 	}
 }
 
-func (a *App) workspaceSyncStatus(selection uiSelection) workspaceSyncStatus {
+func (a *App) workspaceSyncStatus(selection uimodel.Selection) workspaceSyncStatus {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if worker := a.workspaceSyncs[selectionKey(selection)]; worker != nil {

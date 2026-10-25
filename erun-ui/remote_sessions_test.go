@@ -12,6 +12,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // A socket whose program is gone is a leftover and must not be rebuilt as a tab.
@@ -36,7 +37,7 @@ func TestListRemoteAppSessionsRebuildsOnlyRunningSessions(t *testing.T) {
 		},
 	}})
 
-	got := app.ListRemoteAppSessions(uiSelection{Tenant: "erun", Environment: "remote"})
+	got := app.ListRemoteAppSessions(uimodel.Selection{Tenant: "erun", Environment: "remote"})
 	want := []string{"open-1", "ai"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("ListRemoteAppSessions = %v, want %v", got, want)
@@ -53,10 +54,10 @@ func TestListRemoteAppSessionsFailsSoft(t *testing.T) {
 		},
 	}})
 
-	if got := app.ListRemoteAppSessions(uiSelection{Tenant: "erun", Environment: "local"}); got != nil {
+	if got := app.ListRemoteAppSessions(uimodel.Selection{Tenant: "erun", Environment: "local"}); got != nil {
 		t.Fatalf("env without kubernetes context must yield nil, got %v", got)
 	}
-	if got := app.ListRemoteAppSessions(uiSelection{Tenant: "erun", Environment: "missing"}); got != nil {
+	if got := app.ListRemoteAppSessions(uimodel.Selection{Tenant: "erun", Environment: "missing"}); got != nil {
 		t.Fatalf("unknown env must yield nil, got %v", got)
 	}
 }
@@ -99,7 +100,7 @@ func newEndAISessionsTestApp(t *testing.T, aiTool string) (*App, string) {
 // ended even with no tab open.
 func TestEndAISessionsEndsBothPodSessions(t *testing.T) {
 	app, captureFile := newEndAISessionsTestApp(t, "")
-	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 	if _, err := app.StartAISession(selection, 0, 80, 24, false); err != nil {
 		t.Fatalf("StartAISession: %v", err)
 	}
@@ -123,7 +124,7 @@ func TestEndAISessionsEndsBothPodSessions(t *testing.T) {
 // stays attached.
 func TestEndAISessionsSpawnsFreshAIAndLeavesShellAttached(t *testing.T) {
 	app, _ := newEndAISessionsTestApp(t, "")
-	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 	ai, err := app.StartAISession(selection, 0, 80, 24, false)
 	if err != nil {
 		t.Fatalf("StartAISession: %v", err)
@@ -154,7 +155,7 @@ func TestEndAISessionsSpawnsFreshAIAndLeavesShellAttached(t *testing.T) {
 // Verbatim AI tools (e.g. codex) never used the flags, so their session stays.
 func TestEndAISessionsSkipsVerbatimAITool(t *testing.T) {
 	app, _ := newEndAISessionsTestApp(t, "codex")
-	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 	ai, err := app.StartAISession(selection, 0, 80, 24, false)
 	if err != nil {
 		t.Fatalf("StartAISession: %v", err)
@@ -208,7 +209,7 @@ func TestCloseSessionEndsRemoteCustomTerminal(t *testing.T) {
 	defer app.shutdown(context.Background())
 	app.SetEmitter(func(string, ...any) {})
 
-	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 	extra, err := app.StartSession(selection, 2, 80, 24)
 	if err != nil {
 		t.Fatalf("StartSession(slot 2): %v", err)

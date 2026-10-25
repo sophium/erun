@@ -12,6 +12,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 type workingIssueCommandRunner func(ctx context.Context, dir, name string, args ...string) (string, error)
@@ -48,8 +49,8 @@ func execWorkingIssueCommand(ctx context.Context, dir, name string, args ...stri
 
 // EnvironmentWorkingIssue resolves an environment's current branch and its
 // issue title for the sidebar hover card.
-func (a *App) EnvironmentWorkingIssue(selection uiSelection) (uiWorkingIssue, error) {
-	selection = normalizeSelection(selection)
+func (a *App) EnvironmentWorkingIssue(selection uimodel.Selection) (uiWorkingIssue, error) {
+	selection = uimodel.NormalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" {
 		return uiWorkingIssue{}, nil
 	}

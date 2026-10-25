@@ -1,4 +1,4 @@
-package main
+package uimodel
 
 import (
 	"errors"
@@ -7,7 +7,7 @@ import (
 )
 
 func TestRequireTenantTrimsAndPassesThrough(t *testing.T) {
-	tenant, err := requireTenant("loading the tenant dashboard", "  frs  ")
+	tenant, err := RequireTenant("loading the tenant dashboard", "  frs  ")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -17,7 +17,7 @@ func TestRequireTenantTrimsAndPassesThrough(t *testing.T) {
 }
 
 func TestRequireTenantNamesOperationAndRecoveryWhenEmpty(t *testing.T) {
-	_, err := requireTenant("loading the tenant dashboard", "   ")
+	_, err := RequireTenant("loading the tenant dashboard", "   ")
 	if err == nil {
 		t.Fatal("expected an error for a blank tenant")
 	}

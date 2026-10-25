@@ -9,6 +9,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestRuntimeUsageCPUUnavailableRendersAsStatedUnavailable(t *testing.T) {
@@ -131,7 +132,7 @@ func TestLoadRuntimeUsageReportsOwnTimeoutNotSignalKilled(t *testing.T) {
 	defer cancel()
 	app.ctx = ctx
 
-	usage, err := app.LoadRuntimeUsage(uiSelection{Tenant: "petios", Environment: "local"})
+	usage, err := app.LoadRuntimeUsage(uimodel.Selection{Tenant: "petios", Environment: "local"})
 	if err != nil {
 		t.Fatalf("LoadRuntimeUsage must not surface a probe failure as an error: %v", err)
 	}

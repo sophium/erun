@@ -4,6 +4,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // busy fires after sustained output, clears after idle or close, and orchestrator
@@ -30,25 +32,25 @@ func TestRecordAIActivityDebounce(t *testing.T) {
 			}
 			managed := &managedTerminal{
 				kind:      tc.kind,
-				selection: uiSelection{Tenant: "t", Environment: "e"},
+				selection: uimodel.Selection{Tenant: "t", Environment: "e"},
 				key:       string(tc.kind) + "\x00t\x00e",
 				serial:    7,
 			}
 
 			// No time has passed, so busy must not be set yet.
 			app.recordAIActivity(managed)
-			if len(emits.events(aiActivityEvent)) != 0 {
-				t.Fatalf("unexpected immediate emit: %+v", emits.events(aiActivityEvent))
+			if len(emits.events(uimodel.AIActivityEvent)) != 0 {
+				t.Fatalf("unexpected immediate emit: %+v", emits.events(uimodel.AIActivityEvent))
 			}
 
 			app.mu.Lock()
 			managed.aiActiveSince = time.Now().Add(-(aiActivitySustainedThreshold + time.Second))
 			app.mu.Unlock()
 			app.recordAIActivity(managed)
-			assertBusyEmit(t, emits.events(aiActivityEvent), tc.kind, tc.wantEmits)
+			assertBusyEmit(t, emits.events(uimodel.AIActivityEvent), tc.kind, tc.wantEmits)
 
 			app.finalizeAIActivity(managed)
-			assertFinalizeEmit(t, emits.events(aiActivityEvent), tc.kind, tc.wantEmits)
+			assertFinalizeEmit(t, emits.events(uimodel.AIActivityEvent), tc.kind, tc.wantEmits)
 		})
 	}
 }
@@ -107,15 +109,15 @@ func TestClearAIActivityIfQuietBouncesNewOutput(t *testing.T) {
 	}
 	managed := &managedTerminal{
 		kind:          sessionKindAI,
-		selection:     uiSelection{Tenant: "t", Environment: "e"},
+		selection:     uimodel.Selection{Tenant: "t", Environment: "e"},
 		key:           "ai\x00t\x00e",
 		serial:        9,
 		aiBusyEmitted: true,
 		aiLastOutput:  time.Now(), // fresh output between schedule and fire
 	}
 	app.clearAIActivityIfQuiet(managed)
-	if len(emits.events(aiActivityEvent)) != 0 {
-		t.Fatalf("clearAIActivityIfQuiet must not emit while output is fresh, got %+v", emits.events(aiActivityEvent))
+	if len(emits.events(uimodel.AIActivityEvent)) != 0 {
+		t.Fatalf("clearAIActivityIfQuiet must not emit while output is fresh, got %+v", emits.events(uimodel.AIActivityEvent))
 	}
 	if !managed.aiBusyEmitted {
 		t.Fatalf("clearAIActivityIfQuiet must keep busy latch on while output is fresh")

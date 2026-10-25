@@ -4,6 +4,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // The closed mark keeps the session out of the stale-shell detector but must not
@@ -29,7 +31,7 @@ func TestADeliberatelyClosedSessionStillReportsItsExit(t *testing.T) {
 	var closeOnce sync.Once
 	app.SetEmitter(func(name string, args ...any) {
 		record(name, args...)
-		if name != terminalOutputEvent {
+		if name != uimodel.TerminalOutputEvent {
 			return
 		}
 		closeOnce.Do(func() {
@@ -43,7 +45,7 @@ func TestADeliberatelyClosedSessionStillReportsItsExit(t *testing.T) {
 	// The reader is the only finalizer, so this joins on it deterministically.
 	app.sessionWG.Wait()
 
-	if got := len(emits.events(terminalExitEvent)); got != 1 {
+	if got := len(emits.events(uimodel.TerminalExitEvent)); got != 1 {
 		t.Fatalf("a deliberately closed session emitted %d terminal-exit events, want exactly 1", got)
 	}
 	app.mu.Lock()
@@ -85,7 +87,7 @@ func TestASessionClosedBeforeItsFirstReadStillReportsItsExit(t *testing.T) {
 	app.spawnStreamSession(managed)
 	app.sessionWG.Wait()
 
-	if got := len(emits.events(terminalExitEvent)); got != 1 {
+	if got := len(emits.events(uimodel.TerminalExitEvent)); got != 1 {
 		t.Fatalf("a closed-before-its-reader session emitted %d terminal-exit events, want exactly 1", got)
 	}
 	app.mu.Lock()
@@ -121,7 +123,7 @@ func TestAnExitingSessionStillReportsItsExitExactlyOnce(t *testing.T) {
 	}
 	app.sessionWG.Wait()
 
-	if got := len(emits.events(terminalExitEvent)); got != 1 {
+	if got := len(emits.events(uimodel.TerminalExitEvent)); got != 1 {
 		t.Fatalf("an exiting session emitted %d terminal-exit events, want exactly 1", got)
 	}
 	app.mu.Lock()

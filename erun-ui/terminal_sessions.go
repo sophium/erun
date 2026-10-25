@@ -14,12 +14,13 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
-func (a *App) OpenIDE(selection uiSelection, ide string) error {
-	selection = normalizeSelection(selection)
+func (a *App) OpenIDE(selection uimodel.Selection, ide string) error {
+	selection = uimodel.NormalizeSelection(selection)
 	ide = strings.TrimSpace(ide)
-	if err := errMissingTenantOrEnvironment("open IDE", selection.Tenant, selection.Environment); err != nil {
+	if err := uimodel.ErrMissingTenantOrEnvironment("open IDE", selection.Tenant, selection.Environment); err != nil {
 		return err
 	}
 	if ide != "vscode" && ide != "intellij" {
@@ -30,10 +31,7 @@ func (a *App) OpenIDE(selection uiSelection, ide string) error {
 		return err
 	}
 
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	output, err := a.deps.runIDECommand(ctx, params)
 	if err == nil {
 		return nil
@@ -41,7 +39,7 @@ func (a *App) OpenIDE(selection uiSelection, ide string) error {
 	return formatOpenIDEError(ide, output, err)
 }
 
-func (a *App) resolveOpenIDEParams(selection uiSelection, ide string) (startTerminalSessionParams, error) {
+func (a *App) resolveOpenIDEParams(selection uimodel.Selection, ide string) (startTerminalSessionParams, error) {
 	result, err := resolve.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
@@ -76,11 +74,11 @@ func formatOpenIDEError(ide, output string, err error) error {
 	return fmt.Errorf("open %s: %w", ide, err)
 }
 
-func (a *App) LoadDiff(selection uiSelection, options uiDiffOptions) (model.DiffResult, error) {
-	selection = normalizeSelection(selection)
+func (a *App) LoadDiff(selection uimodel.Selection, options uiDiffOptions) (model.DiffResult, error) {
+	selection = uimodel.NormalizeSelection(selection)
 	options.Scope = strings.TrimSpace(options.Scope)
 	options.SelectedCommit = strings.TrimSpace(options.SelectedCommit)
-	if err := errMissingTenantOrEnvironment("load diff", selection.Tenant, selection.Environment); err != nil {
+	if err := uimodel.ErrMissingTenantOrEnvironment("load diff", selection.Tenant, selection.Environment); err != nil {
 		return model.DiffResult{}, err
 	}
 	result, err := resolve.ResolveOpen(a.deps.store, model.OpenParams{
@@ -90,10 +88,7 @@ func (a *App) LoadDiff(selection uiSelection, options uiDiffOptions) (model.Diff
 	if err != nil {
 		return model.DiffResult{}, err
 	}
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	mcpPort := configpkg.MCPPortForResult(result)
 	if a.deps.canReachMCPEndpoint != nil && !a.deps.canReachMCPEndpoint(mcpPort) {
 		return model.DiffResult{}, wrapMCPUnreachableErrorWithKind(
@@ -159,7 +154,7 @@ func (a *App) streamSession(managed *managedTerminal) {
 }
 
 func (a *App) handleSessionOutput(managed *managedTerminal, chunk []byte, lastOutputActivity *time.Time) {
-	a.emitEvent(terminalOutputEvent, terminalOutputPayload{
+	a.emitEvent(uimodel.TerminalOutputEvent, terminalOutputPayload{
 		SessionID: managed.serial,
 		Data:      base64.StdEncoding.EncodeToString(chunk),
 	})
@@ -191,7 +186,7 @@ func (a *App) finalizeSessionExit(managed *managedTerminal, reason string) {
 	}
 	a.releaseIdleBlockLocked(managed)
 	a.mu.Unlock()
-	a.emitEvent(terminalExitEvent, terminalExitPayload{
+	a.emitEvent(uimodel.TerminalExitEvent, terminalExitPayload{
 		SessionID:  managed.serial,
 		Reason:     reason,
 		Deliberate: deliberate,
@@ -217,8 +212,8 @@ func (a *App) currentSessionFor(managed *managedTerminal) terminalSession {
 }
 
 // emitEnvStatus publishes the env's condition for the sidebar row; "" clears.
-func (a *App) emitEnvStatus(selection uiSelection, status string) {
-	a.emitEvent(envStatusEvent, envStatusPayload{
+func (a *App) emitEnvStatus(selection uimodel.Selection, status string) {
+	a.emitEvent(uimodel.EnvStatusEvent, uimodel.EnvStatusPayload{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 		Status:      status,
@@ -244,7 +239,7 @@ func (a *App) emitEvent(name string, payload any) {
 
 type managedTerminal struct {
 	session   terminalSession
-	selection uiSelection
+	selection uimodel.Selection
 	key       string
 	serial    int
 	slot      int
@@ -369,20 +364,20 @@ const (
 	sessionKindOrchestrator sessionKind = "orchestrator"
 )
 
-func selectionKey(selection uiSelection) string {
-	selection = normalizeSelection(selection)
+func selectionKey(selection uimodel.Selection) string {
+	selection = uimodel.NormalizeSelection(selection)
 	return selection.Tenant + "\x00" + selection.Environment
 }
 
-func openSessionKey(selection uiSelection, slot int) string {
+func openSessionKey(selection uimodel.Selection, slot int) string {
 	return selectionKey(selection) + "\x00" + fmt.Sprintf("%d", slot)
 }
 
-func localSessionKey(selection uiSelection, slot int) string {
+func localSessionKey(selection uimodel.Selection, slot int) string {
 	return "local\x00" + selectionKey(selection) + "\x00" + fmt.Sprintf("%d", slot)
 }
 
-func aiSessionKey(selection uiSelection, slot int) string {
+func aiSessionKey(selection uimodel.Selection, slot int) string {
 	return "ai\x00" + selectionKey(selection) + "\x00" + fmt.Sprintf("%d", slot)
 }
 

@@ -12,6 +12,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 const envTraceTailBytes = 64 * 1024
@@ -27,9 +28,9 @@ type uiEnvTrace struct {
 
 // LoadEnvTrace merges the host log (operator commands) with the in-pod log
 // (agent MCP actions). It must never mutate the env or hold it awake.
-func (a *App) LoadEnvTrace(selection uiSelection) (uiEnvTrace, error) {
-	selection = normalizeSelection(selection)
-	if err := errMissingTenantOrEnvironment("load environment trace", selection.Tenant, selection.Environment); err != nil {
+func (a *App) LoadEnvTrace(selection uimodel.Selection) (uiEnvTrace, error) {
+	selection = uimodel.NormalizeSelection(selection)
+	if err := uimodel.ErrMissingTenantOrEnvironment("load environment trace", selection.Tenant, selection.Environment); err != nil {
 		return uiEnvTrace{}, err
 	}
 	result, err := resolve.ResolveOpen(a.deps.store, model.OpenParams{

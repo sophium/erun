@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -11,6 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/orchestrator"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func (a *App) LoadERunConfig() (uiERunConfig, error) {
@@ -85,10 +85,7 @@ func (a *App) InitCloudContext(input uiCloudContextInitInput) (uiCloudContextSta
 }
 
 func (a *App) StopCloudContext(name string) (uiCloudContextStatus, error) {
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	// Mark the stop before the AWS call so the reconnect gate sees it when the session
 	// dies; clear it on failure so a stop error does not disable reconnect.
 	a.markIntentionalStopForCloudContext(name)
@@ -254,7 +251,7 @@ func (a *App) GetCloudProviderBearerToken(alias string) (uiCloudProviderBearerTo
 }
 
 func (a *App) LoadTenantConfig(tenant string) (uiTenantConfig, error) {
-	tenant, err := requireTenant("loading tenant settings", tenant)
+	tenant, err := uimodel.RequireTenant("loading tenant settings", tenant)
 	if err != nil {
 		return uiTenantConfig{}, err
 	}
@@ -267,7 +264,7 @@ func (a *App) LoadTenantConfig(tenant string) (uiTenantConfig, error) {
 }
 
 func (a *App) SaveTenantConfig(config uiTenantConfig) (uiTenantConfig, error) {
-	tenant, err := requireTenant("saving tenant settings", config.Name)
+	tenant, err := uimodel.RequireTenant("saving tenant settings", config.Name)
 	if err != nil {
 		return uiTenantConfig{}, err
 	}
@@ -463,7 +460,7 @@ func (a *App) emitAppStatus(message string) {
 	if strings.TrimSpace(message) == "" {
 		return
 	}
-	a.emit(appStatusEvent, appStatusPayload{Message: message, Busy: true})
+	a.emit(uimodel.AppStatusEvent, uimodel.AppStatusPayload{Message: message, Busy: true})
 }
 
 // emitAppNotification pushes a toast with no env/orchestrator identity.
@@ -471,7 +468,7 @@ func (a *App) emitAppNotification(kind, message string) {
 	if strings.TrimSpace(message) == "" {
 		return
 	}
-	a.emit(appNotificationEvent, appNotificationPayload{Kind: kind, Message: message})
+	a.emit(uimodel.AppNotificationEvent, uimodel.AppNotificationPayload{Kind: kind, Message: message})
 }
 
 // notificationSourceRuntimeUnreachable must match dismissNotificationForEnv in the frontend.
@@ -508,7 +505,7 @@ func (a *App) emitEnvNotification(kind, tenant, environment, source, message, ac
 	if strings.TrimSpace(message) == "" {
 		return
 	}
-	a.emit(appNotificationEvent, appNotificationPayload{
+	a.emit(uimodel.AppNotificationEvent, uimodel.AppNotificationPayload{
 		Kind:        kind,
 		Message:     message,
 		Tenant:      tenant,
@@ -523,7 +520,7 @@ func (a *App) emitOrchestratorNotification(kind, orchestratorID, message, action
 	if strings.TrimSpace(message) == "" {
 		return
 	}
-	a.emit(appNotificationEvent, appNotificationPayload{
+	a.emit(uimodel.AppNotificationEvent, uimodel.AppNotificationPayload{
 		Kind:           kind,
 		Message:        message,
 		OrchestratorID: orchestratorID,
@@ -533,7 +530,7 @@ func (a *App) emitOrchestratorNotification(kind, orchestratorID, message, action
 
 // emitClearEnvNotification dismisses an emitEnvNotification matching source, tenant, and environment.
 func (a *App) emitClearEnvNotification(tenant, environment, source string) {
-	a.emit(appNotificationClearEvent, appNotificationClearPayload{
+	a.emit(uimodel.AppNotificationClearEvent, uimodel.AppNotificationClearPayload{
 		Tenant:      tenant,
 		Environment: environment,
 		Source:      source,

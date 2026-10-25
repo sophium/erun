@@ -12,6 +12,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/command/orchestrator"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // Pacing re-states the contract into a session whose activity report has gone
@@ -393,7 +394,7 @@ func (a *App) capOrchestratorPacing(id string, serial int, name string, now time
 func (a *App) emitOrchestratorPacingMarker(sessionID, count int, elapsed time.Duration, signal orchestratorPacingActivitySignal, envStuckDetail string) {
 	marker := fmt.Sprintf("\r\n\x1b[2;33m── pacing nudge %d/%d sent — %s ──\x1b[0m\r\n",
 		count, getOrchestratorWhipConfig().MaxNudges, orchestratorPacingQuietDescription(elapsed, signal, envStuckDetail))
-	a.emitEvent(terminalOutputEvent, terminalOutputPayload{
+	a.emitEvent(uimodel.TerminalOutputEvent, terminalOutputPayload{
 		SessionID: sessionID,
 		Data:      base64.StdEncoding.EncodeToString([]byte(marker)),
 	})
@@ -420,7 +421,7 @@ func orchestratorPacingQuietDescription(elapsed time.Duration, signal orchestrat
 
 func (a *App) emitOrchestratorPacingCappedMarker(sessionID int) {
 	marker := "\r\n\x1b[2;33m── stopped pacing nudges after repeated silence — reply in this pane or restart the orchestrator to resume ──\x1b[0m\r\n"
-	a.emitEvent(terminalOutputEvent, terminalOutputPayload{
+	a.emitEvent(uimodel.TerminalOutputEvent, terminalOutputPayload{
 		SessionID: sessionID,
 		Data:      base64.StdEncoding.EncodeToString([]byte(marker)),
 	})

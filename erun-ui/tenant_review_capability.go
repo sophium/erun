@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/sophium/erun/erun-common/infra/platformclient"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // uiTenantReviewCreateCapability gates the diff panel's Start a review
@@ -19,14 +20,11 @@ type uiTenantReviewCreateCapability struct {
 // TenantReviewCreateCapability mirrors the dashboard's CanCreateReview
 // derivation without loading the dashboard's other reads.
 func (a *App) TenantReviewCreateCapability(tenant string) (uiTenantReviewCreateCapability, error) {
-	tenant, err := requireTenant("checking whether you can create a review", tenant)
+	tenant, err := uimodel.RequireTenant("checking whether you can create a review", tenant)
 	if err != nil {
 		return uiTenantReviewCreateCapability{}, err
 	}
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	resolution, err := a.resolveTenantPlatform(tenant, "")
 	if err != nil {
 		return uiTenantReviewCreateCapability{}, err

@@ -9,13 +9,14 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/infra/kube"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // CheckEnvironmentHealth checks registry config and runtime deployment from the
 // host, since `erun doctor` runs in-pod and cannot see an undeployed env.
-func (a *App) CheckEnvironmentHealth(selection uiSelection) (uiEnvironmentHealth, error) {
-	selection = normalizeSelection(selection)
-	if err := errMissingTenantOrEnvironment("check environment health", selection.Tenant, selection.Environment); err != nil {
+func (a *App) CheckEnvironmentHealth(selection uimodel.Selection) (uiEnvironmentHealth, error) {
+	selection = uimodel.NormalizeSelection(selection)
+	if err := uimodel.ErrMissingTenantOrEnvironment("check environment health", selection.Tenant, selection.Environment); err != nil {
 		return uiEnvironmentHealth{}, err
 	}
 	config, _, err := a.deps.store.LoadEnvConfig(selection.Tenant, selection.Environment)
@@ -77,10 +78,7 @@ func (a *App) runtimeDeployedHealthCheck(tenant, environment string, config conf
 		check.Detail = "No Kubernetes context is set for this environment, so its deployment state can't be checked."
 		return check
 	}
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	deployed, err := a.deps.checkRuntimeDeployed(ctx, kubeContext, tenant, environment)
 	if err != nil {
 		check.Status = healthCheckStatusUnknown

@@ -13,6 +13,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/open/appsession"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // A session whose pod keeps dying caps its respawns and emits one stop marker.
@@ -45,7 +46,7 @@ func TestStartSessionStopsReconnectingAfterRepeatedFailures(t *testing.T) {
 	defer app.shutdown(context.Background())
 	app.SetEmitter(emits.fn())
 
-	if _, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
+	if _, err := app.StartSession(uimodel.Selection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
 		t.Fatalf("StartSession failed: %v", err)
 	}
 
@@ -106,7 +107,7 @@ func TestRespawnDeclaresItselfAReconnect(t *testing.T) {
 	defer app.shutdown(context.Background())
 	app.SetEmitter(emits.fn())
 
-	if _, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
+	if _, err := app.StartSession(uimodel.Selection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
 		t.Fatalf("StartSession failed: %v", err)
 	}
 	waitForSessionCount(t, &sessionsMu, &sessions, 1, 2*time.Second)
@@ -164,7 +165,7 @@ func waitForTerminalMarker(t *testing.T, emits *capturedEmits, needle string, ti
 }
 
 func sawTerminalMarker(emits *capturedEmits, needle string) bool {
-	for _, evt := range emits.events(terminalOutputEvent) {
+	for _, evt := range emits.events(uimodel.TerminalOutputEvent) {
 		payload, ok := evt.(terminalOutputPayload)
 		if !ok {
 			continue
@@ -243,7 +244,7 @@ func TestStopCloudContextSuppressesReconnect(t *testing.T) {
 	defer app.shutdown(context.Background())
 	app.setCloudContextStatusInCache("managed-cloud", cloud.CloudContextStatusRunning)
 
-	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 	if _, err := app.StartSession(selection, 0, 80, 24); err != nil {
 		t.Fatalf("StartSession failed: %v", err)
 	}
@@ -304,7 +305,7 @@ func TestClearIntentionalStopForCloudContext(t *testing.T) {
 	defer app.shutdown(context.Background())
 	app.setCloudContextStatusInCache("managed-cloud", cloud.CloudContextStatusRunning)
 
-	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 
 	if _, err := app.StopCloudContext("managed-cloud"); err != nil {
 		t.Fatalf("StopCloudContext failed: %v", err)
@@ -352,7 +353,7 @@ func TestStopCloudContextErrorClearsIntentionalStop(t *testing.T) {
 	defer app.shutdown(context.Background())
 	app.setCloudContextStatusInCache("managed-cloud", cloud.CloudContextStatusRunning)
 
-	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 	if _, err := app.StopCloudContext("managed-cloud"); err == nil {
 		t.Fatal("expected StopCloudContext to surface stub error")
 	}
@@ -418,7 +419,7 @@ func TestTryReconnectRefusesWhenActivityDeployFailed(t *testing.T) {
 	respawned := false
 	managed := &managedTerminal{
 		serial:      9,
-		selection:   uiSelection{Tenant: "petios", Environment: "rihards-develop"},
+		selection:   uimodel.Selection{Tenant: "petios", Environment: "rihards-develop"},
 		readyClosed: false, // no deploy-failed readyErr — this open timed out reaching the pod
 		respawn: func() (terminalSession, error) {
 			respawned = true
@@ -464,7 +465,7 @@ func TestTryReconnectAfterHealthyDropRespawns(t *testing.T) {
 
 func sawDeployFailedMarker(emits *capturedEmits) bool {
 	const needle = "deploy failed — not retrying"
-	for _, evt := range emits.events(terminalOutputEvent) {
+	for _, evt := range emits.events(uimodel.TerminalOutputEvent) {
 		payload, ok := evt.(terminalOutputPayload)
 		if !ok {
 			continue
@@ -512,7 +513,7 @@ func TestSessionTakenOverByAnotherWindowDoesNotReconnect(t *testing.T) {
 	defer app.shutdown(context.Background())
 	app.SetEmitter(emits.fn())
 
-	if _, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
+	if _, err := app.StartSession(uimodel.Selection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
 		t.Fatalf("StartSession failed: %v", err)
 	}
 	waitForSessionCount(t, &sessionsMu, &sessions, 1, 2*time.Second)

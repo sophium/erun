@@ -10,6 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func orchestratorLinkForwardTestApp(
@@ -145,9 +146,9 @@ func TestLinkingAStoppedEnvironmentDoesNotForceStartIt(t *testing.T) {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
 
-	waitForEnvStatus(t, emits, envStatusRuntimeStopped)
+	waitForEnvStatus(t, emits, uimodel.EnvStatusRuntimeStopped)
 	for _, status := range envStatuses(emits) {
-		if status.Status == envStatusFailed {
+		if status.Status == uimodel.EnvStatusFailed {
 			t.Fatalf("a stopped environment must never surface as failed, got %+v", status)
 		}
 	}
@@ -167,9 +168,9 @@ func TestLinkingAnEnvironmentSurfacesAForwardOpenFailure(t *testing.T) {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
 
-	waitForEnvStatus(t, emits, envStatusFailed)
+	waitForEnvStatus(t, emits, uimodel.EnvStatusFailed)
 	posted := emits.waitFor(envStatusWaitBound, func(byName map[string][]any) bool {
-		return len(byName[appNotificationEvent]) > 0
+		return len(byName[uimodel.AppNotificationEvent]) > 0
 	})
 	if !posted {
 		t.Fatal("a forward-open failure must post a visible notification, got none")

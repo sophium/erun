@@ -10,13 +10,14 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/expose"
 	"github.com/sophium/erun/erun-common/orchestration/clusterread"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // ListEnvironmentExposures reports why exposure is not configured (host env vs
 // no platform block) and Restricted when credentials cannot list.
-func (a *App) ListEnvironmentExposures(selection uiSelection) (uiExposureList, error) {
-	selection = normalizeSelection(selection)
-	if err := errMissingTenantOrEnvironment("list environment exposures", selection.Tenant, selection.Environment); err != nil {
+func (a *App) ListEnvironmentExposures(selection uimodel.Selection) (uiExposureList, error) {
+	selection = uimodel.NormalizeSelection(selection)
+	if err := uimodel.ErrMissingTenantOrEnvironment("list environment exposures", selection.Tenant, selection.Environment); err != nil {
 		return uiExposureList{}, err
 	}
 	req, configured, notConfiguredReason, err := a.resolveExposureRequest(selection)
@@ -37,9 +38,9 @@ func (a *App) ListEnvironmentExposures(selection uiSelection) (uiExposureList, e
 }
 
 // ListEnvironmentServices lists Services and their existing public hostnames.
-func (a *App) ListEnvironmentServices(selection uiSelection) (uiEnvironmentServiceList, error) {
-	selection = normalizeSelection(selection)
-	if err := errMissingTenantOrEnvironment("list environment services", selection.Tenant, selection.Environment); err != nil {
+func (a *App) ListEnvironmentServices(selection uimodel.Selection) (uiEnvironmentServiceList, error) {
+	selection = uimodel.NormalizeSelection(selection)
+	if err := uimodel.ErrMissingTenantOrEnvironment("list environment services", selection.Tenant, selection.Environment); err != nil {
 		return uiEnvironmentServiceList{}, err
 	}
 	req, configured, notConfiguredReason, err := a.resolveExposureRequest(selection)
@@ -60,9 +61,9 @@ func (a *App) ListEnvironmentServices(selection uiSelection) (uiEnvironmentServi
 }
 
 // ExposeEnvironmentService applies expose.RunExposeService directly, with no dry run.
-func (a *App) ExposeEnvironmentService(selection uiSelection, input uiExposeServiceInput) (uiExposedService, error) {
-	selection = normalizeSelection(selection)
-	if err := errMissingTenantOrEnvironment("expose environment service", selection.Tenant, selection.Environment); err != nil {
+func (a *App) ExposeEnvironmentService(selection uimodel.Selection, input uiExposeServiceInput) (uiExposedService, error) {
+	selection = uimodel.NormalizeSelection(selection)
+	if err := uimodel.ErrMissingTenantOrEnvironment("expose environment service", selection.Tenant, selection.Environment); err != nil {
 		return uiExposedService{}, err
 	}
 	service := strings.TrimSpace(input.Service)
@@ -91,9 +92,9 @@ func (a *App) ExposeEnvironmentService(selection uiSelection, input uiExposeServ
 
 // UnexposeEnvironment removes the per-env wildcard DNS record, de-listing every
 // service exposed under it; there is no per-service primitive.
-func (a *App) UnexposeEnvironment(selection uiSelection) (uiUnexposeResult, error) {
-	selection = normalizeSelection(selection)
-	if err := errMissingTenantOrEnvironment("unexpose environment", selection.Tenant, selection.Environment); err != nil {
+func (a *App) UnexposeEnvironment(selection uimodel.Selection) (uiUnexposeResult, error) {
+	selection = uimodel.NormalizeSelection(selection)
+	if err := uimodel.ErrMissingTenantOrEnvironment("unexpose environment", selection.Tenant, selection.Environment); err != nil {
 		return uiUnexposeResult{}, err
 	}
 	projectRoot := a.exposeProjectRoot()
@@ -112,7 +113,7 @@ func (a *App) UnexposeEnvironment(selection uiSelection) (uiUnexposeResult, erro
 }
 
 // resolveExposureRequest checks a host environment first: it has no cluster.
-func (a *App) resolveExposureRequest(selection uiSelection) (req configpkg.ShellLaunchParams, configured bool, notConfiguredReason string, err error) {
+func (a *App) resolveExposureRequest(selection uimodel.Selection) (req configpkg.ShellLaunchParams, configured bool, notConfiguredReason string, err error) {
 	config, _, err := a.deps.store.LoadEnvConfig(selection.Tenant, selection.Environment)
 	if err != nil {
 		return configpkg.ShellLaunchParams{}, false, "", err

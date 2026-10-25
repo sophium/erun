@@ -10,6 +10,7 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestStartLocalSessionStartsShellAtRepoPath(t *testing.T) {
@@ -36,7 +37,7 @@ func TestStartLocalSessionStartsShellAtRepoPath(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	result, err := app.StartLocalSession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24)
+	result, err := app.StartLocalSession(uimodel.Selection{Tenant: "erun", Environment: "remote"}, 0, 80, 24)
 	if err != nil {
 		t.Fatalf("StartLocalSession failed: %v", err)
 	}
@@ -77,7 +78,7 @@ func TestStartAISessionRunsErunOpenAsPersistentAITab(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	result, err := app.StartAISession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24, false)
+	result, err := app.StartAISession(uimodel.Selection{Tenant: "erun", Environment: "remote"}, 0, 80, 24, false)
 	if err != nil {
 		t.Fatalf("StartAISession failed: %v", err)
 	}
@@ -124,8 +125,8 @@ func TestAISessionRepaintNudgeFiresOnAttachMarker(t *testing.T) {
 
 	managed := &managedTerminal{
 		session:   session,
-		selection: uiSelection{Tenant: "erun", Environment: "remote"},
-		key:       aiSessionKey(uiSelection{Tenant: "erun", Environment: "remote"}, 0),
+		selection: uimodel.Selection{Tenant: "erun", Environment: "remote"},
+		key:       aiSessionKey(uimodel.Selection{Tenant: "erun", Environment: "remote"}, 0),
 		serial:    1,
 		kind:      sessionKindAI,
 		lastCols:  80,
@@ -193,7 +194,7 @@ func TestStartSessionAutoReconnectsOnExit(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	if _, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
+	if _, err := app.StartSession(uimodel.Selection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
 		t.Fatalf("StartSession failed: %v", err)
 	}
 
@@ -260,7 +261,7 @@ func TestStartSessionDoesNotReconnectIntoStoppedCloudContext(t *testing.T) {
 	defer app.shutdown(context.Background())
 	app.setCloudContextStatusInCache("managed-cloud", cloud.CloudContextStatusStopped)
 
-	if _, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
+	if _, err := app.StartSession(uimodel.Selection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
 		t.Fatalf("StartSession failed: %v", err)
 	}
 
@@ -322,7 +323,7 @@ func TestStartAISessionRespawnsAfterStoppedCloudContextDeath(t *testing.T) {
 	defer app.shutdown(context.Background())
 	app.setCloudContextStatusInCache("managed-cloud", cloud.CloudContextStatusStopped)
 
-	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 	first, err := app.StartAISession(selection, 0, 80, 24, false)
 	if err != nil {
 		t.Fatalf("first StartAISession failed: %v", err)
@@ -388,13 +389,13 @@ func TestStartSessionLogsOpenCommandToLocal(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	if _, err := app.StartLocalSession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
+	if _, err := app.StartLocalSession(uimodel.Selection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
 		t.Fatalf("StartLocalSession failed: %v", err)
 	}
-	if _, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
+	if _, err := app.StartSession(uimodel.Selection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
 		t.Fatalf("StartSession failed: %v", err)
 	}
-	if _, err := app.StartAISession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24, false); err != nil {
+	if _, err := app.StartAISession(uimodel.Selection{Tenant: "erun", Environment: "remote"}, 0, 80, 24, false); err != nil {
 		t.Fatalf("StartAISession failed: %v", err)
 	}
 
@@ -439,7 +440,7 @@ func TestStartSessionDoesNotLogWhenLocalAbsent(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	if _, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
+	if _, err := app.StartSession(uimodel.Selection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
 		t.Fatalf("StartSession failed: %v", err)
 	}
 }
@@ -470,7 +471,7 @@ func TestStartLocalSessionDoesNotAutoReconnect(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	if _, err := app.StartLocalSession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
+	if _, err := app.StartLocalSession(uimodel.Selection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
 		t.Fatalf("StartLocalSession failed: %v", err)
 	}
 

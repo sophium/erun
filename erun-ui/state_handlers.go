@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -12,6 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	registrypkg "github.com/sophium/erun/erun-common/infra/registry"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func (a *App) LoadState() (uiState, error) {
@@ -63,10 +63,7 @@ func (a *App) LoadState() (uiState, error) {
 }
 
 func (a *App) resolveRuntimeRegistryVersionsForTenant(namespace, tenant string) (model.RuntimeRegistryVersions, error) {
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	if namespace = strings.TrimSpace(namespace); namespace == "" {
 		namespace = config.DefaultContainerRegistry
 	}
@@ -201,8 +198,8 @@ func (a *App) lookupEnvConfig(tenant, environment string) (config.EnvConfig, boo
 	return config.EnvConfig{}, false
 }
 
-func (a *App) LoadVersionSuggestions(selection uiSelection) (uiVersionSuggestions, error) {
-	selection = normalizeSelection(selection)
+func (a *App) LoadVersionSuggestions(selection uimodel.Selection) (uiVersionSuggestions, error) {
+	selection = uimodel.NormalizeSelection(selection)
 	suggestions, notices := a.runtimeVersionSuggestions(a.deps.resolveBuildInfo(), selection.Tenant, selection.Environment)
 	return uiVersionSuggestions{Suggestions: suggestions, Notices: notices}, nil
 }
@@ -268,7 +265,7 @@ func stateFromListResult(result lifecycle.ListResult, info model.BuildInfo) uiSt
 		state.Tenants = append(state.Tenants, item)
 	}
 	if result.CurrentDirectory.Effective != nil {
-		state.Selected = &uiSelection{
+		state.Selected = &uimodel.Selection{
 			Tenant:      strings.TrimSpace(result.CurrentDirectory.Effective.Tenant),
 			Environment: strings.TrimSpace(result.CurrentDirectory.Effective.Environment),
 		}
@@ -357,40 +354,4 @@ func preferCurrentKubernetesContext(contexts []string, current string) []string 
 		result = append(result, context)
 	}
 	return result
-}
-
-// errMissingTenantOrEnvironment returns nil when both are set, so it can be a caller's whole guard.
-func errMissingTenantOrEnvironment(operation, tenant, environment string) error {
-	var missing []string
-	if strings.TrimSpace(tenant) == "" {
-		missing = append(missing, "tenant")
-	}
-	if strings.TrimSpace(environment) == "" {
-		missing = append(missing, "environment")
-	}
-	if len(missing) == 0 {
-		return nil
-	}
-	return fmt.Errorf(
-		"%s: %s not set -- select an environment in the sidebar before retrying this action",
-		operation, strings.Join(missing, " and "),
-	)
-}
-
-func normalizeSelection(selection uiSelection) uiSelection {
-	return uiSelection{
-		Tenant:            strings.TrimSpace(selection.Tenant),
-		Environment:       strings.TrimSpace(selection.Environment),
-		Version:           strings.TrimSpace(selection.Version),
-		RuntimeImage:      strings.TrimSpace(selection.RuntimeImage),
-		RuntimeCPU:        strings.TrimSpace(selection.RuntimeCPU),
-		RuntimeMemory:     strings.TrimSpace(selection.RuntimeMemory),
-		KubernetesContext: strings.TrimSpace(selection.KubernetesContext),
-		ContainerRegistry: strings.TrimSpace(selection.ContainerRegistry),
-		Type:              strings.TrimSpace(selection.Type),
-		LocalRepoPath:     strings.TrimSpace(selection.LocalRepoPath),
-		NoGit:             selection.NoGit,
-		SetDefaultTenant:  selection.SetDefaultTenant,
-		Components:        trimmedComponentNames(selection.Components),
-	}
 }

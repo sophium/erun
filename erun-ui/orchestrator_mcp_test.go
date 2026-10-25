@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func orchestratorTestPort(tenant, _ string) int {
@@ -249,7 +250,7 @@ func TestSpawnOrchestratorSignalsUnwiredEnvironments(t *testing.T) {
 			if _, err := app.spawnOrchestratorSession(spawn); err != nil {
 				t.Fatalf("spawnOrchestratorSession: %v", err)
 			}
-			assertUnwiredNotice(t, emits.events(appNotificationEvent), testCase.wantNote)
+			assertUnwiredNotice(t, emits.events(uimodel.AppNotificationEvent), testCase.wantNote)
 		})
 	}
 }
@@ -265,7 +266,7 @@ func assertUnwiredNotice(t *testing.T, events []any, wantNote string) {
 	if len(events) != 1 {
 		t.Fatalf("expected one notification, got %+v", events)
 	}
-	payload, ok := events[0].(appNotificationPayload)
+	payload, ok := events[0].(uimodel.AppNotificationPayload)
 	if !ok {
 		t.Fatalf("unexpected payload type: %T", events[0])
 	}

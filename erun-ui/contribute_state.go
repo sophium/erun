@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 const contributeStateFileName = "contribute-state.json"
@@ -73,13 +75,13 @@ func (s *contributeStore) saveToDisk() error {
 	return os.WriteFile(s.path, data, 0o644)
 }
 
-func (s *contributeStore) get(selection uiSelection) bool {
+func (s *contributeStore) get(selection uimodel.Selection) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.data.Flags[contributeFlagKey(selection)]
 }
 
-func (s *contributeStore) set(selection uiSelection, on bool) {
+func (s *contributeStore) set(selection uimodel.Selection, on bool) {
 	key := contributeFlagKey(selection)
 	s.mu.Lock()
 	if s.data.Flags == nil {
@@ -103,7 +105,7 @@ func cloneContributeFlags(in map[string]bool) map[string]bool {
 	return out
 }
 
-func contributeFlagKey(selection uiSelection) string {
-	selection = normalizeSelection(selection)
+func contributeFlagKey(selection uimodel.Selection) string {
+	selection = uimodel.NormalizeSelection(selection)
 	return selection.Tenant + "/" + selection.Environment
 }

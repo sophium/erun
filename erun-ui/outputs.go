@@ -14,6 +14,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/codesign"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -36,9 +37,9 @@ func downloadAgentOutputViaRuntime(result config.OpenResult, params model.Runtim
 }
 
 // ListAgentOutputs lists the files an agent produced in the selected env's runtime pod, newest-first.
-func (a *App) ListAgentOutputs(selection uiSelection) (model.RuntimeOutputsListResult, error) {
-	selection = normalizeSelection(selection)
-	if err := errMissingTenantOrEnvironment("list agent outputs", selection.Tenant, selection.Environment); err != nil {
+func (a *App) ListAgentOutputs(selection uimodel.Selection) (model.RuntimeOutputsListResult, error) {
+	selection = uimodel.NormalizeSelection(selection)
+	if err := uimodel.ErrMissingTenantOrEnvironment("list agent outputs", selection.Tenant, selection.Environment); err != nil {
 		return model.RuntimeOutputsListResult{}, err
 	}
 	result, err := resolve.ResolveOpen(a.deps.store, model.OpenParams{
@@ -52,9 +53,9 @@ func (a *App) ListAgentOutputs(selection uiSelection) (model.RuntimeOutputsListR
 }
 
 // DownloadAgentOutput saves one runtime output via a Save dialog; "" means cancelled.
-func (a *App) DownloadAgentOutput(selection uiSelection, name string) (string, error) {
-	selection = normalizeSelection(selection)
-	if err := errMissingTenantOrEnvironment("download agent output", selection.Tenant, selection.Environment); err != nil {
+func (a *App) DownloadAgentOutput(selection uimodel.Selection, name string) (string, error) {
+	selection = uimodel.NormalizeSelection(selection)
+	if err := uimodel.ErrMissingTenantOrEnvironment("download agent output", selection.Tenant, selection.Environment); err != nil {
 		return "", err
 	}
 	if strings.TrimSpace(name) == "" {

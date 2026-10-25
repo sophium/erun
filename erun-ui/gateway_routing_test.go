@@ -10,6 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // stubGatewayRouting answers the cluster read from a "<tenant>/<env>" table.
@@ -103,11 +104,11 @@ func TestLoadEnvironmentGatewayRouting(t *testing.T) {
 		},
 	}})
 
-	drifted, err := app.LoadEnvironmentGatewayRouting(uiSelection{Tenant: "erun", Environment: "build"})
+	drifted, err := app.LoadEnvironmentGatewayRouting(uimodel.Selection{Tenant: "erun", Environment: "build"})
 	if err != nil || drifted.Environment != "build" || drifted.Deployed != gateway {
 		t.Fatalf("build = %+v err=%v, want its pod reported as still on the gateway", drifted, err)
 	}
-	matching, err := app.LoadEnvironmentGatewayRouting(uiSelection{Tenant: "erun", Environment: "ux"})
+	matching, err := app.LoadEnvironmentGatewayRouting(uimodel.Selection{Tenant: "erun", Environment: "ux"})
 	if err != nil || matching != (uiGatewayRouting{}) {
 		t.Fatalf("ux = %+v err=%v, want the zero value for a pod that matches its config", matching, err)
 	}

@@ -5,6 +5,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestLoadEnvironmentConfigExposesClaudeDefaultsAndOverrides(t *testing.T) {
@@ -30,7 +31,7 @@ func TestLoadEnvironmentConfigExposesClaudeDefaultsAndOverrides(t *testing.T) {
 	}
 	app := NewApp(erunUIDeps{store: store})
 
-	got, err := app.LoadEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "local"})
+	got, err := app.LoadEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "local"})
 	if err != nil {
 		t.Fatalf("LoadEnvironmentConfig failed: %v", err)
 	}
@@ -92,7 +93,7 @@ func TestSaveEnvironmentConfigRoundTripsClaudeOverrides(t *testing.T) {
 
 	useMantle := false
 	maxTokens := 16384
-	saved, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "local"}, uiEnvironmentConfig{
+	saved, err := app.SaveEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "local"}, uiEnvironmentConfig{
 		Name:              "local",
 		RepoPath:          projectRoot,
 		KubernetesContext: "cluster-local",
@@ -149,7 +150,7 @@ func TestSaveEnvironmentConfigRoundTripsClaudeLaunchFlags(t *testing.T) {
 	app := NewApp(erunUIDeps{store: store})
 
 	defaultModel := "fable"
-	saved, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "local"}, uiEnvironmentConfig{
+	saved, err := app.SaveEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "local"}, uiEnvironmentConfig{
 		Name:              "local",
 		RepoPath:          projectRoot,
 		KubernetesContext: "cluster-local",
@@ -216,7 +217,7 @@ func TestSetEnvironmentAutoStartPersistsTriStateValue(t *testing.T) {
 	assertReturnedAutoStart(t, saved.AutoStart, nil, "nil after ask")
 	assertStoredAutoStart(t, store.envs["frs/prod"].AutoStart, nil, "nil after ask")
 
-	if _, err := app.SetEnvironmentAutoStart(uiSelection{Tenant: "frs", Environment: "prod"}, "bogus"); err == nil {
+	if _, err := app.SetEnvironmentAutoStart(uimodel.Selection{Tenant: "frs", Environment: "prod"}, "bogus"); err == nil {
 		t.Fatal("expected unknown auto-start mode to be rejected")
 	}
 }
@@ -224,7 +225,7 @@ func TestSetEnvironmentAutoStartPersistsTriStateValue(t *testing.T) {
 func setAutoStartMode(t *testing.T, app *App, mode string) uiEnvironmentConfig {
 	t.Helper()
 
-	saved, err := app.SetEnvironmentAutoStart(uiSelection{Tenant: "frs", Environment: "prod"}, mode)
+	saved, err := app.SetEnvironmentAutoStart(uimodel.Selection{Tenant: "frs", Environment: "prod"}, mode)
 	if err != nil {
 		t.Fatalf("SetEnvironmentAutoStart(%s) failed: %v", mode, err)
 	}

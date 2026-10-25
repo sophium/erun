@@ -3,11 +3,12 @@ package main
 import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/registry"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 type uiState struct {
 	Tenants                  []uiTenant              `json:"tenants"`
-	Selected                 *uiSelection            `json:"selected,omitempty"`
+	Selected                 *uimodel.Selection      `json:"selected,omitempty"`
 	Message                  string                  `json:"message,omitempty"`
 	Build                    uiBuildDetails          `json:"build"`
 	VersionSuggestions       []uiVersion             `json:"versionSuggestions,omitempty"`
@@ -92,22 +93,7 @@ type uiWorkingIssue struct {
 	Reason      string `json:"reason,omitempty"`
 }
 
-// Env-status values; "" clears. Stopped context and stopped runtime differ in
-// recovery.
-const (
-	envStatusStopped        = "stopped"
-	envStatusRuntimeStopped = "runtime-stopped"
-	envStatusFailed         = "failed"
-)
-
-// envStatusPayload: tab presence alone does not mean running.
-type envStatusPayload struct {
-	Tenant      string `json:"tenant"`
-	Environment string `json:"environment"`
-	Status      string `json:"status"`
-}
-
-// envActivityPayload is replaced every poll, unlike the sticky envStatusPayload.
+// envActivityPayload is replaced every poll, unlike the sticky uimodel.EnvStatusPayload.
 type envActivityPayload struct {
 	Tenant      string `json:"tenant"`
 	Environment string `json:"environment"`
@@ -155,31 +141,6 @@ type uiRuntimeRunState struct {
 	// RemainingComponents names what a stop would leave running.
 	RemainingComponents []string `json:"remainingComponents,omitempty"`
 	Message             string   `json:"message,omitempty"`
-}
-
-type uiSelection struct {
-	Tenant            string `json:"tenant"`
-	Environment       string `json:"environment"`
-	Version           string `json:"version,omitempty"`
-	RuntimeImage      string `json:"runtimeImage,omitempty"`
-	RuntimeCPU        string `json:"runtimeCpu,omitempty"`
-	RuntimeMemory     string `json:"runtimeMemory,omitempty"`
-	KubernetesContext string `json:"kubernetesContext,omitempty"`
-	ContainerRegistry string `json:"containerRegistry,omitempty"`
-	// ClusterRegistry wins over ContainerRegistry when set.
-	ClusterRegistry bool `json:"clusterRegistry,omitempty"`
-	// ErunRegistry excludes ContainerRegistry and ClusterRegistry.
-	ErunRegistry bool `json:"erunRegistry,omitempty"`
-	// RuntimeRegistry and ImagePullSecrets let the env pull a private runtime image.
-	RuntimeRegistry  string   `json:"runtimeRegistry,omitempty"`
-	ImagePullSecrets []string `json:"imagePullSecrets,omitempty"`
-	Type             string   `json:"type,omitempty"`
-	LocalRepoPath    string   `json:"localRepoPath,omitempty"`
-	NoGit            bool     `json:"noGit,omitempty"`
-	SetDefaultTenant bool     `json:"setDefaultTenant,omitempty"`
-	// Components are chart directory names, never erun-* dependency names; empty
-	// uses the env's saved default.
-	Components []string `json:"components,omitempty"`
 }
 
 type uiDiffOptions struct {
@@ -375,26 +336,6 @@ type uiCloudContextInitInput struct {
 	DiskSizeGB         int    `json:"diskSizeGb"`
 }
 
-type startSessionResult struct {
-	SessionID int         `json:"sessionId"`
-	Selection uiSelection `json:"selection"`
-	Slot      int         `json:"slot,omitempty"`
-	Kind      string      `json:"kind,omitempty"`
-	// Orchestrated means a background orchestration ran instead of a PTY session.
-	Orchestrated bool `json:"orchestrated,omitempty"`
-	// Occupancy is set when an unconfirmed AI start found held leases; no session
-	// started.
-	Occupancy []uiEnvironmentLease `json:"occupancy,omitempty"`
-}
-
-// uiEnvironmentLease names a job holding an environment.
-type uiEnvironmentLease struct {
-	Name        string `json:"name"`
-	SecondsHeld int64  `json:"secondsHeld,omitempty"`
-	// JobID is empty for non-job holders, which cannot be cancelled.
-	JobID string `json:"jobId,omitempty"`
-}
-
 type deleteEnvironmentResult struct {
 	Tenant                string `json:"tenant"`
 	Environment           string `json:"environment"`
@@ -435,33 +376,6 @@ type orchestratorShellActivityPayload struct {
 	StartedAtUnix int64  `json:"startedAtUnix,omitempty"`
 }
 
-type appStatusPayload struct {
-	Message string `json:"message"`
-	Busy    bool   `json:"busy"`
-}
-
-// appNotificationPayload: success/info auto-dismiss; warning/error persist.
-// debug is never emitted by this backend.
-type appNotificationPayload struct {
-	Kind    string `json:"kind"`
-	Message string `json:"message"`
-	// Tenant/Environment/Source let a later state change dismiss this notification.
-	Tenant      string `json:"tenant,omitempty"`
-	Environment string `json:"environment,omitempty"`
-	Source      string `json:"source,omitempty"`
-	// OrchestratorID lets the frontend act on that orchestrator.
-	OrchestratorID string `json:"orchestratorId,omitempty"`
-	// Action names a control that performs the remedy; empty means none.
-	Action string `json:"action,omitempty"`
-}
-
-// appNotificationClearPayload clears only an exact source/tenant/environment match.
-type appNotificationClearPayload struct {
-	Tenant      string `json:"tenant"`
-	Environment string `json:"environment"`
-	Source      string `json:"source"`
-}
-
 type pastedFilePayload struct {
 	Data     string `json:"data"`
 	MIMEType string `json:"mimeType,omitempty"`
@@ -487,7 +401,7 @@ type uiIdleStatus struct {
 	CloudContextLabel  string         `json:"cloudContextLabel,omitempty"`
 	Markers            []uiIdleMarker `json:"markers,omitempty"`
 	// Leases are job claims; the desktop's own sessions never take one.
-	Leases []uiEnvironmentLease `json:"leases,omitempty"`
+	Leases []uimodel.EnvironmentLease `json:"leases,omitempty"`
 	// StopPendingSince is when the env became StopEligible; empty when no auto-stop
 	// is pending.
 	StopPendingSince       string `json:"stopPendingSince,omitempty"`

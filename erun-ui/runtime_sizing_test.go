@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestRuntimeSizingFromOutputParsesActions(t *testing.T) {
@@ -20,7 +22,7 @@ func TestRuntimeSizingFromOutputParsesActions(t *testing.T) {
 		"memory: 8916Mi -> 12288Mi\n" +
 		"==> Resized myapp/prod\n"
 
-	got := runtimeSizingFromOutput(uiSelection{Tenant: "myapp", Environment: "prod"}, output)
+	got := runtimeSizingFromOutput(uimodel.Selection{Tenant: "myapp", Environment: "prod"}, output)
 
 	want := uiRuntimeSizingRecommendation{
 		Tenant:      "myapp",
@@ -39,7 +41,7 @@ func TestRuntimeSizingFromOutputParsesActions(t *testing.T) {
 func TestRuntimeSizingFromOutputParsesNoOp(t *testing.T) {
 	output := "resize: myapp/prod is already sized at cpu=4 memory=8916Mi; no change\n"
 
-	got := runtimeSizingFromOutput(uiSelection{Tenant: "myapp", Environment: "prod"}, output)
+	got := runtimeSizingFromOutput(uimodel.Selection{Tenant: "myapp", Environment: "prod"}, output)
 
 	if !got.Available || !got.NoOp || len(got.Actions) != 0 {
 		t.Fatalf("expected an available no-op with no actions, got %+v", got)
@@ -53,7 +55,7 @@ func TestRuntimeSizingFromOutputParsesVerdictsAndEvidenceOnNoOp(t *testing.T) {
 		"resize: myapp/prod sizing-evidence: 1h12m observed, 120 samples, 0 restarts, knob=runtimepod, from cgroup memory.peak, cgroup memory.events oom_kill, cgroup cpu.stat usage_usec/nr_throttled (not loadavg)\n" +
 		"resize: myapp/prod is already sized at cpu=12 memory=23552Mi; no change\n"
 
-	got := runtimeSizingFromOutput(uiSelection{Tenant: "myapp", Environment: "prod"}, output)
+	got := runtimeSizingFromOutput(uimodel.Selection{Tenant: "myapp", Environment: "prod"}, output)
 
 	if !got.Available || !got.NoOp {
 		t.Fatalf("expected an available no-op, got %+v", got)
@@ -72,7 +74,7 @@ func TestRuntimeSizingFromOutputParsesVerdictsAndEvidenceOnNoOp(t *testing.T) {
 }
 
 func TestRuntimeSizingFromOutputHandlesUnrecognisedOutput(t *testing.T) {
-	got := runtimeSizingFromOutput(uiSelection{Tenant: "myapp", Environment: "prod"}, "some unrelated line\n")
+	got := runtimeSizingFromOutput(uimodel.Selection{Tenant: "myapp", Environment: "prod"}, "some unrelated line\n")
 
 	if got.Available {
 		t.Fatalf("expected unavailable when no known line is present, got %+v", got)
@@ -106,7 +108,7 @@ func (e *wrappedError) Error() string { return e.msg }
 
 func TestLoadRuntimeSizingReportsOwnTimeoutNotSignalKilled(t *testing.T) {
 	app := NewApp(erunUIDeps{
-		execRuntimePod: func(context.Context, uiSelection, string) (string, error) {
+		execRuntimePod: func(context.Context, uimodel.Selection, string) (string, error) {
 			return "", errors.New("signal: killed")
 		},
 	})
@@ -114,7 +116,7 @@ func TestLoadRuntimeSizingReportsOwnTimeoutNotSignalKilled(t *testing.T) {
 	defer cancel()
 	app.ctx = ctx
 
-	recommendation, err := app.LoadRuntimeSizing(uiSelection{Tenant: "myapp", Environment: "prod"})
+	recommendation, err := app.LoadRuntimeSizing(uimodel.Selection{Tenant: "myapp", Environment: "prod"})
 	if err != nil {
 		t.Fatalf("LoadRuntimeSizing must not surface a probe failure as an error: %v", err)
 	}
@@ -134,14 +136,14 @@ func TestLoadRuntimeSizingReportsExternalKillDistinctFromTimeout(t *testing.T) {
 		t.Skip("signal-terminated exec is a POSIX concept")
 	}
 	app := NewApp(erunUIDeps{
-		execRuntimePod: func(context.Context, uiSelection, string) (string, error) {
+		execRuntimePod: func(context.Context, uimodel.Selection, string) (string, error) {
 			cmd := exec.Command("/bin/sh", "-c", "kill -9 $$")
 			return "", cmd.Run()
 		},
 	})
 	app.ctx = context.Background()
 
-	recommendation, err := app.LoadRuntimeSizing(uiSelection{Tenant: "myapp", Environment: "prod"})
+	recommendation, err := app.LoadRuntimeSizing(uimodel.Selection{Tenant: "myapp", Environment: "prod"})
 	if err != nil {
 		t.Fatalf("LoadRuntimeSizing must not surface a probe failure as an error: %v", err)
 	}

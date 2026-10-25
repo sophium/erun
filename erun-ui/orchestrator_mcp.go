@@ -12,6 +12,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/command/jobs"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // orchestratorMCPServer runs `erun mcp proxy` over stdio; the proxy mints a bearer
@@ -278,7 +279,7 @@ func (a *App) repairOrchestratorMCPEdges(envs []configpkg.OrchestratorEnvConfig)
 	var wg sync.WaitGroup
 	for _, selection := range dead {
 		wg.Add(1)
-		go func(selection uiSelection) {
+		go func(selection uimodel.Selection) {
 			defer wg.Done()
 			a.ensureEnvRuntimeWithin(selection, envEnsureForBrokenForward, orchestratorEdgeRepairBudget)
 		}(selection)
@@ -288,8 +289,8 @@ func (a *App) repairOrchestratorMCPEdges(envs []configpkg.OrchestratorEnvConfig)
 
 // A missing probe means "cannot tell", never "not answering": do not restart a
 // forward on no evidence.
-func (a *App) orchestratorEdgesNotAnswering(envs []configpkg.OrchestratorEnvConfig) []uiSelection {
-	var dead []uiSelection
+func (a *App) orchestratorEdgesNotAnswering(envs []configpkg.OrchestratorEnvConfig) []uimodel.Selection {
+	var dead []uimodel.Selection
 	for _, ref := range envs {
 		tenant := strings.TrimSpace(ref.Tenant)
 		environment := strings.TrimSpace(ref.Environment)
@@ -300,7 +301,7 @@ func (a *App) orchestratorEdgesNotAnswering(envs []configpkg.OrchestratorEnvConf
 		if port <= 0 || a.mcpEdgeAnswers(port) {
 			continue
 		}
-		dead = append(dead, uiSelection{Tenant: tenant, Environment: environment})
+		dead = append(dead, uimodel.Selection{Tenant: tenant, Environment: environment})
 	}
 	return dead
 }

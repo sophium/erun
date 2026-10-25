@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // registrationWriteAPI serves the Registration tab's write routes, refusing
@@ -74,7 +76,7 @@ func TestRegisterPlatformEnvironmentRequiresATenant(t *testing.T) {
 	_, err := NewApp(erunUIDeps{store: stubUIStore{}}).RegisterPlatformEnvironment(uiRegisterPlatformEnvironmentInput{
 		Name: "prod", Type: "runtime",
 	})
-	if err == nil || !errors.Is(err, ErrTenantNotGiven) {
+	if err == nil || !errors.Is(err, uimodel.ErrTenantNotGiven) {
 		t.Fatalf("expected ErrTenantNotGiven, got %v", err)
 	}
 }

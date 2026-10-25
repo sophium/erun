@@ -16,6 +16,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/sophium/erun/erun-common/primitive/deploy/gateway"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -273,12 +274,12 @@ func withDefaultPodDeps(deps erunUIDeps) erunUIDeps {
 		deps.runPodRaw = runPodRawFromMCP
 	}
 	if deps.execRuntimePod == nil {
-		deps.execRuntimePod = func(ctx context.Context, selection uiSelection, script string) (string, error) {
+		deps.execRuntimePod = func(ctx context.Context, selection uimodel.Selection, script string) (string, error) {
 			return execInRuntimePodViaKubectl(ctx, selection, deps.store, script)
 		}
 	}
 	if deps.loadRuntimeUsage == nil {
-		deps.loadRuntimeUsage = func(ctx context.Context, selection uiSelection) (uiRuntimeUsage, error) {
+		deps.loadRuntimeUsage = func(ctx context.Context, selection uimodel.Selection) (uiRuntimeUsage, error) {
 			return loadRuntimeUsageViaKubectl(ctx, deps.store, selection)
 		}
 	}

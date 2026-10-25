@@ -8,6 +8,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	activitypkg "github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestEnvironmentBusyFromIdleStatus(t *testing.T) {
@@ -89,7 +90,7 @@ func TestEnvironmentBusyFromIdleStatus(t *testing.T) {
 // A frontend reset without a Go restart must keep a busy env's activity.
 func TestSeedEnvironmentActivitySnapshotsCarriesTheLastObservation(t *testing.T) {
 	app := &App{envActivity: map[string]environmentActivityState{
-		selectionKey(uiSelection{Tenant: "acme", Environment: "dev"}): {
+		selectionKey(uimodel.Selection{Tenant: "acme", Environment: "dev"}): {
 			reachable: true,
 			observed:  true,
 			busy:      true,
@@ -121,7 +122,7 @@ func TestSeedEnvironmentActivitySnapshotsLeavesUnobservedEnvsNil(t *testing.T) {
 }
 
 func TestEnvActivitySnapshotCopiesRatherThanAliases(t *testing.T) {
-	key := selectionKey(uiSelection{Tenant: "acme", Environment: "dev"})
+	key := selectionKey(uimodel.Selection{Tenant: "acme", Environment: "dev"})
 	app := &App{envActivity: map[string]environmentActivityState{key: {busy: true, detail: "gradle-build"}}}
 
 	snapshot := app.envActivitySnapshot()
@@ -142,7 +143,7 @@ func TestEnvActivitySnapshotNilWhenEmpty(t *testing.T) {
 }
 
 func TestResetEnvironmentActivityObservationsClearsTheCache(t *testing.T) {
-	key := selectionKey(uiSelection{Tenant: "acme", Environment: "dev"})
+	key := selectionKey(uimodel.Selection{Tenant: "acme", Environment: "dev"})
 	app := &App{envActivity: map[string]environmentActivityState{key: {busy: true, detail: "gradle-build"}}}
 
 	app.ResetEnvironmentActivityObservations()
@@ -179,7 +180,7 @@ func TestLoadStateSeedsEnvironmentActivityFromThePoller(t *testing.T) {
 		},
 	})
 	app.envActivity = map[string]environmentActivityState{
-		selectionKey(uiSelection{Tenant: "acme", Environment: "dev"}): {
+		selectionKey(uimodel.Selection{Tenant: "acme", Environment: "dev"}): {
 			reachable: true,
 			observed:  true,
 			busy:      true,
@@ -212,7 +213,7 @@ func TestTriggerEnvironmentActivitySweepRunsSynchronously(t *testing.T) {
 
 	app.TriggerEnvironmentActivitySweep()
 
-	if len(emits.events(envActivityEvent)) == 0 {
+	if len(emits.events(uimodel.EnvActivityEvent)) == 0 {
 		t.Fatal("triggering a sweep must observe and emit for every configured selection before returning")
 	}
 }

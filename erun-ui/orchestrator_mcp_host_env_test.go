@@ -9,6 +9,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	orchestratorpkg "github.com/sophium/erun/erun-common/command/orchestrator"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // orchestratorTestPortWithHost gives the host fixture a real port, as production
@@ -194,11 +195,11 @@ func TestWireOrchestratorMCPHostEnvGetsAnInfoNoticeNotAWarning(t *testing.T) {
 		t.Fatalf("path = %q, want empty for a host-only orchestrator", path)
 	}
 
-	events := emits.events(appNotificationEvent)
+	events := emits.events(uimodel.AppNotificationEvent)
 	if len(events) != 1 {
 		t.Fatalf("expected exactly one notice for the host env, got %+v", events)
 	}
-	payload, ok := events[0].(appNotificationPayload)
+	payload, ok := events[0].(uimodel.AppNotificationPayload)
 	if !ok {
 		t.Fatalf("unexpected payload type: %T", events[0])
 	}
@@ -236,8 +237,8 @@ func TestWireOrchestratorMCPHostEnvIsNotCountedAsMissing(t *testing.T) {
 		t.Fatalf("a host env must not appear in the written config:\n%s", data)
 	}
 
-	for _, event := range emits.events(appNotificationEvent) {
-		payload, ok := event.(appNotificationPayload)
+	for _, event := range emits.events(uimodel.AppNotificationEvent) {
+		payload, ok := event.(uimodel.AppNotificationPayload)
 		if !ok {
 			t.Fatalf("unexpected payload type: %T", event)
 		}

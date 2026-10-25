@@ -16,11 +16,12 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // runDeployOrchestration composes build/push/deploy primitives (the desktop may not use
 // `build --deploy`, per erun-ui/AGENTS.md), threading the minted version so what deploys is what was built.
-func (a *App) runDeployOrchestration(ctx context.Context, selection uiSelection, result config.OpenResult, force bool) error {
+func (a *App) runDeployOrchestration(ctx context.Context, selection uimodel.Selection, result config.OpenResult, force bool) error {
 	cli := a.deps.resolveCLIPath()
 	dir := resolveTerminalStartDir(result.RepoPath)
 	onLine := newActivityTraceLineHandler(a, selection, sessionKindLocal)
@@ -31,7 +32,7 @@ func (a *App) runDeployOrchestration(ctx context.Context, selection uiSelection,
 	return a.runInstallByReferenceDeploy(ctx, cli, dir, onLine, selection, force)
 }
 
-func (a *App) runBuildPushDeployOrchestration(ctx context.Context, cli, dir string, onLine func(string), selection uiSelection, force bool) error {
+func (a *App) runBuildPushDeployOrchestration(ctx context.Context, cli, dir string, onLine func(string), selection uimodel.Selection, force bool) error {
 	buildArgs := []string{"build", "--output", "json"}
 	if force {
 		buildArgs = append(buildArgs, "--no-incremental")
@@ -57,7 +58,7 @@ func (a *App) runBuildPushDeployOrchestration(ctx context.Context, cli, dir stri
 	return err
 }
 
-func (a *App) runInstallByReferenceDeploy(ctx context.Context, cli, dir string, onLine func(string), selection uiSelection, force bool) error {
+func (a *App) runInstallByReferenceDeploy(ctx context.Context, cli, dir string, onLine func(string), selection uimodel.Selection, force bool) error {
 	args := []string{"deploy", selection.Tenant, selection.Environment}
 	if version := strings.TrimSpace(selection.Version); version != "" {
 		args = append(args, "--version", version)
@@ -104,27 +105,27 @@ func deployNeedsBuildOrchestration(result config.OpenResult, version string, for
 }
 
 // maybeStartDeployOrchestration returns false for envs that use in-shell `erun deploy` instead.
-func (a *App) maybeStartDeployOrchestration(selection uiSelection, force bool) (startSessionResult, bool) {
-	selection = normalizeSelection(selection)
+func (a *App) maybeStartDeployOrchestration(selection uimodel.Selection, force bool) (uimodel.StartSessionResult, bool) {
+	selection = uimodel.NormalizeSelection(selection)
 	// a.ctx is nil in unit tests; never fall back to the real CLI and config there.
 	if a.ctx == nil || selection.Tenant == "" || selection.Environment == "" {
-		return startSessionResult{}, false
+		return uimodel.StartSessionResult{}, false
 	}
 	result, err := resolve.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
 	if err != nil || !deployNeedsBuildOrchestration(result, selection.Version, force) {
-		return startSessionResult{}, false
+		return uimodel.StartSessionResult{}, false
 	}
 	go func() {
-		ctx := a.activityWatcherCtx()
+		ctx := a.context()
 		// Detached from any PTY, so surface failures explicitly unless the app is shutting down.
 		if err := a.runDeployOrchestration(ctx, selection, result, force); err != nil && ctx.Err() == nil {
 			a.surfaceDeployFailure(selection.Tenant, selection.Environment, deployOrchestrationFailureReason(err))
 		}
 	}()
-	return startSessionResult{Selection: selection, Orchestrated: true}, true
+	return uimodel.StartSessionResult{Selection: selection, Orchestrated: true}, true
 }
 
 const deployOrchestrationFailureReasonMaxLen = 300

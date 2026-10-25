@@ -8,6 +8,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestLoadDiffUsesSelectedMCPPort(t *testing.T) {
@@ -50,7 +51,7 @@ func TestLoadDiffUsesSelectedMCPPort(t *testing.T) {
 		},
 	})
 
-	result, err := app.LoadDiff(uiSelection{Tenant: "erun", Environment: "local"}, uiDiffOptions{Scope: " commit ", SelectedCommit: " abc123 "})
+	result, err := app.LoadDiff(uimodel.Selection{Tenant: "erun", Environment: "local"}, uiDiffOptions{Scope: " commit ", SelectedCommit: " abc123 "})
 	if err != nil {
 		t.Fatalf("LoadDiff failed: %v", err)
 	}
@@ -102,7 +103,7 @@ func TestLoadDiffReturnsUnreachableWhenPortClosed(t *testing.T) {
 		},
 	})
 
-	_, err := app.LoadDiff(uiSelection{Tenant: "erun", Environment: "test"}, uiDiffOptions{})
+	_, err := app.LoadDiff(uimodel.Selection{Tenant: "erun", Environment: "test"}, uiDiffOptions{})
 	if err == nil {
 		t.Fatalf("expected unreachable error when port is closed")
 	}
@@ -148,7 +149,7 @@ func TestLoadDiffReturnsStaleForwardKindWhenPortHeldButEdgeDead(t *testing.T) {
 		},
 	})
 
-	_, err := app.LoadDiff(uiSelection{Tenant: "erun", Environment: "test"}, uiDiffOptions{})
+	_, err := app.LoadDiff(uimodel.Selection{Tenant: "erun", Environment: "test"}, uiDiffOptions{})
 	if err == nil {
 		t.Fatalf("expected unreachable error when the edge never answers")
 	}
@@ -195,7 +196,7 @@ func TestLoadDiffWrapsDialFailureAsUnreachable(t *testing.T) {
 		},
 	})
 
-	_, err := app.LoadDiff(uiSelection{Tenant: "erun", Environment: "test"}, uiDiffOptions{})
+	_, err := app.LoadDiff(uimodel.Selection{Tenant: "erun", Environment: "test"}, uiDiffOptions{})
 	if err == nil {
 		t.Fatalf("expected dial failure to surface as unreachable")
 	}
@@ -245,7 +246,7 @@ func TestReconnectMCPRunsOpenAndStreamsLines(t *testing.T) {
 		},
 	})
 
-	if err := app.ReconnectMCP(uiSelection{Tenant: " erun ", Environment: " test "}); err != nil {
+	if err := app.ReconnectMCP(uimodel.Selection{Tenant: " erun ", Environment: " test "}); err != nil {
 		t.Fatalf("ReconnectMCP failed: %v", err)
 	}
 	if calls != 1 {

@@ -7,11 +7,12 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // applyContainerRegistries stores local-agent and host lists in project config
 // and remote/runtime lists on the env config, whose project config is not local.
-func (a *App) applyContainerRegistries(selection uiSelection, updated *configpkg.EnvConfig, registries configpkg.ContainerRegistries) error {
+func (a *App) applyContainerRegistries(selection uimodel.Selection, updated *configpkg.EnvConfig, registries configpkg.ContainerRegistries) error {
 	switch updated.ResolvedType() {
 	case configpkg.EnvironmentTypeLocalAgent, configpkg.EnvironmentTypeHost:
 		updated.ContainerRegistries = nil

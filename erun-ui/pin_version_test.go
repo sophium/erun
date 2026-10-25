@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestPinRepoCheckoutStatusResolvesForALocalWorktree(t *testing.T) {
@@ -16,7 +17,7 @@ func TestPinRepoCheckoutStatusResolvesForALocalWorktree(t *testing.T) {
 			},
 		},
 	}
-	status, err := app.PinRepoCheckoutStatus(uiSelection{Tenant: "team", Environment: "dev"})
+	status, err := app.PinRepoCheckoutStatus(uimodel.Selection{Tenant: "team", Environment: "dev"})
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
@@ -38,7 +39,7 @@ func TestPinRepoCheckoutStatusResolvesFromASiblingsCheckout(t *testing.T) {
 			},
 		},
 	}
-	status, err := app.PinRepoCheckoutStatus(uiSelection{Tenant: "frs", Environment: "prod"})
+	status, err := app.PinRepoCheckoutStatus(uimodel.Selection{Tenant: "frs", Environment: "prod"})
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
@@ -57,7 +58,7 @@ func TestPinRepoCheckoutStatusRefusesASourcelessEnvWithNoTenantCheckout(t *testi
 			},
 		},
 	}
-	status, err := app.PinRepoCheckoutStatus(uiSelection{Tenant: "frs", Environment: "prod"})
+	status, err := app.PinRepoCheckoutStatus(uimodel.Selection{Tenant: "frs", Environment: "prod"})
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}

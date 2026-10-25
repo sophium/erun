@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestRuntimeActivityGroupsResourceHoldingProcesses(t *testing.T) {
@@ -22,7 +24,7 @@ func TestRuntimeActivityGroupsResourceHoldingProcesses(t *testing.T) {
 		"erun-process\tnot-a-number\tjava\tjava",
 	}, "\n")
 
-	activity := runtimeActivityFromProbe(uiSelection{Tenant: "petios", Environment: "local"}, probe)
+	activity := runtimeActivityFromProbe(uimodel.Selection{Tenant: "petios", Environment: "local"}, probe)
 
 	want := []uiRuntimeProcessGroup{
 		{ID: runtimeProcessGroupGradle, Label: "2 Gradle daemons", Count: 2, Memory: "3.0 GiB", MemoryMiB: 3072, Reclaim: runtimeReclaimGradleDaemons, ReclaimLabel: "Stop build daemons"},
@@ -42,7 +44,7 @@ func TestRuntimeActivityGroupsResourceHoldingProcesses(t *testing.T) {
 
 func TestRuntimeActivityGroupsAreReadOnly(t *testing.T) {
 	probe := "erun-process\t1048576\tclaude.exe\tclaude.exe --continue --model opus"
-	activity := runtimeActivityFromProbe(uiSelection{Tenant: "petios", Environment: "local"}, probe)
+	activity := runtimeActivityFromProbe(uimodel.Selection{Tenant: "petios", Environment: "local"}, probe)
 	if len(activity.Processes) != 1 {
 		t.Fatalf("expected the agent process to be shown, got %+v", activity.Processes)
 	}
@@ -53,11 +55,11 @@ func TestRuntimeActivityGroupsAreReadOnly(t *testing.T) {
 
 func TestLoadRuntimeActivityFailsSoft(t *testing.T) {
 	app := NewApp(erunUIDeps{
-		execRuntimePod: func(context.Context, uiSelection, string) (string, error) {
+		execRuntimePod: func(context.Context, uimodel.Selection, string) (string, error) {
 			return "", context.DeadlineExceeded
 		},
 	})
-	activity, err := app.LoadRuntimeActivity(uiSelection{Tenant: "petios", Environment: "local"})
+	activity, err := app.LoadRuntimeActivity(uimodel.Selection{Tenant: "petios", Environment: "local"})
 	if err != nil {
 		t.Fatalf("LoadRuntimeActivity must not surface a pod read failure as an error: %v", err)
 	}
@@ -72,7 +74,7 @@ func TestLoadRuntimeActivityFailsSoft(t *testing.T) {
 // An already-expired parent ctx must be reported as our timeout, not the mocked "signal: killed".
 func TestLoadRuntimeActivityReportsOwnTimeoutNotSignalKilled(t *testing.T) {
 	app := NewApp(erunUIDeps{
-		execRuntimePod: func(context.Context, uiSelection, string) (string, error) {
+		execRuntimePod: func(context.Context, uimodel.Selection, string) (string, error) {
 			return "", errors.New("signal: killed")
 		},
 	})
@@ -80,7 +82,7 @@ func TestLoadRuntimeActivityReportsOwnTimeoutNotSignalKilled(t *testing.T) {
 	defer cancel()
 	app.ctx = ctx
 
-	activity, err := app.LoadRuntimeActivity(uiSelection{Tenant: "petios", Environment: "local"})
+	activity, err := app.LoadRuntimeActivity(uimodel.Selection{Tenant: "petios", Environment: "local"})
 	if err != nil {
 		t.Fatalf("LoadRuntimeActivity must not surface a probe failure as an error: %v", err)
 	}
@@ -100,14 +102,14 @@ func TestLoadRuntimeActivityReportsExternalKillDistinctFromTimeout(t *testing.T)
 		t.Skip("signal-terminated exec is a POSIX concept")
 	}
 	app := NewApp(erunUIDeps{
-		execRuntimePod: func(context.Context, uiSelection, string) (string, error) {
+		execRuntimePod: func(context.Context, uimodel.Selection, string) (string, error) {
 			cmd := exec.Command("/bin/sh", "-c", "kill -9 $$")
 			return "", cmd.Run()
 		},
 	})
 	app.ctx = context.Background()
 
-	activity, err := app.LoadRuntimeActivity(uiSelection{Tenant: "petios", Environment: "local"})
+	activity, err := app.LoadRuntimeActivity(uimodel.Selection{Tenant: "petios", Environment: "local"})
 	if err != nil {
 		t.Fatalf("LoadRuntimeActivity must not surface a probe failure as an error: %v", err)
 	}

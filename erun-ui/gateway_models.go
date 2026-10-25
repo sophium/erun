@@ -56,10 +56,7 @@ func (a *App) LoadGatewayModels(baseURL string) ([]uiGatewayModel, error) {
 }
 
 func (a *App) fetchGatewayModels(endpoint string) ([]byte, error) {
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	ctx, cancel := context.WithTimeout(ctx, gatewayModelListTimeout)
 	defer cancel()
 

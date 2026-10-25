@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestNewFsnotifyConfigWatcherFailsWhenTheRootCannotBeCreated(t *testing.T) {
@@ -31,11 +32,11 @@ func TestStartConfigWatcherSurfacesAStartupFailure(t *testing.T) {
 
 	app.reportConfigWatcherFailure(errors.New("create config directory: mkdir: not a directory"))
 
-	events := emits.events(appNotificationEvent)
+	events := emits.events(uimodel.AppNotificationEvent)
 	if len(events) != 1 {
 		t.Fatalf("want one notification, got %d: %+v", len(events), events)
 	}
-	payload, ok := events[0].(appNotificationPayload)
+	payload, ok := events[0].(uimodel.AppNotificationPayload)
 	if !ok || payload.Kind != "warning" || payload.Message == "" {
 		t.Fatalf("want an actionable warning notification, got %+v", events[0])
 	}
@@ -49,12 +50,12 @@ func TestConfigWatcherSurfacesARuntimeError(t *testing.T) {
 		Errors: make(chan error),
 	}
 
-	notified := make(chan appNotificationPayload, 1)
+	notified := make(chan uimodel.AppNotificationPayload, 1)
 	app := &App{emitFn: func(name string, args ...any) {
-		if name != appNotificationEvent || len(args) == 0 {
+		if name != uimodel.AppNotificationEvent || len(args) == 0 {
 			return
 		}
-		if payload, ok := args[0].(appNotificationPayload); ok {
+		if payload, ok := args[0].(uimodel.AppNotificationPayload); ok {
 			notified <- payload
 		}
 	}}

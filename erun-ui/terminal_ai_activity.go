@@ -7,15 +7,16 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/primitive/open/ailaunch"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // EndAISessions ends the env's AI sessions, desktop and pod side, so the next
 // launch picks up changed Claude flags: `dtach -A` would otherwise reattach to
 // the stale process. Returns false without ending anything when the AI tool
 // launches verbatim, since the managed flags cannot affect it.
-func (a *App) EndAISessions(selection uiSelection) (bool, error) {
-	selection = normalizeSelection(selection)
-	if err := errMissingTenantOrEnvironment("end AI sessions", selection.Tenant, selection.Environment); err != nil {
+func (a *App) EndAISessions(selection uimodel.Selection) (bool, error) {
+	selection = uimodel.NormalizeSelection(selection)
+	if err := uimodel.ErrMissingTenantOrEnvironment("end AI sessions", selection.Tenant, selection.Environment); err != nil {
 		return false, err
 	}
 	if envConfig, _, err := a.deps.store.LoadEnvConfig(selection.Tenant, selection.Environment); err == nil {
@@ -59,7 +60,7 @@ func (a *App) EndAISessions(selection uiSelection) (bool, error) {
 	return true, nil
 }
 
-func managedAITabFor(managed *managedTerminal, selection uiSelection) bool {
+func managedAITabFor(managed *managedTerminal, selection uimodel.Selection) bool {
 	if managed == nil || managed.closed || managed.session == nil {
 		return false
 	}
@@ -227,8 +228,8 @@ func (a *App) finalizeAIActivity(managed *managedTerminal) {
 	a.emitAIActivity(serial, selection, false)
 }
 
-func (a *App) emitAIActivity(sessionID int, selection uiSelection, busy bool) {
-	a.emitEvent(aiActivityEvent, aiActivityPayload{
+func (a *App) emitAIActivity(sessionID int, selection uimodel.Selection, busy bool) {
+	a.emitEvent(uimodel.AIActivityEvent, aiActivityPayload{
 		SessionID:   sessionID,
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,

@@ -11,10 +11,11 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func (a *App) LoadTenantDashboard(input uiTenantDashboardInput) (uiTenantDashboard, error) {
-	tenant, err := requireTenant("loading the tenant dashboard", input.Tenant)
+	tenant, err := uimodel.RequireTenant("loading the tenant dashboard", input.Tenant)
 	if err != nil {
 		return uiTenantDashboard{}, err
 	}
@@ -22,10 +23,7 @@ func (a *App) LoadTenantDashboard(input uiTenantDashboardInput) (uiTenantDashboa
 		Tenant:      tenant,
 		Environment: strings.TrimSpace(input.Environment),
 	}
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	if strings.TrimSpace(input.MCPURL) != "" || strings.TrimSpace(input.KubernetesContext) != "" {
 		input.mcpBearer = a.mcpBearer(tenant, strings.TrimSpace(input.Environment))
 		log, err := a.deps.loadAPILog(ctx, input)

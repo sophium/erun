@@ -9,6 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/deploy/kubecheck"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // envEnsureTTL lets one reconnect cover the burst of spawns an env (re)start produces.
@@ -24,7 +25,7 @@ const (
 )
 
 // ensureEnvRuntimeOnce rebinds MCP/API forwarders at most once per (re)start window. It never deploys.
-func (a *App) ensureEnvRuntimeOnce(selection uiSelection) {
+func (a *App) ensureEnvRuntimeOnce(selection uimodel.Selection) {
 	a.ensureEnvRuntime(selection, envEnsureForTabSpawn)
 }
 
@@ -58,7 +59,7 @@ func (a *App) claimEnvRuntimeEnsure(key string, reason envEnsureReason) (run *en
 
 // ensureEnvRuntime starts a rebind and reports whether this call started it. A failed
 // reconnect is surfaced and does not stamp the success window, so the next open retries.
-func (a *App) ensureEnvRuntime(selection uiSelection, reason envEnsureReason) bool {
+func (a *App) ensureEnvRuntime(selection uimodel.Selection, reason envEnsureReason) bool {
 	selection, run, mine := a.beginEnvRuntimeEnsure(selection, reason)
 	if !mine {
 		return false
@@ -69,7 +70,7 @@ func (a *App) ensureEnvRuntime(selection uiSelection, reason envEnsureReason) bo
 
 // ensureEnvRuntimeWithin waits up to budget for the rebind, for callers that next hand
 // a client this port. Timing out is not a verdict; the rebind keeps running.
-func (a *App) ensureEnvRuntimeWithin(selection uiSelection, reason envEnsureReason, budget time.Duration) bool {
+func (a *App) ensureEnvRuntimeWithin(selection uimodel.Selection, reason envEnsureReason, budget time.Duration) bool {
 	selection, run, mine := a.beginEnvRuntimeEnsure(selection, reason)
 	if run == nil {
 		return false
@@ -89,17 +90,17 @@ func (a *App) ensureEnvRuntimeWithin(selection uiSelection, reason envEnsureReas
 
 // beginEnvRuntimeEnsure returns a nil run when the window already confirmed reach or
 // a.ctx is nil (unit tests), so tests never fall back to the real CLI.
-func (a *App) beginEnvRuntimeEnsure(selection uiSelection, reason envEnsureReason) (uiSelection, *envEnsureRun, bool) {
+func (a *App) beginEnvRuntimeEnsure(selection uimodel.Selection, reason envEnsureReason) (uimodel.Selection, *envEnsureRun, bool) {
 	if a.ctx == nil {
 		return selection, nil, false
 	}
-	selection = normalizeSelection(selection)
+	selection = uimodel.NormalizeSelection(selection)
 	run, mine := a.claimEnvRuntimeEnsure(selectionKey(selection), reason)
 	return selection, run, mine
 }
 
 // runEnvRuntimeEnsure is the run's only writer, so settling needs no extra lock.
-func (a *App) runEnvRuntimeEnsure(selection uiSelection, key string, run *envEnsureRun) {
+func (a *App) runEnvRuntimeEnsure(selection uimodel.Selection, key string, run *envEnsureRun) {
 	var ensureErr error
 	defer func() {
 		a.envEnsureMu.Lock()
@@ -134,8 +135,8 @@ func (a *App) runEnvRuntimeEnsure(selection uiSelection, key string, run *envEns
 
 // surfaceEnvRuntimeEnsureFailure reports a failed reconnect. A failure does not mean
 // the runtime is down; only a confirmed absent deployment offers the deploy action.
-func (a *App) surfaceEnvRuntimeEnsureFailure(selection uiSelection, err error) {
-	selection = normalizeSelection(selection)
+func (a *App) surfaceEnvRuntimeEnsureFailure(selection uimodel.Selection, err error) {
+	selection = uimodel.NormalizeSelection(selection)
 	// An in-flight deploy is already the recovery, and its overlay says so.
 	if a.deployInFlightForEnv(selection) {
 		return
@@ -146,7 +147,7 @@ func (a *App) surfaceEnvRuntimeEnsureFailure(selection uiSelection, err error) {
 		return
 	}
 	// The row status updates every attempt; the notification posts once per failure episode.
-	a.emitEnvStatus(selection, envStatusFailed)
+	a.emitEnvStatus(selection, uimodel.EnvStatusFailed)
 	if a.ensureFailureAlreadyNotified(selection) {
 		return
 	}
@@ -172,8 +173,8 @@ func runtimeCheckFoundDeploymentAbsent(err error) bool {
 }
 
 // surfaceEnvRuntimeStopped shows a stopped env as stopped and names the way back.
-func (a *App) surfaceEnvRuntimeStopped(selection uiSelection) {
-	a.emitEnvStatus(selection, envStatusRuntimeStopped)
+func (a *App) surfaceEnvRuntimeStopped(selection uimodel.Selection) {
+	a.emitEnvStatus(selection, uimodel.EnvStatusRuntimeStopped)
 	if a.ensureFailureAlreadyNotified(selection) {
 		return
 	}
@@ -184,7 +185,7 @@ func (a *App) surfaceEnvRuntimeStopped(selection uiSelection) {
 }
 
 // ensureFailureAlreadyNotified latches one notification per failure episode.
-func (a *App) ensureFailureAlreadyNotified(selection uiSelection) bool {
+func (a *App) ensureFailureAlreadyNotified(selection uimodel.Selection) bool {
 	key := selectionKey(selection)
 	a.envEnsureMu.Lock()
 	defer a.envEnsureMu.Unlock()
@@ -197,8 +198,8 @@ func (a *App) ensureFailureAlreadyNotified(selection uiSelection) bool {
 }
 
 // deployInFlightForEnv: only deploys lock sibling terminals, so a locked session is the signal.
-func (a *App) deployInFlightForEnv(selection uiSelection) bool {
-	selection = normalizeSelection(selection)
+func (a *App) deployInFlightForEnv(selection uimodel.Selection) bool {
+	selection = uimodel.NormalizeSelection(selection)
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	for _, managed := range a.sessions {

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // "No pod to measure" must differ from "measured zero", which reads as healthy.
@@ -12,12 +14,12 @@ import (
 func TestSampleEnvironmentUsageOnceSkipsProbeWhenUnreachable(t *testing.T) {
 	probed := false
 	app := &App{deps: erunUIDeps{
-		loadRuntimeUsage: func(context.Context, uiSelection) (uiRuntimeUsage, error) {
+		loadRuntimeUsage: func(context.Context, uimodel.Selection) (uiRuntimeUsage, error) {
 			probed = true
 			return uiRuntimeUsage{Available: true}, nil
 		},
 	}}
-	selection := uiSelection{Tenant: "acme", Environment: "dev"}
+	selection := uimodel.Selection{Tenant: "acme", Environment: "dev"}
 
 	app.sampleEnvironmentUsageOnce(selection, nil)
 
@@ -39,12 +41,12 @@ func TestSampleEnvironmentUsageOnceSkipsProbeWhenUnreachable(t *testing.T) {
 func TestSampleEnvironmentUsageOnceSkipsProbeWhenNotReachable(t *testing.T) {
 	probed := false
 	app := &App{deps: erunUIDeps{
-		loadRuntimeUsage: func(context.Context, uiSelection) (uiRuntimeUsage, error) {
+		loadRuntimeUsage: func(context.Context, uimodel.Selection) (uiRuntimeUsage, error) {
 			probed = true
 			return uiRuntimeUsage{Available: true}, nil
 		},
 	}}
-	selection := uiSelection{Tenant: "acme", Environment: "dev"}
+	selection := uimodel.Selection{Tenant: "acme", Environment: "dev"}
 	reachability := map[string]environmentActivityState{
 		selectionKey(selection): {reachable: false, observed: false},
 	}
@@ -57,9 +59,9 @@ func TestSampleEnvironmentUsageOnceSkipsProbeWhenNotReachable(t *testing.T) {
 }
 
 func TestSampleEnvironmentUsageOnceProbesWhenReachable(t *testing.T) {
-	var gotSelection uiSelection
+	var gotSelection uimodel.Selection
 	app := &App{deps: erunUIDeps{
-		loadRuntimeUsage: func(_ context.Context, selection uiSelection) (uiRuntimeUsage, error) {
+		loadRuntimeUsage: func(_ context.Context, selection uimodel.Selection) (uiRuntimeUsage, error) {
 			gotSelection = selection
 			return uiRuntimeUsage{
 				Tenant: selection.Tenant, Environment: selection.Environment,
@@ -67,7 +69,7 @@ func TestSampleEnvironmentUsageOnceProbesWhenReachable(t *testing.T) {
 			}, nil
 		},
 	}}
-	selection := uiSelection{Tenant: "acme", Environment: "dev"}
+	selection := uimodel.Selection{Tenant: "acme", Environment: "dev"}
 	reachability := map[string]environmentActivityState{selectionKey(selection): {reachable: true}}
 
 	app.sampleEnvironmentUsageOnce(selection, reachability)
@@ -83,11 +85,11 @@ func TestSampleEnvironmentUsageOnceProbesWhenReachable(t *testing.T) {
 
 func TestSampleEnvironmentUsageOnceReportsProbeFailureNotZero(t *testing.T) {
 	app := &App{deps: erunUIDeps{
-		loadRuntimeUsage: func(context.Context, uiSelection) (uiRuntimeUsage, error) {
+		loadRuntimeUsage: func(context.Context, uimodel.Selection) (uiRuntimeUsage, error) {
 			return uiRuntimeUsage{}, errors.New("kubectl exec failed: pod not found")
 		},
 	}}
-	selection := uiSelection{Tenant: "acme", Environment: "dev"}
+	selection := uimodel.Selection{Tenant: "acme", Environment: "dev"}
 	reachability := map[string]environmentActivityState{selectionKey(selection): {reachable: true}}
 
 	app.sampleEnvironmentUsageOnce(selection, reachability)
@@ -104,7 +106,7 @@ func TestSampleEnvironmentUsageOnceReportsProbeFailureNotZero(t *testing.T) {
 func TestSeedEnvironmentUsageSnapshotsCarriesTheLastReading(t *testing.T) {
 	observedAt := time.Now().Add(-5 * time.Minute)
 	app := &App{envUsage: map[string]environmentUsageReading{
-		selectionKey(uiSelection{Tenant: "acme", Environment: "dev"}): {
+		selectionKey(uimodel.Selection{Tenant: "acme", Environment: "dev"}): {
 			usage:      uiRuntimeUsage{Available: true, CPU: uiRuntimeCPUUsage{Available: true, Utilization: "42.0%"}},
 			observedAt: observedAt,
 		},
@@ -140,7 +142,7 @@ func TestSeedEnvironmentUsageSnapshotsLeavesUnobservedEnvsNil(t *testing.T) {
 }
 
 func TestEnvUsageSnapshotCopiesRatherThanAliases(t *testing.T) {
-	key := selectionKey(uiSelection{Tenant: "acme", Environment: "dev"})
+	key := selectionKey(uimodel.Selection{Tenant: "acme", Environment: "dev"})
 	app := &App{envUsage: map[string]environmentUsageReading{key: {usage: uiRuntimeUsage{Available: true}}}}
 
 	snapshot := app.envUsageSnapshot()
@@ -161,7 +163,7 @@ func TestEnvUsageSnapshotNilWhenEmpty(t *testing.T) {
 }
 
 func TestResetEnvironmentUsageObservationsClearsTheCache(t *testing.T) {
-	key := selectionKey(uiSelection{Tenant: "acme", Environment: "dev"})
+	key := selectionKey(uimodel.Selection{Tenant: "acme", Environment: "dev"})
 	app := &App{envUsage: map[string]environmentUsageReading{key: {usage: uiRuntimeUsage{Available: true}}}}
 
 	app.ResetEnvironmentUsageObservations()

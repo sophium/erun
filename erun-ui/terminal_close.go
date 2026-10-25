@@ -9,11 +9,12 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
-func (a *App) DeleteEnvironment(selection uiSelection, confirmation string) (deleteEnvironmentResult, error) {
-	selection = normalizeSelection(selection)
-	if err := errMissingTenantOrEnvironment("delete environment", selection.Tenant, selection.Environment); err != nil {
+func (a *App) DeleteEnvironment(selection uimodel.Selection, confirmation string) (deleteEnvironmentResult, error) {
+	selection = uimodel.NormalizeSelection(selection)
+	if err := uimodel.ErrMissingTenantOrEnvironment("delete environment", selection.Tenant, selection.Environment); err != nil {
 		return deleteEnvironmentResult{}, err
 	}
 	expected := lifecycle.DeleteEnvironmentConfirmation(selection.Tenant, selection.Environment)
@@ -65,7 +66,7 @@ func (a *App) CloseSession(sessionID int) error {
 	a.mu.Lock()
 	managed := a.sessionBySerialLocked(sessionID)
 	var endRemote bool
-	var endSelection uiSelection
+	var endSelection uimodel.Selection
 	var endID string
 	if managed != nil && managed.kind == sessionKindOpen && managed.slot > 0 && !managed.takenOver {
 		// Closing a custom tab removes it, so end the pod session too or detection
@@ -88,9 +89,9 @@ func (a *App) CloseSession(sessionID int) error {
 
 // CloseEnvironmentSessions closes every PTY of the env and returns their serials.
 // Sessions close after a.mu is released: Close re-acquires it.
-func (a *App) CloseEnvironmentSessions(selection uiSelection) ([]int, error) {
-	selection = normalizeSelection(selection)
-	if err := errMissingTenantOrEnvironment("close environment sessions", selection.Tenant, selection.Environment); err != nil {
+func (a *App) CloseEnvironmentSessions(selection uimodel.Selection) ([]int, error) {
+	selection = uimodel.NormalizeSelection(selection)
+	if err := uimodel.ErrMissingTenantOrEnvironment("close environment sessions", selection.Tenant, selection.Environment); err != nil {
 		return nil, err
 	}
 	targets := a.collectAndMarkClosedForSelection(selection)
@@ -103,7 +104,7 @@ func (a *App) CloseEnvironmentSessions(selection uiSelection) ([]int, error) {
 
 // collectAndMarkClosedForSelection marks sessions closed under a.mu so they
 // finalize instead of reconnecting, which clears the sidebar spinner.
-func (a *App) collectAndMarkClosedForSelection(selection uiSelection) []*managedTerminal {
+func (a *App) collectAndMarkClosedForSelection(selection uimodel.Selection) []*managedTerminal {
 	var targets []*managedTerminal
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -213,8 +214,8 @@ func (a *App) closeAllSessionsLocked() {
 	a.sessions = make(map[string]*managedTerminal)
 }
 
-func (a *App) closeSessionsForSelection(selection uiSelection) {
-	selection = normalizeSelection(selection)
+func (a *App) closeSessionsForSelection(selection uimodel.Selection) {
+	selection = uimodel.NormalizeSelection(selection)
 	prefixes := []string{
 		selectionKey(selection) + "\x00",
 		"init\x00" + selection.Tenant + "\x00" + selection.Environment + "\x00",

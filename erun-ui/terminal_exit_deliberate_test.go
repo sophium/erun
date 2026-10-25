@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // A deliberate close kills PTYs, so their exits must be marked deliberate
@@ -16,9 +18,9 @@ func exitPayloadFor(t *testing.T, app *App, managed *managedTerminal, reason str
 	emits := newCapturedEmits()
 	app.emitFn = emits.fn()
 	app.finalizeSessionExit(managed, reason)
-	events := emits.events(terminalExitEvent)
+	events := emits.events(uimodel.TerminalExitEvent)
 	if len(events) != 1 {
-		t.Fatalf("expected 1 %s event, got %d (%+v)", terminalExitEvent, len(events), events)
+		t.Fatalf("expected 1 %s event, got %d (%+v)", uimodel.TerminalExitEvent, len(events), events)
 	}
 	payload, ok := events[0].(terminalExitPayload)
 	if !ok {
@@ -31,7 +33,7 @@ func exitPayloadFor(t *testing.T, app *App, managed *managedTerminal, reason str
 // it reached.
 func TestACloseReportsTheExitsItKilledAsItsOwn(t *testing.T) {
 	app := &App{sessions: make(map[string]*managedTerminal)}
-	target := uiSelection{Tenant: "erun", Environment: "local"}
+	target := uimodel.Selection{Tenant: "erun", Environment: "local"}
 	managed := &managedTerminal{
 		selection: target,
 		session:   newStubTerminalSession(),
@@ -56,7 +58,7 @@ func TestACloseReportsTheExitsItKilledAsItsOwn(t *testing.T) {
 func TestASessionThatDiesOnItsOwnIsNotMarkedDeliberate(t *testing.T) {
 	app := &App{sessions: make(map[string]*managedTerminal)}
 	managed := &managedTerminal{
-		selection: uiSelection{Tenant: "erun", Environment: "local"},
+		selection: uimodel.Selection{Tenant: "erun", Environment: "local"},
 		session:   newStubTerminalSession(),
 		serial:    42,
 		key:       "erun-local-42",
@@ -86,7 +88,7 @@ func (s *survivingTerminalSession) Close() error {
 // managedWithSession seeds one managed session on an app that owns it.
 func managedWithSession(app *App, session terminalSession, serial int) *managedTerminal {
 	managed := &managedTerminal{
-		selection: uiSelection{Tenant: "erun", Environment: "local"},
+		selection: uimodel.Selection{Tenant: "erun", Environment: "local"},
 		session:   session,
 		serial:    serial,
 		key:       fmt.Sprintf("erun-local-%d", serial),
@@ -97,7 +99,7 @@ func managedWithSession(app *App, session terminalSession, serial int) *managedT
 
 func TestACloseThatCouldNotKillDoesNotOwnTheSurvivorsExit(t *testing.T) {
 	app := &App{sessions: make(map[string]*managedTerminal)}
-	selection := uiSelection{Tenant: "erun", Environment: "local"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "local"}
 	managed := managedWithSession(app, newSurvivingTerminalSession(), 43)
 
 	if _, err := app.CloseEnvironmentSessions(selection); !errors.Is(err, errKillDidNotLand) {
@@ -146,7 +148,7 @@ func TestACloseThatCouldNotKillDoesNotOwnTheSurvivorsExitOnEveryTeardownPath(t *
 // A Close that killed the process but failed to release the pty keeps the claim.
 func TestACloseThatCouldNotReleaseItsPtyStillOwnsItsExit(t *testing.T) {
 	app := &App{sessions: make(map[string]*managedTerminal)}
-	selection := uiSelection{Tenant: "erun", Environment: "local"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "local"}
 	session := &ptyReleaseFailureSession{stubTerminalSession: newStubTerminalSession()}
 	managed := managedWithSession(app, session, 45)
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // Tenant creation and user enrollment are deliberately absent: an issuer
@@ -161,7 +162,7 @@ func platformActionMessage(err error) string {
 // CreatePlatformContext registers a cloud context, or with Preview only
 // returns its plan.
 func (a *App) CreatePlatformContext(input uiCreatePlatformContextInput) (uiPlatformContextOutcome, error) {
-	tenant, err := requireTenant("creating a cloud context", input.Tenant)
+	tenant, err := uimodel.RequireTenant("creating a cloud context", input.Tenant)
 	if err != nil {
 		return uiPlatformContextOutcome{}, err
 	}
@@ -172,10 +173,7 @@ func (a *App) CreatePlatformContext(input uiCreatePlatformContextInput) (uiPlatf
 		return uiPlatformContextOutcome{}, fmt.Errorf("context name, cloud provider alias, and region are required")
 	}
 
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	client, requestCtx, cancel, err := a.tenantPlatformClient(ctx, tenant)
 	if err != nil {
 		return uiPlatformContextOutcome{}, err
@@ -226,7 +224,7 @@ func createEnvironmentParams(input uiRegisterPlatformEnvironmentInput) (model.Pl
 // PreviewPlatformEnvironment returns the plan without creating anything;
 // QuotaOk reports whether register would succeed.
 func (a *App) PreviewPlatformEnvironment(input uiRegisterPlatformEnvironmentInput) (uiPlatformProvisionResult, error) {
-	tenant, err := requireTenant("previewing a hosted environment", input.Tenant)
+	tenant, err := uimodel.RequireTenant("previewing a hosted environment", input.Tenant)
 	if err != nil {
 		return uiPlatformProvisionResult{}, err
 	}
@@ -235,10 +233,7 @@ func (a *App) PreviewPlatformEnvironment(input uiRegisterPlatformEnvironmentInpu
 		return uiPlatformProvisionResult{}, err
 	}
 
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	client, requestCtx, cancel, err := a.tenantPlatformClient(ctx, tenant)
 	if err != nil {
 		return uiPlatformProvisionResult{}, err
@@ -255,7 +250,7 @@ func (a *App) PreviewPlatformEnvironment(input uiRegisterPlatformEnvironmentInpu
 // RegisterPlatformEnvironment registers, or with Adopt records, a hosted
 // environment; a quota cap is a "conflict" outcome, not an error.
 func (a *App) RegisterPlatformEnvironment(input uiRegisterPlatformEnvironmentInput) (uiPlatformEnvironmentOutcome, error) {
-	tenant, err := requireTenant("registering a hosted environment", input.Tenant)
+	tenant, err := uimodel.RequireTenant("registering a hosted environment", input.Tenant)
 	if err != nil {
 		return uiPlatformEnvironmentOutcome{}, err
 	}
@@ -264,10 +259,7 @@ func (a *App) RegisterPlatformEnvironment(input uiRegisterPlatformEnvironmentInp
 		return uiPlatformEnvironmentOutcome{}, err
 	}
 
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	client, requestCtx, cancel, err := a.tenantPlatformClient(ctx, tenant)
 	if err != nil {
 		return uiPlatformEnvironmentOutcome{}, err
@@ -307,7 +299,7 @@ func (a *App) DeletePlatformEnvironment(input uiPlatformEnvironmentActionInput) 
 }
 
 func (a *App) platformEnvironmentAction(input uiPlatformEnvironmentActionInput, action platformAction, call func(client *platformclient.PlatformClient, requestCtx context.Context, environmentID string) (model.PlatformEnvironment, error)) (uiPlatformEnvironmentOutcome, error) {
-	tenant, err := requireTenant(string(action), input.Tenant)
+	tenant, err := uimodel.RequireTenant(string(action), input.Tenant)
 	if err != nil {
 		return uiPlatformEnvironmentOutcome{}, err
 	}
@@ -316,10 +308,7 @@ func (a *App) platformEnvironmentAction(input uiPlatformEnvironmentActionInput, 
 		return uiPlatformEnvironmentOutcome{}, fmt.Errorf("environment id is required")
 	}
 
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	client, requestCtx, cancel, err := a.tenantPlatformClient(ctx, tenant)
 	if err != nil {
 		return uiPlatformEnvironmentOutcome{}, err

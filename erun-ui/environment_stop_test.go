@@ -12,6 +12,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // Scaled-to-zero is stopped, never a failure; pods wanted but not ready stay unhealthy.
@@ -36,7 +37,7 @@ func stopTestApp(t *testing.T, emits *capturedEmits, deps erunUIDeps) *App {
 }
 
 func TestRuntimeStoppedForSelectionMapsClusterStateToTheIndicator(t *testing.T) {
-	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 	cases := []struct {
 		name  string
 		state lifecycle.RuntimeRunState
@@ -99,7 +100,7 @@ func TestRuntimeStoppedForSelectionHonoursTheLatchBeforeTheClusterCatchesUp(t *t
 		},
 	})
 
-	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 	if app.runtimeStoppedForSelection(selection) {
 		t.Fatal("a running env must not read as stopped before anything stopped it")
 	}
@@ -129,7 +130,7 @@ func TestStopEnvironmentFlagsTheRowStoppedAndTargetsTheRuntimeDeployment(t *test
 		},
 	})
 
-	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 	result, err := app.StopEnvironment(selection)
 	if err != nil {
 		t.Fatalf("StopEnvironment failed: %v", err)
@@ -140,7 +141,7 @@ func TestStopEnvironmentFlagsTheRowStoppedAndTargetsTheRuntimeDeployment(t *test
 	if captured.Result.Environment != "remote" {
 		t.Fatalf("stop resolved the wrong environment: %+v", captured.Result)
 	}
-	waitForEnvStatus(t, emits, envStatusRuntimeStopped)
+	waitForEnvStatus(t, emits, uimodel.EnvStatusRuntimeStopped)
 	if !app.isRuntimeStopped(selection) {
 		t.Fatal("stop did not latch the intent, so an open tab's reconnect would wake the env straight back up")
 	}
@@ -195,7 +196,7 @@ func loadRunStateReading(t *testing.T, state lifecycle.RuntimeRunState, readErr 
 			return state, readErr
 		},
 	})
-	got, err := app.LoadRuntimeRunState(uiSelection{Tenant: "erun", Environment: "remote"})
+	got, err := app.LoadRuntimeRunState(uimodel.Selection{Tenant: "erun", Environment: "remote"})
 	if err != nil {
 		t.Fatalf("LoadRuntimeRunState must fail soft, got error %v", err)
 	}
@@ -218,7 +219,7 @@ func TestLoadRuntimeRunStateAnswersFromTheStopLatchBeforeTheClusterCatchesUp(t *
 			return lifecycle.RuntimeRunState{Present: true, DesiredReplicas: 1, ReadyReplicas: 1}, nil
 		},
 	})
-	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 	app.markRuntimeStopped(selection)
 	got, err := app.LoadRuntimeRunState(selection)
 	if err != nil {
@@ -288,7 +289,7 @@ func TestStopEnvironmentClearsTheLatchWhenTheStopFails(t *testing.T) {
 		},
 	})
 
-	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 	if _, err := app.StopEnvironment(selection); err == nil {
 		t.Fatal("expected StopEnvironment to surface the failure")
 	}
@@ -318,7 +319,7 @@ func TestReconnectRefusedFlagsStoppedRuntimeInsteadOfFailed(t *testing.T) {
 		},
 	})
 
-	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 	if _, err := app.StartSession(selection, 0, 80, 24); err != nil {
 		t.Fatalf("StartSession failed: %v", err)
 	}
@@ -329,9 +330,9 @@ func TestReconnectRefusedFlagsStoppedRuntimeInsteadOfFailed(t *testing.T) {
 	sessionsMu.Unlock()
 	_ = current.Close()
 
-	waitForEnvStatus(t, emits, envStatusRuntimeStopped)
+	waitForEnvStatus(t, emits, uimodel.EnvStatusRuntimeStopped)
 	for _, payload := range envStatuses(emits) {
-		if payload.Status == envStatusFailed {
+		if payload.Status == uimodel.EnvStatusFailed {
 			t.Fatalf("a stopped runtime must not read as a failure: %+v", envStatuses(emits))
 		}
 	}

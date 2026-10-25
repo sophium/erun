@@ -4,6 +4,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // staleShellDebounce skips fresh sessions, since some shells fork children before the parent exits.
@@ -42,7 +44,7 @@ func (a *App) reconcileStaleShellsOnce() {
 type staleSessionSnapshot struct {
 	serial    int
 	kind      sessionKind
-	selection uiSelection
+	selection uimodel.Selection
 	startedAt time.Time
 	pid       int
 }

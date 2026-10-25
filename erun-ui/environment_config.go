@@ -12,12 +12,13 @@ import (
 	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/workspace"
 	"github.com/sophium/erun/erun-common/primitive/open/ailaunch"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-func (a *App) LoadEnvironmentConfig(selection uiSelection) (uiEnvironmentConfig, error) {
-	selection = normalizeSelection(selection)
-	if err := errMissingTenantOrEnvironment("load environment config", selection.Tenant, selection.Environment); err != nil {
+func (a *App) LoadEnvironmentConfig(selection uimodel.Selection) (uiEnvironmentConfig, error) {
+	selection = uimodel.NormalizeSelection(selection)
+	if err := uimodel.ErrMissingTenantOrEnvironment("load environment config", selection.Tenant, selection.Environment); err != nil {
 		return uiEnvironmentConfig{}, err
 	}
 
@@ -32,9 +33,9 @@ func (a *App) LoadEnvironmentConfig(selection uiSelection) (uiEnvironmentConfig,
 	return a.environmentConfigToUI(selection.Tenant, config, selection.Environment, ports)
 }
 
-func (a *App) SaveEnvironmentConfig(selection uiSelection, config uiEnvironmentConfig) (uiEnvironmentConfig, error) {
-	selection = normalizeSelection(selection)
-	if err := errMissingTenantOrEnvironment("save environment config", selection.Tenant, selection.Environment); err != nil {
+func (a *App) SaveEnvironmentConfig(selection uimodel.Selection, config uiEnvironmentConfig) (uiEnvironmentConfig, error) {
+	selection = uimodel.NormalizeSelection(selection)
+	if err := uimodel.ErrMissingTenantOrEnvironment("save environment config", selection.Tenant, selection.Environment); err != nil {
 		return uiEnvironmentConfig{}, err
 	}
 
@@ -53,7 +54,7 @@ func (a *App) SaveEnvironmentConfig(selection uiSelection, config uiEnvironmentC
 	return a.environmentConfigToUI(selection.Tenant, updated, selection.Environment, ports)
 }
 
-func (a *App) persistEnvironmentConfig(selection uiSelection, config uiEnvironmentConfig, existing configpkg.EnvConfig) (configpkg.EnvConfig, error) {
+func (a *App) persistEnvironmentConfig(selection uimodel.Selection, config uiEnvironmentConfig, existing configpkg.EnvConfig) (configpkg.EnvConfig, error) {
 	updated, err := a.updatedEnvironmentConfig(config, existing)
 	if err != nil {
 		return configpkg.EnvConfig{}, err
@@ -77,9 +78,9 @@ func (a *App) persistEnvironmentConfig(selection uiSelection, config uiEnvironme
 }
 
 // SetEnvironmentAutoStart persists the desktop-only auto-start preference.
-func (a *App) SetEnvironmentAutoStart(selection uiSelection, mode string) (uiEnvironmentConfig, error) {
-	selection = normalizeSelection(selection)
-	if err := errMissingTenantOrEnvironment("set environment auto-start", selection.Tenant, selection.Environment); err != nil {
+func (a *App) SetEnvironmentAutoStart(selection uimodel.Selection, mode string) (uiEnvironmentConfig, error) {
+	selection = uimodel.NormalizeSelection(selection)
+	if err := uimodel.ErrMissingTenantOrEnvironment("set environment auto-start", selection.Tenant, selection.Environment); err != nil {
 		return uiEnvironmentConfig{}, err
 	}
 	value, err := parseAutoStartMode(mode)
@@ -118,9 +119,9 @@ func parseAutoStartMode(mode string) (*bool, error) {
 	return value, nil
 }
 
-func (a *App) ChooseWorkspaceSyncLocalFolder(selection uiSelection, current string) (string, error) {
-	selection = normalizeSelection(selection)
-	if err := errMissingTenantOrEnvironment("choose workspace-sync local folder", selection.Tenant, selection.Environment); err != nil {
+func (a *App) ChooseWorkspaceSyncLocalFolder(selection uimodel.Selection, current string) (string, error) {
+	selection = uimodel.NormalizeSelection(selection)
+	if err := uimodel.ErrMissingTenantOrEnvironment("choose workspace-sync local folder", selection.Tenant, selection.Environment); err != nil {
 		return "", err
 	}
 	if a.ctx == nil {
@@ -216,7 +217,7 @@ func (a *App) environmentConfigToUI(tenant string, config configpkg.EnvConfig, f
 	if name == "" {
 		name = strings.TrimSpace(fallbackName)
 	}
-	syncStatus := a.workspaceSyncStatus(uiSelection{Tenant: tenant, Environment: name})
+	syncStatus := a.workspaceSyncStatus(uimodel.Selection{Tenant: tenant, Environment: name})
 	effectiveRegistries, registriesInherited := a.effectiveEnvironmentContainerRegistries(tenant, fallbackName, config)
 	registries := containerRegistriesToUI(effectiveRegistries)
 	ports = configpkg.LocalPortsForResult(configpkg.OpenResult{
@@ -241,7 +242,7 @@ func (a *App) environmentConfigToUI(tenant string, config configpkg.EnvConfig, f
 		RuntimeVersion:               strings.TrimSpace(config.RuntimeVersion),
 		RuntimeChart:                 strings.TrimSpace(config.RuntimeChart),
 		RuntimeRegistry:              strings.TrimSpace(config.RuntimeRegistry),
-		ImagePullSecrets:             trimmedNonEmpty(config.ImagePullSecrets),
+		ImagePullSecrets:             uimodel.TrimmedNonEmpty(config.ImagePullSecrets),
 		RuntimePod:                   runtimePodConfigToUI(config.RuntimePod),
 		SSHD: uiSSHDConfig{
 			Enabled:                    config.SSHD.Enabled,
@@ -346,7 +347,7 @@ func environmentConfigFromUI(config uiEnvironmentConfig, existing configpkg.EnvC
 	existing.RuntimeChart = strings.TrimSpace(config.RuntimeChart)
 	// An empty list clears the pull secrets rather than keeping a stale one.
 	existing.RuntimeRegistry = strings.TrimSpace(config.RuntimeRegistry)
-	existing.ImagePullSecrets = trimmedNonEmpty(config.ImagePullSecrets)
+	existing.ImagePullSecrets = uimodel.TrimmedNonEmpty(config.ImagePullSecrets)
 	existing.PlatformAccount = config.PlatformAccount
 	existing.MountSource = config.MountSource
 	existing.RepoURL = strings.TrimSpace(config.RepoURL)
@@ -359,20 +360,7 @@ func environmentConfigFromUI(config uiEnvironmentConfig, existing configpkg.EnvC
 }
 
 func trimmedComponentNames(names []string) []string {
-	return trimmedNonEmpty(names)
-}
-
-func trimmedNonEmpty(values []string) []string {
-	out := make([]string, 0, len(values))
-	for _, raw := range values {
-		if value := strings.TrimSpace(raw); value != "" {
-			out = append(out, value)
-		}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
+	return uimodel.TrimmedNonEmpty(names)
 }
 
 func copyBoolPtr(value *bool) *bool {

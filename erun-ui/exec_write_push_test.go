@@ -8,6 +8,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func execWritePushTestStore(t *testing.T) erunUIStore {
@@ -39,7 +40,7 @@ func TestExecCommitCallsMCPWithTheClaimedBranchAndMessage(t *testing.T) {
 		},
 	})
 
-	result, err := app.ExecCommit(uiSelection{Tenant: "erun", Environment: "local"}, uiExecCommitInput{
+	result, err := app.ExecCommit(uimodel.Selection{Tenant: "erun", Environment: "local"}, uiExecCommitInput{
 		Branch: " feature/1348-x ", Message: " open the review ",
 	})
 	if err != nil {
@@ -67,7 +68,7 @@ func TestExecCommitRequiresAMessage(t *testing.T) {
 		},
 	})
 
-	_, err := app.ExecCommit(uiSelection{Tenant: "erun", Environment: "local"}, uiExecCommitInput{Branch: "feature/1348-x", Message: "   "})
+	_, err := app.ExecCommit(uimodel.Selection{Tenant: "erun", Environment: "local"}, uiExecCommitInput{Branch: "feature/1348-x", Message: "   "})
 	if err == nil || !strings.Contains(err.Error(), "commit message is required") {
 		t.Fatalf("expected a message-required error, got %v", err)
 	}
@@ -85,7 +86,7 @@ func TestExecCommitReturnsUnreachableWhenPortClosed(t *testing.T) {
 		},
 	})
 
-	_, err := app.ExecCommit(uiSelection{Tenant: "erun", Environment: "local"}, uiExecCommitInput{Branch: "feature/1348-x", Message: "open the review"})
+	_, err := app.ExecCommit(uimodel.Selection{Tenant: "erun", Environment: "local"}, uiExecCommitInput{Branch: "feature/1348-x", Message: "open the review"})
 	if err == nil || !errors.Is(err, errMCPUnreachable) {
 		t.Fatalf("expected errMCPUnreachable, got %v", err)
 	}
@@ -106,7 +107,7 @@ func TestExecPushCallsMCPWithTheClaimedBranch(t *testing.T) {
 		},
 	})
 
-	result, err := app.ExecPush(uiSelection{Tenant: "erun", Environment: "local"}, uiExecPushInput{Branch: " feature/1348-x "})
+	result, err := app.ExecPush(uimodel.Selection{Tenant: "erun", Environment: "local"}, uiExecPushInput{Branch: " feature/1348-x "})
 	if err != nil {
 		t.Fatalf("ExecPush failed: %v", err)
 	}
@@ -121,7 +122,7 @@ func TestExecPushCallsMCPWithTheClaimedBranch(t *testing.T) {
 func TestExecPushRequiresABranch(t *testing.T) {
 	app := NewApp(erunUIDeps{store: execWritePushTestStore(t)})
 
-	_, err := app.ExecPush(uiSelection{Tenant: "erun", Environment: "local"}, uiExecPushInput{Branch: "  "})
+	_, err := app.ExecPush(uimodel.Selection{Tenant: "erun", Environment: "local"}, uiExecPushInput{Branch: "  "})
 	if err == nil || !strings.Contains(err.Error(), "branch is required") {
 		t.Fatalf("expected a branch-required error, got %v", err)
 	}

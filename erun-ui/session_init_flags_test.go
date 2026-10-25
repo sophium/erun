@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func flagValue(args []string, flag string) []string {
@@ -25,7 +27,7 @@ func hasFlag(args []string, flag string) bool {
 }
 
 func TestInitFlagsCarryPullSecretsAndRuntimeRegistry(t *testing.T) {
-	args := appendInitOptionalFlags(nil, uiSelection{
+	args := appendInitOptionalFlags(nil, uimodel.Selection{
 		RuntimeImage:     "registry.example.com/acme/devops",
 		RuntimeRegistry:  "ghcr.io/sophium",
 		ImagePullSecrets: []string{"ecr-pull", " ", "ghcr-pull"},
@@ -41,7 +43,7 @@ func TestInitFlagsCarryPullSecretsAndRuntimeRegistry(t *testing.T) {
 }
 
 func TestInitFlagsKeepTheThreeRegistryChoicesExclusive(t *testing.T) {
-	hosted := appendInitOptionalFlags(nil, uiSelection{ErunRegistry: true, ContainerRegistry: "ignored.example.com"})
+	hosted := appendInitOptionalFlags(nil, uimodel.Selection{ErunRegistry: true, ContainerRegistry: "ignored.example.com"})
 	if !hasFlag(hosted, "--erun-registry") {
 		t.Fatal("hosted registry selection must emit --erun-registry")
 	}
@@ -52,19 +54,19 @@ func TestInitFlagsKeepTheThreeRegistryChoicesExclusive(t *testing.T) {
 		t.Fatalf("hosted must not also select the cluster registry: %s", strings.Join(hosted, " "))
 	}
 
-	cluster := appendInitOptionalFlags(nil, uiSelection{ClusterRegistry: true, ContainerRegistry: "ignored.example.com"})
+	cluster := appendInitOptionalFlags(nil, uimodel.Selection{ClusterRegistry: true, ContainerRegistry: "ignored.example.com"})
 	if !hasFlag(cluster, "--cluster-registry") || hasFlag(cluster, "--container-registry") || hasFlag(cluster, "--erun-registry") {
 		t.Fatalf("cluster selection is exclusive too: %s", strings.Join(cluster, " "))
 	}
 
-	static := appendInitOptionalFlags(nil, uiSelection{ContainerRegistry: "registry.example.com"})
+	static := appendInitOptionalFlags(nil, uimodel.Selection{ContainerRegistry: "registry.example.com"})
 	if got := flagValue(static, "--container-registry"); len(got) != 1 || got[0] != "registry.example.com" {
 		t.Fatalf("a plain registry string still passes through: %v", got)
 	}
 }
 
 func TestRuntimeRegistrySurvivesAnExclusiveRegistryChoice(t *testing.T) {
-	for _, selection := range []uiSelection{
+	for _, selection := range []uimodel.Selection{
 		{ErunRegistry: true, RuntimeRegistry: "ghcr.io/sophium"},
 		{ClusterRegistry: true, RuntimeRegistry: "ghcr.io/sophium"},
 	} {

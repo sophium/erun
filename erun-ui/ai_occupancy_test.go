@@ -10,6 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // newAIOccupancyTestApp returns the app and a counter of launched AI PTYs.
@@ -58,7 +59,7 @@ func takeTestLease(t *testing.T, name string) {
 func TestStartAISessionReportsOccupancyInsteadOfStartingASecondAgent(t *testing.T) {
 	app, started := newAIOccupancyTestApp(t)
 	takeTestLease(t, "job-fix-1201")
-	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 
 	result, err := app.StartAISession(selection, 0, 80, 24, false)
 	if err != nil {
@@ -73,7 +74,7 @@ func TestStartAISessionReportsOccupancyInsteadOfStartingASecondAgent(t *testing.
 	assertConfirmedStartResult(t, confirmed, *started)
 }
 
-func assertOccupiedUnconfirmedResult(t *testing.T, result startSessionResult, started int) {
+func assertOccupiedUnconfirmedResult(t *testing.T, result uimodel.StartSessionResult, started int) {
 	t.Helper()
 	if started != 0 {
 		t.Fatalf("expected no PTY to be started while occupied and unconfirmed, got %d", started)
@@ -86,7 +87,7 @@ func assertOccupiedUnconfirmedResult(t *testing.T, result startSessionResult, st
 	}
 }
 
-func assertConfirmedStartResult(t *testing.T, result startSessionResult, started int) {
+func assertConfirmedStartResult(t *testing.T, result uimodel.StartSessionResult, started int) {
 	t.Helper()
 	if started != 1 {
 		t.Fatalf("expected the confirmed retry to start exactly one PTY, got %d", started)
@@ -102,7 +103,7 @@ func assertConfirmedStartResult(t *testing.T, result startSessionResult, started
 func TestStartAISessionStartsNormallyWithNoHeldLease(t *testing.T) {
 	app, started := newAIOccupancyTestApp(t)
 
-	result, err := app.StartAISession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24, false)
+	result, err := app.StartAISession(uimodel.Selection{Tenant: "erun", Environment: "remote"}, 0, 80, 24, false)
 	if err != nil {
 		t.Fatalf("StartAISession failed: %v", err)
 	}
@@ -117,7 +118,7 @@ func TestStartAISessionStartsNormallyWithNoHeldLease(t *testing.T) {
 // Reattaching to this desktop's own session is not a second agent.
 func TestStartAISessionReuseSkipsOccupancyCheck(t *testing.T) {
 	app, started := newAIOccupancyTestApp(t)
-	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 
 	first, err := app.StartAISession(selection, 0, 80, 24, false)
 	if err != nil {
@@ -153,11 +154,11 @@ func TestStartAISessionReportsAHeldLeaseWhenAnActivitySnapshotIsUnreadable(t *te
 	if err := os.WriteFile(filepath.Join(dir, config.ActivityKindCLI+".json"), nil, 0o644); err != nil {
 		t.Fatalf("stage a truncated snapshot: %v", err)
 	}
-	if _, err := app.LoadIdleStatus(uiSelection{Tenant: "erun", Environment: "remote"}); err == nil {
+	if _, err := app.LoadIdleStatus(uimodel.Selection{Tenant: "erun", Environment: "remote"}); err == nil {
 		t.Fatal("precondition: an empty snapshot must fail the idle-status read")
 	}
 
-	result, err := app.StartAISession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24, false)
+	result, err := app.StartAISession(uimodel.Selection{Tenant: "erun", Environment: "remote"}, 0, 80, 24, false)
 	if err != nil {
 		t.Fatalf("StartAISession failed: %v", err)
 	}

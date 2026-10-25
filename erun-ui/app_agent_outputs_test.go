@@ -6,6 +6,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestListAgentOutputsResolvesEnvAndLists(t *testing.T) {
@@ -31,7 +32,7 @@ func TestListAgentOutputsResolvesEnvAndLists(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	got, err := app.ListAgentOutputs(uiSelection{Tenant: "erun", Environment: "local"})
+	got, err := app.ListAgentOutputs(uimodel.Selection{Tenant: "erun", Environment: "local"})
 	if err != nil {
 		t.Fatalf("ListAgentOutputs failed: %v", err)
 	}
@@ -46,7 +47,7 @@ func TestListAgentOutputsResolvesEnvAndLists(t *testing.T) {
 func TestListAgentOutputsRequiresSelection(t *testing.T) {
 	app := NewApp(erunUIDeps{store: stubUIStore{}})
 	defer app.shutdown(context.Background())
-	if _, err := app.ListAgentOutputs(uiSelection{}); err == nil {
+	if _, err := app.ListAgentOutputs(uimodel.Selection{}); err == nil {
 		t.Fatal("expected an error when tenant/environment are missing")
 	}
 }
@@ -54,7 +55,7 @@ func TestListAgentOutputsRequiresSelection(t *testing.T) {
 func TestDownloadAgentOutputRequiresSelection(t *testing.T) {
 	app := NewApp(erunUIDeps{store: stubUIStore{}})
 	defer app.shutdown(context.Background())
-	if _, err := app.DownloadAgentOutput(uiSelection{}, "report.pdf"); err == nil {
+	if _, err := app.DownloadAgentOutput(uimodel.Selection{}, "report.pdf"); err == nil {
 		t.Fatal("expected an error when tenant/environment are missing")
 	}
 }

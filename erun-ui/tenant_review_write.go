@@ -1,13 +1,13 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // The write routes the dashboard gates on, in the same canonical
@@ -23,7 +23,7 @@ const (
 
 // CreateReview opens a review.
 func (a *App) CreateReview(input uiCreateReviewInput) (uiTenantDashboardReview, error) {
-	tenant, err := requireTenant("opening a review", input.Tenant)
+	tenant, err := uimodel.RequireTenant("opening a review", input.Tenant)
 	if err != nil {
 		return uiTenantDashboardReview{}, err
 	}
@@ -34,10 +34,7 @@ func (a *App) CreateReview(input uiCreateReviewInput) (uiTenantDashboardReview, 
 		return uiTenantDashboardReview{}, fmt.Errorf("name, target branch, and source branch are required")
 	}
 
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	client, requestCtx, cancel, err := a.tenantPlatformClient(ctx, tenant)
 	if err != nil {
 		return uiTenantDashboardReview{}, err
@@ -56,7 +53,7 @@ func (a *App) CreateReview(input uiCreateReviewInput) (uiTenantDashboardReview, 
 
 // CloseReview transitions a review to CLOSED without merging.
 func (a *App) CloseReview(input uiCloseReviewInput) (uiTenantDashboardReview, error) {
-	tenant, err := requireTenant("closing a review", input.Tenant)
+	tenant, err := uimodel.RequireTenant("closing a review", input.Tenant)
 	if err != nil {
 		return uiTenantDashboardReview{}, err
 	}
@@ -65,10 +62,7 @@ func (a *App) CloseReview(input uiCloseReviewInput) (uiTenantDashboardReview, er
 		return uiTenantDashboardReview{}, fmt.Errorf("review id is required")
 	}
 
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	client, requestCtx, cancel, err := a.tenantPlatformClient(ctx, tenant)
 	if err != nil {
 		return uiTenantDashboardReview{}, err
@@ -99,7 +93,7 @@ func mergeQueueAddress(repository, targetBranch string) (model.PlatformMergeQueu
 // back as a Blocked result, and an occupied MERGE slot surfaces the platform's
 // message, since retrying cannot help.
 func (a *App) AdvanceMergeQueue(input uiAdvanceMergeQueueInput) (uiTenantDashboardReview, error) {
-	tenant, err := requireTenant("advancing the merge queue", input.Tenant)
+	tenant, err := uimodel.RequireTenant("advancing the merge queue", input.Tenant)
 	if err != nil {
 		return uiTenantDashboardReview{}, err
 	}
@@ -108,10 +102,7 @@ func (a *App) AdvanceMergeQueue(input uiAdvanceMergeQueueInput) (uiTenantDashboa
 		return uiTenantDashboardReview{}, err
 	}
 
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	client, requestCtx, cancel, err := a.tenantPlatformClient(ctx, tenant)
 	if err != nil {
 		return uiTenantDashboardReview{}, err
@@ -137,7 +128,7 @@ func (a *App) AdvanceMergeQueue(input uiAdvanceMergeQueueInput) (uiTenantDashboa
 // OverrideAdvanceMergeQueue bypasses the unresolved-thread gate; Reason is
 // required and audited.
 func (a *App) OverrideAdvanceMergeQueue(input uiOverrideAdvanceMergeQueueInput) (uiTenantDashboardReview, error) {
-	tenant, err := requireTenant("overriding the merge queue's unresolved-thread gate", input.Tenant)
+	tenant, err := uimodel.RequireTenant("overriding the merge queue's unresolved-thread gate", input.Tenant)
 	if err != nil {
 		return uiTenantDashboardReview{}, err
 	}
@@ -150,10 +141,7 @@ func (a *App) OverrideAdvanceMergeQueue(input uiOverrideAdvanceMergeQueueInput) 
 		return uiTenantDashboardReview{}, fmt.Errorf("a reason is required to override the merge queue's unresolved-thread gate")
 	}
 
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	client, requestCtx, cancel, err := a.tenantPlatformClient(ctx, tenant)
 	if err != nil {
 		return uiTenantDashboardReview{}, err
@@ -170,7 +158,7 @@ func (a *App) OverrideAdvanceMergeQueue(input uiOverrideAdvanceMergeQueueInput) 
 // AddReviewer assigns userId as a reviewer; the picker offers only the tenant's
 // enrolled users.
 func (a *App) AddReviewer(input uiAddReviewerInput) (uiReviewer, error) {
-	tenant, err := requireTenant("assigning a reviewer", input.Tenant)
+	tenant, err := uimodel.RequireTenant("assigning a reviewer", input.Tenant)
 	if err != nil {
 		return uiReviewer{}, err
 	}
@@ -183,10 +171,7 @@ func (a *App) AddReviewer(input uiAddReviewerInput) (uiReviewer, error) {
 		return uiReviewer{}, fmt.Errorf("user id is required")
 	}
 
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	client, requestCtx, cancel, err := a.tenantPlatformClient(ctx, tenant)
 	if err != nil {
 		return uiReviewer{}, err
@@ -202,7 +187,7 @@ func (a *App) AddReviewer(input uiAddReviewerInput) (uiReviewer, error) {
 
 // RemoveReviewer unassigns userId from a review's reviewers.
 func (a *App) RemoveReviewer(input uiRemoveReviewerInput) error {
-	tenant, err := requireTenant("removing a reviewer", input.Tenant)
+	tenant, err := uimodel.RequireTenant("removing a reviewer", input.Tenant)
 	if err != nil {
 		return err
 	}
@@ -215,10 +200,7 @@ func (a *App) RemoveReviewer(input uiRemoveReviewerInput) error {
 		return fmt.Errorf("user id is required")
 	}
 
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	client, requestCtx, cancel, err := a.tenantPlatformClient(ctx, tenant)
 	if err != nil {
 		return err
@@ -233,7 +215,7 @@ func (a *App) RemoveReviewer(input uiRemoveReviewerInput) error {
 
 // validateCreateReviewCommentInput is split out to stay under the complexity cap.
 func validateCreateReviewCommentInput(tenant, reviewID, commitID, filePath, body string) error {
-	if _, err := requireTenant("commenting on a review", tenant); err != nil {
+	if _, err := uimodel.RequireTenant("commenting on a review", tenant); err != nil {
 		return err
 	}
 	if reviewID == "" {
@@ -259,10 +241,7 @@ func (a *App) CreateReviewComment(input uiCreateReviewCommentInput) (uiReviewCom
 		return uiReviewComment{}, err
 	}
 
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	client, requestCtx, cancel, err := a.tenantPlatformClient(ctx, tenant)
 	if err != nil {
 		return uiReviewComment{}, err
@@ -297,7 +276,7 @@ func (a *App) updateReviewCommentStatus(input uiUpdateReviewCommentStatusInput, 
 	if status == "OPEN" {
 		operation = "reopening a review comment"
 	}
-	tenant, err := requireTenant(operation, input.Tenant)
+	tenant, err := uimodel.RequireTenant(operation, input.Tenant)
 	if err != nil {
 		return uiReviewComment{}, err
 	}
@@ -310,10 +289,7 @@ func (a *App) updateReviewCommentStatus(input uiUpdateReviewCommentStatusInput, 
 		return uiReviewComment{}, fmt.Errorf("comment id is required")
 	}
 
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	client, requestCtx, cancel, err := a.tenantPlatformClient(ctx, tenant)
 	if err != nil {
 		return uiReviewComment{}, err

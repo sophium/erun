@@ -10,16 +10,17 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // StartSession spawns the ERun tab's `erun open` PTY through the per-env action
 // runner, so a parallel AI-tab open cannot duplicate a build+deploy.
-func (a *App) StartSession(selection uiSelection, slot, cols, rows int) (startSessionResult, error) {
-	selection = normalizeSelection(selection)
-	if err := errMissingTenantOrEnvironment("start ERun session", selection.Tenant, selection.Environment); err != nil {
-		return startSessionResult{}, err
+func (a *App) StartSession(selection uimodel.Selection, slot, cols, rows int) (uimodel.StartSessionResult, error) {
+	selection = uimodel.NormalizeSelection(selection)
+	if err := uimodel.ErrMissingTenantOrEnvironment("start ERun session", selection.Tenant, selection.Environment); err != nil {
+		return uimodel.StartSessionResult{}, err
 	}
-	return a.enqueueGatedSession(selection, gatedSessionKindOpen, func(ctx context.Context) (startSessionResult, *managedTerminal, error) {
+	return a.enqueueGatedSession(selection, gatedSessionKindOpen, func(ctx context.Context) (uimodel.StartSessionResult, *managedTerminal, error) {
 		return a.runOpenSession(ctx, selection, slot, cols, rows)
 	})
 }
@@ -34,7 +35,7 @@ func clampTerminalSize(cols, rows int) (int, int) {
 	return cols, rows
 }
 
-func (a *App) runOpenSession(ctx context.Context, selection uiSelection, slot, cols, rows int) (startSessionResult, *managedTerminal, error) {
+func (a *App) runOpenSession(ctx context.Context, selection uimodel.Selection, slot, cols, rows int) (uimodel.StartSessionResult, *managedTerminal, error) {
 	cols, rows = clampTerminalSize(cols, rows)
 
 	key := openSessionKey(selection, slot)
@@ -43,7 +44,7 @@ func (a *App) runOpenSession(ctx context.Context, selection uiSelection, slot, c
 		Environment: selection.Environment,
 	})
 	if err != nil {
-		return startSessionResult{}, nil, err
+		return uimodel.StartSessionResult{}, nil, err
 	}
 
 	a.mu.Lock()
@@ -51,7 +52,7 @@ func (a *App) runOpenSession(ctx context.Context, selection uiSelection, slot, c
 		a.mu.Unlock()
 		go a.startWorkspaceSyncForSelection(selection)
 		existing.signalReady(nil)
-		return startSessionResult{
+		return uimodel.StartSessionResult{
 			SessionID: existing.serial,
 			Selection: existing.selection,
 			Slot:      slot,
@@ -71,7 +72,7 @@ func (a *App) runOpenSession(ctx context.Context, selection uiSelection, slot, c
 	}
 	session, err := a.deps.startTerminal(openParams)
 	if err != nil {
-		return startSessionResult{}, nil, err
+		return uimodel.StartSessionResult{}, nil, err
 	}
 
 	a.mu.Lock()
@@ -109,7 +110,7 @@ func (a *App) runOpenSession(ctx context.Context, selection uiSelection, slot, c
 	a.emitEnvStatus(selection, "")
 	a.logSpawnedCommandToLocal(selection, "erun", formatLocalCommandLog(formatLaunchCommand(openParams), "ERun tab"))
 	_ = ctx
-	return startSessionResult{
+	return uimodel.StartSessionResult{
 		SessionID: serial,
 		Selection: selection,
 		Slot:      slot,
@@ -117,10 +118,10 @@ func (a *App) runOpenSession(ctx context.Context, selection uiSelection, slot, c
 	}, managed, nil
 }
 
-func (a *App) StartLocalSession(selection uiSelection, slot, cols, rows int) (startSessionResult, error) {
-	selection = normalizeSelection(selection)
-	if err := errMissingTenantOrEnvironment("start local session", selection.Tenant, selection.Environment); err != nil {
-		return startSessionResult{}, err
+func (a *App) StartLocalSession(selection uimodel.Selection, slot, cols, rows int) (uimodel.StartSessionResult, error) {
+	selection = uimodel.NormalizeSelection(selection)
+	if err := uimodel.ErrMissingTenantOrEnvironment("start local session", selection.Tenant, selection.Environment); err != nil {
+		return uimodel.StartSessionResult{}, err
 	}
 	cols, rows = clampTerminalSize(cols, rows)
 
@@ -137,7 +138,7 @@ func (a *App) StartLocalSession(selection uiSelection, slot, cols, rows int) (st
 	a.mu.Lock()
 	if existing := a.sessions[key]; existing != nil && !existing.closed && existing.session != nil {
 		a.mu.Unlock()
-		return startSessionResult{
+		return uimodel.StartSessionResult{
 			SessionID: existing.serial,
 			Selection: existing.selection,
 			Slot:      slot,
@@ -157,7 +158,7 @@ func (a *App) StartLocalSession(selection uiSelection, slot, cols, rows int) (st
 	}
 	session, err := a.deps.startTerminal(params)
 	if err != nil {
-		return startSessionResult{}, err
+		return uimodel.StartSessionResult{}, err
 	}
 
 	a.mu.Lock()
@@ -176,14 +177,14 @@ func (a *App) StartLocalSession(selection uiSelection, slot, cols, rows int) (st
 	a.mu.Unlock()
 
 	if banner := localSessionBanner(selection); len(banner) > 0 {
-		a.emitEvent(terminalOutputEvent, terminalOutputPayload{
+		a.emitEvent(uimodel.TerminalOutputEvent, terminalOutputPayload{
 			SessionID: serial,
 			Data:      base64.StdEncoding.EncodeToString(banner),
 		})
 	}
 
 	a.spawnStreamSession(managed)
-	return startSessionResult{
+	return uimodel.StartSessionResult{
 		SessionID: serial,
 		Selection: selection,
 		Slot:      slot,
@@ -194,17 +195,17 @@ func (a *App) StartLocalSession(selection uiSelection, slot, cols, rows int) (st
 // StartAISession spawns the AI tab's `erun open` PTY through the per-env queue.
 // A fresh start held by another agent's activity lease reports occupied unless
 // confirmed.
-func (a *App) StartAISession(selection uiSelection, slot, cols, rows int, confirmed bool) (startSessionResult, error) {
-	selection = normalizeSelection(selection)
-	if err := errMissingTenantOrEnvironment("start AI session", selection.Tenant, selection.Environment); err != nil {
-		return startSessionResult{}, err
+func (a *App) StartAISession(selection uimodel.Selection, slot, cols, rows int, confirmed bool) (uimodel.StartSessionResult, error) {
+	selection = uimodel.NormalizeSelection(selection)
+	if err := uimodel.ErrMissingTenantOrEnvironment("start AI session", selection.Tenant, selection.Environment); err != nil {
+		return uimodel.StartSessionResult{}, err
 	}
-	return a.enqueueGatedSession(selection, gatedSessionKindAI, func(ctx context.Context) (startSessionResult, *managedTerminal, error) {
+	return a.enqueueGatedSession(selection, gatedSessionKindAI, func(ctx context.Context) (uimodel.StartSessionResult, *managedTerminal, error) {
 		return a.runAISession(ctx, selection, slot, cols, rows, confirmed)
 	})
 }
 
-func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, cols, rows int, confirmed bool) (startSessionResult, *managedTerminal, error) {
+func (a *App) runAISession(ctx context.Context, selection uimodel.Selection, slot, cols, rows int, confirmed bool) (uimodel.StartSessionResult, *managedTerminal, error) {
 	cols, rows = clampTerminalSize(cols, rows)
 
 	key := aiSessionKey(selection, slot)
@@ -213,14 +214,14 @@ func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, col
 		Environment: selection.Environment,
 	})
 	if err != nil {
-		return startSessionResult{}, nil, err
+		return uimodel.StartSessionResult{}, nil, err
 	}
 
 	a.mu.Lock()
 	if existing := a.sessions[key]; existing != nil && !existing.closed && existing.session != nil {
 		a.mu.Unlock()
 		existing.signalReady(nil)
-		return startSessionResult{
+		return uimodel.StartSessionResult{
 			SessionID: existing.serial,
 			Selection: existing.selection,
 			Slot:      slot,
@@ -231,7 +232,7 @@ func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, col
 
 	if !confirmed {
 		if occupants := a.aiSessionOccupants(selection); len(occupants) > 0 {
-			return startSessionResult{
+			return uimodel.StartSessionResult{
 				Selection: selection,
 				Slot:      slot,
 				Kind:      string(sessionKindAI),
@@ -252,7 +253,7 @@ func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, col
 	}
 	session, err := a.deps.startTerminal(params)
 	if err != nil {
-		return startSessionResult{}, nil, err
+		return uimodel.StartSessionResult{}, nil, err
 	}
 
 	a.mu.Lock()
@@ -282,7 +283,7 @@ func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, col
 
 	a.logSpawnedCommandToLocal(selection, "ai", formatLocalCommandLog(formatLaunchCommand(params), "AI tab"))
 	_ = ctx
-	return startSessionResult{
+	return uimodel.StartSessionResult{
 		SessionID: serial,
 		Selection: selection,
 		Slot:      slot,
@@ -292,7 +293,7 @@ func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, col
 
 // aiSessionOccupants reads held leases, separately if the status read fails. A
 // failed lease read returns none: this is a notice, not an access check.
-func (a *App) aiSessionOccupants(selection uiSelection) []uiEnvironmentLease {
+func (a *App) aiSessionOccupants(selection uimodel.Selection) []uimodel.EnvironmentLease {
 	status, err := a.LoadIdleStatus(selection)
 	if err == nil {
 		return status.Leases

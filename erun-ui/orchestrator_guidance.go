@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"path/filepath"
 	"runtime"
@@ -68,10 +67,7 @@ func (a *App) RevealOrchestratorGuidance(id, layer, ide string) error {
 	if err != nil {
 		return err
 	}
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	output, err := a.deps.runIDECommand(ctx, startTerminalSessionParams{
 		Dir:        dir,
 		Executable: executable,

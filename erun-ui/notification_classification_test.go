@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestEnsureMCPAvailableEmitsClassifiedWarning(t *testing.T) {
@@ -27,14 +28,14 @@ func TestEnsureMCPAvailableEmitsClassifiedWarning(t *testing.T) {
 		t.Fatalf("ensureMCPAvailable returned an error: %v", err)
 	}
 
-	if got := emits.events(appStatusEvent); len(got) != 0 {
+	if got := emits.events(uimodel.AppStatusEvent); len(got) != 0 {
 		t.Fatalf("expected no unclassified app-status emit, got %+v", got)
 	}
-	events := emits.events(appNotificationEvent)
+	events := emits.events(uimodel.AppNotificationEvent)
 	if len(events) != 1 {
 		t.Fatalf("expected one classified notification, got %+v", events)
 	}
-	payload, ok := events[0].(appNotificationPayload)
+	payload, ok := events[0].(uimodel.AppNotificationPayload)
 	if !ok {
 		t.Fatalf("unexpected payload type: %T", events[0])
 	}
@@ -71,7 +72,7 @@ func TestEnsureMCPAvailableEmitsNothingWhenReachable(t *testing.T) {
 	if err := app.ensureMCPAvailable(context.Background(), result); err != nil {
 		t.Fatalf("ensureMCPAvailable returned an error: %v", err)
 	}
-	if got := emits.events(appNotificationEvent); len(got) != 0 {
+	if got := emits.events(uimodel.AppNotificationEvent); len(got) != 0 {
 		t.Fatalf("expected no notification when already reachable, got %+v", got)
 	}
 }
@@ -79,18 +80,18 @@ func TestEnsureMCPAvailableEmitsNothingWhenReachable(t *testing.T) {
 func TestSurfaceCredentialRefreshFailureEmitsClassifiedError(t *testing.T) {
 	emits := newCapturedEmits()
 	app := &App{emitFn: emits.fn()}
-	selection := uiSelection{Tenant: "frs", Environment: "dev"}
+	selection := uimodel.Selection{Tenant: "frs", Environment: "dev"}
 
 	app.surfaceCredentialRefreshFailure(selection, errors.New("token expired"), nil)
 
-	if got := emits.events(appStatusEvent); len(got) != 0 {
+	if got := emits.events(uimodel.AppStatusEvent); len(got) != 0 {
 		t.Fatalf("expected no unclassified app-status emit, got %+v", got)
 	}
-	events := emits.events(appNotificationEvent)
+	events := emits.events(uimodel.AppNotificationEvent)
 	if len(events) != 1 {
 		t.Fatalf("expected one classified notification, got %+v", events)
 	}
-	payload, ok := events[0].(appNotificationPayload)
+	payload, ok := events[0].(uimodel.AppNotificationPayload)
 	if !ok {
 		t.Fatalf("unexpected payload type: %T", events[0])
 	}
@@ -108,13 +109,13 @@ func TestSurfaceCredentialRefreshFailureEmitsClassifiedError(t *testing.T) {
 func TestSurfaceCredentialRefreshFailureNotifiesOnlyOnce(t *testing.T) {
 	emits := newCapturedEmits()
 	app := &App{emitFn: emits.fn()}
-	selection := uiSelection{Tenant: "frs", Environment: "dev"}
+	selection := uimodel.Selection{Tenant: "frs", Environment: "dev"}
 	notified := false
 
 	app.surfaceCredentialRefreshFailure(selection, errors.New("token expired"), &notified)
 	app.surfaceCredentialRefreshFailure(selection, errors.New("token expired"), &notified)
 
-	if got := emits.events(appNotificationEvent); len(got) != 1 {
+	if got := emits.events(uimodel.AppNotificationEvent); len(got) != 1 {
 		t.Fatalf("expected exactly one notification across two calls, got %+v", got)
 	}
 }

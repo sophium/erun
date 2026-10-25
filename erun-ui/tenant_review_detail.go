@@ -8,11 +8,12 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	reviewpkg "github.com/sophium/erun/erun-common/command/review"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // LoadReviewDetail loads one review's detail; each sub-read degrades independently.
 func (a *App) LoadReviewDetail(input uiReviewDetailInput) (uiReviewDetail, error) {
-	tenant, err := requireTenant("loading review detail", input.Tenant)
+	tenant, err := uimodel.RequireTenant("loading review detail", input.Tenant)
 	if err != nil {
 		return uiReviewDetail{}, err
 	}
@@ -22,10 +23,7 @@ func (a *App) LoadReviewDetail(input uiReviewDetailInput) (uiReviewDetail, error
 	}
 
 	detail := uiReviewDetail{ReviewID: reviewID}
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	client, requestCtx, cancel, err := a.tenantPlatformClient(ctx, tenant)
 	if err != nil {
 		detail.APIError = err.Error()
@@ -151,7 +149,7 @@ func loadReviewDetailQueuePosition(ctx context.Context, client *platformclient.P
 // CreateReviewReply returns a real error so the frontend keeps the draft until it
 // succeeds.
 func (a *App) CreateReviewReply(input uiCreateReviewReplyInput) (uiReviewComment, error) {
-	tenant, err := requireTenant("replying to a review comment", input.Tenant)
+	tenant, err := uimodel.RequireTenant("replying to a review comment", input.Tenant)
 	if err != nil {
 		return uiReviewComment{}, err
 	}
@@ -168,10 +166,7 @@ func (a *App) CreateReviewReply(input uiCreateReviewReplyInput) (uiReviewComment
 		return uiReviewComment{}, fmt.Errorf("reply body is required")
 	}
 
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	client, requestCtx, cancel, err := a.tenantPlatformClient(ctx, tenant)
 	if err != nil {
 		return uiReviewComment{}, err

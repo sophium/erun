@@ -15,6 +15,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // InvestigateFailure stages a failure report to a host file and, within the
@@ -158,7 +159,7 @@ func (a *App) investigateWorkingDir(tenant, environment string) string {
 	if strings.TrimSpace(tenant) == "" || strings.TrimSpace(environment) == "" {
 		return ""
 	}
-	_, path, err := a.resolveHostWorkspace(uiSelection{Tenant: tenant, Environment: environment})
+	_, path, err := a.resolveHostWorkspace(uimodel.Selection{Tenant: tenant, Environment: environment})
 	if err != nil {
 		return ""
 	}

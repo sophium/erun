@@ -9,6 +9,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // uiGatewayRouting is an environment whose pod routes Claude Code somewhere
@@ -111,7 +112,7 @@ func (a *App) readGatewayRoutingDrift(tenant string, env config.EnvConfig, catal
 }
 
 // LoadEnvironmentGatewayRouting is LoadGatewayRoutingDrift for one environment.
-func (a *App) LoadEnvironmentGatewayRouting(selection uiSelection) (uiGatewayRouting, error) {
+func (a *App) LoadEnvironmentGatewayRouting(selection uimodel.Selection) (uiGatewayRouting, error) {
 	if a.deps.store == nil {
 		return uiGatewayRouting{}, nil
 	}

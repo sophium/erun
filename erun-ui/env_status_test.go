@@ -8,6 +8,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // Tab presence alone is not running-ness.
@@ -46,10 +47,10 @@ func envStatusTestApp(t *testing.T, emits *capturedEmits, sessionsMu *sync.Mutex
 	return app
 }
 
-func envStatuses(emits *capturedEmits) []envStatusPayload {
-	var out []envStatusPayload
-	for _, raw := range emits.events(envStatusEvent) {
-		if payload, ok := raw.(envStatusPayload); ok {
+func envStatuses(emits *capturedEmits) []uimodel.EnvStatusPayload {
+	var out []uimodel.EnvStatusPayload
+	for _, raw := range emits.events(uimodel.EnvStatusEvent) {
+		if payload, ok := raw.(uimodel.EnvStatusPayload); ok {
 			out = append(out, payload)
 		}
 	}
@@ -62,8 +63,8 @@ const envStatusWaitBound = 30 * time.Second
 func waitForEnvStatus(t *testing.T, emits *capturedEmits, status string) {
 	t.Helper()
 	arrived := emits.waitFor(envStatusWaitBound, func(byName map[string][]any) bool {
-		for _, raw := range byName[envStatusEvent] {
-			if payload, ok := raw.(envStatusPayload); ok && payload.Status == status {
+		for _, raw := range byName[uimodel.EnvStatusEvent] {
+			if payload, ok := raw.(uimodel.EnvStatusPayload); ok && payload.Status == status {
 				return true
 			}
 		}
@@ -80,7 +81,7 @@ func TestEnvStatusStoppedWhenReconnectRefusedForStoppedContext(t *testing.T) {
 	emits := newCapturedEmits()
 	app := envStatusTestApp(t, emits, &sessionsMu, &sessions)
 
-	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 	if _, err := app.StartSession(selection, 0, 80, 24); err != nil {
 		t.Fatalf("StartSession failed: %v", err)
 	}
@@ -93,7 +94,7 @@ func TestEnvStatusStoppedWhenReconnectRefusedForStoppedContext(t *testing.T) {
 	sessionsMu.Unlock()
 	_ = current.Close()
 
-	waitForEnvStatus(t, emits, envStatusStopped)
+	waitForEnvStatus(t, emits, uimodel.EnvStatusStopped)
 
 	sessionsMu.Lock()
 	got := len(sessions)
@@ -109,7 +110,7 @@ func TestEnvStatusFailedAfterReconnectLoopCapAndClearedByRespawns(t *testing.T) 
 	emits := newCapturedEmits()
 	app := envStatusTestApp(t, emits, &sessionsMu, &sessions)
 
-	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 	if _, err := app.StartSession(selection, 0, 80, 24); err != nil {
 		t.Fatalf("StartSession failed: %v", err)
 	}
@@ -124,11 +125,11 @@ func TestEnvStatusFailedAfterReconnectLoopCapAndClearedByRespawns(t *testing.T) 
 		_ = current.Close()
 	}
 
-	waitForEnvStatus(t, emits, envStatusFailed)
+	waitForEnvStatus(t, emits, uimodel.EnvStatusFailed)
 
 	statuses := envStatuses(emits)
 	last := statuses[len(statuses)-1]
-	if last.Status != envStatusFailed {
+	if last.Status != uimodel.EnvStatusFailed {
 		t.Fatalf("expected the final env-status to be failed, got %+v", statuses)
 	}
 	if last.Tenant != "erun" || last.Environment != "remote" {
@@ -152,7 +153,7 @@ func TestEnvStatusClearedByLaterSuccessfulDeploy(t *testing.T) {
 	app := envStatusTestApp(t, emits, &sessionsMu, &sessions)
 
 	app.activityQueue.start(activityQueueEntry{Command: "deploy", Tenant: "erun", Environment: "remote", Version: "1.0.1"})
-	app.finishDeployByTenantEnv(uiSelection{}, "erun", "remote", activityQueueStatusSucceeded, "")
+	app.finishDeployByTenantEnv(uimodel.Selection{}, "erun", "remote", activityQueueStatusSucceeded, "")
 
 	waitForEnvStatus(t, emits, "")
 	statuses := envStatuses(emits)
@@ -169,7 +170,7 @@ func TestEnvStatusNotClearedByFailedDeploy(t *testing.T) {
 	app := envStatusTestApp(t, emits, &sessionsMu, &sessions)
 
 	app.activityQueue.start(activityQueueEntry{Command: "deploy", Tenant: "erun", Environment: "remote", Version: "1.0.1"})
-	app.finishDeployByTenantEnv(uiSelection{}, "erun", "remote", activityQueueStatusFailed, "==> Deploy failed after 2m1s")
+	app.finishDeployByTenantEnv(uimodel.Selection{}, "erun", "remote", activityQueueStatusFailed, "==> Deploy failed after 2m1s")
 
 	if got := envStatuses(emits); len(got) != 0 {
 		t.Fatalf("a failed deploy must not emit env-status, got %+v", got)

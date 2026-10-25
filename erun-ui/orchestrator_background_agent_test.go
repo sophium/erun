@@ -11,6 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/orchestrator"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 type agentLaunches struct {
@@ -56,8 +57,8 @@ func startAgentOrchestrator(t *testing.T, app *App, name string) string {
 
 func notificationMessages(emits *capturedEmits) string {
 	var out []string
-	for _, event := range emits.events(appNotificationEvent) {
-		if payload, ok := event.(appNotificationPayload); ok {
+	for _, event := range emits.events(uimodel.AppNotificationEvent) {
+		if payload, ok := event.(uimodel.AppNotificationPayload); ok {
 			out = append(out, payload.Message)
 		}
 	}

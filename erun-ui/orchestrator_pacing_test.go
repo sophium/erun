@@ -8,11 +8,13 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func orchestratorPacingMarkerTexts(emits *capturedEmits) []string {
 	var texts []string
-	for _, evt := range emits.events(terminalOutputEvent) {
+	for _, evt := range emits.events(uimodel.TerminalOutputEvent) {
 		payload, ok := evt.(terminalOutputPayload)
 		if !ok {
 			continue
@@ -214,13 +216,13 @@ func TestOrchestratorPacingCapsAfterRepeatedSilenceAndRearmsOnFreshBusy(t *testi
 	if len(session.Calls()) != writesBeforeCap {
 		t.Fatalf("a capped orchestrator must not be written to again, got %d new writes", len(session.Calls())-writesBeforeCap)
 	}
-	notices := emits.events(appNotificationEvent)
+	notices := emits.events(uimodel.AppNotificationEvent)
 	if len(notices) != 1 {
 		t.Fatalf("expected exactly one capped notification, got %d", len(notices))
 	}
 
 	app.reconcileOrchestratorPacing()
-	if len(emits.events(appNotificationEvent)) != 1 {
+	if len(emits.events(uimodel.AppNotificationEvent)) != 1 {
 		t.Fatal("the capped notice must not repeat every tick")
 	}
 
@@ -298,7 +300,7 @@ func TestOrchestratorPacingRearmsOnIdleReplyAcrossManyStaleCycles(t *testing.T) 
 		}
 	}
 
-	if notices := emits.events(appNotificationEvent); len(notices) != 0 {
+	if notices := emits.events(uimodel.AppNotificationEvent); len(notices) != 0 {
 		t.Fatalf("expected no capped notification for a session that answered every nudge, got %d", len(notices))
 	}
 }
@@ -328,7 +330,7 @@ func TestOrchestratorPacingStillCapsWithoutAFreshReply(t *testing.T) {
 	if !capped {
 		t.Fatal("expected a session that never replies to still cap")
 	}
-	if notices := emits.events(appNotificationEvent); len(notices) != 1 {
+	if notices := emits.events(uimodel.AppNotificationEvent); len(notices) != 1 {
 		t.Fatalf("expected exactly one capped notification, got %d", len(notices))
 	}
 }

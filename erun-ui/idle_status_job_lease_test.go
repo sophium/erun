@@ -7,6 +7,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/jobs"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestLeasesCarryTheirJobOnlyWhenAJobHoldsThem(t *testing.T) {
@@ -56,7 +57,7 @@ func TestVerifyLeaseJobIDsClearsAJobIDWithNoJobBehindIt(t *testing.T) {
 		},
 	})
 
-	leases := []uiEnvironmentLease{
+	leases := []uimodel.EnvironmentLease{
 		{Name: "repo gate", JobID: "gate-9"},
 		{Name: "job-visual-demo", JobID: "visual-demo"},
 	}

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/command/podruntime"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestOrchestratorSkillsInstalledByDefault(t *testing.T) {
@@ -210,7 +211,7 @@ func TestOrchestratorSkillsRefreshFromBuildStampedCheckout(t *testing.T) {
 	if strings.TrimSpace(string(marker)) != want {
 		t.Fatalf("marker = %q, want the refreshed source sha %q", strings.TrimSpace(string(marker)), want)
 	}
-	if notes := emits.events(appNotificationEvent); len(notes) != 0 {
+	if notes := emits.events(uimodel.AppNotificationEvent); len(notes) != 0 {
 		t.Fatalf("a resolved source must report nothing, got %+v", notes)
 	}
 }
@@ -252,11 +253,11 @@ func TestOrchestratorSkillsReportUnresolvableSource(t *testing.T) {
 	if _, err := app.ensureOrchestratorWorkspace(); err != nil {
 		t.Fatalf("the orchestrator must still launch cleanly: %v", err)
 	}
-	notes := emits.events(appNotificationEvent)
+	notes := emits.events(uimodel.AppNotificationEvent)
 	if len(notes) != 1 {
 		t.Fatalf("expected exactly one report, got %+v", notes)
 	}
-	payload, ok := notes[0].(appNotificationPayload)
+	payload, ok := notes[0].(uimodel.AppNotificationPayload)
 	if !ok {
 		t.Fatalf("unexpected payload type: %T", notes[0])
 	}
@@ -276,7 +277,7 @@ func TestOrchestratorSkillsReportUnresolvableSource(t *testing.T) {
 	if _, err := app.ensureOrchestratorWorkspace(); err != nil {
 		t.Fatalf("second ensureOrchestratorWorkspace: %v", err)
 	}
-	if got := emits.events(appNotificationEvent); len(got) != 1 {
+	if got := emits.events(uimodel.AppNotificationEvent); len(got) != 1 {
 		t.Fatalf("expected the report said once, got %+v", got)
 	}
 }
@@ -305,7 +306,7 @@ func TestHostSkillsSourceOverrideWinsOverBuildStamp(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(home, ".claude", "skills", "erun-orchestrate")); !os.IsNotExist(err) {
 		t.Fatalf("an empty override must install nothing, stat err = %v", err)
 	}
-	if notes := emits.events(appNotificationEvent); len(notes) != 0 {
+	if notes := emits.events(uimodel.AppNotificationEvent); len(notes) != 0 {
 		t.Fatalf("an honoured override is not a failure to report, got %+v", notes)
 	}
 }
@@ -339,7 +340,7 @@ func TestOrchestratorSkillsResolveFromCheckoutAroundExecutable(t *testing.T) {
 	if data, _ := os.ReadFile(installedOrchestrateSkill(t)); string(data) != "# from the checkout\n" {
 		t.Fatalf("expected the surrounding checkout's skill installed, got %q", data)
 	}
-	if notes := emits.events(appNotificationEvent); len(notes) != 0 {
+	if notes := emits.events(uimodel.AppNotificationEvent); len(notes) != 0 {
 		t.Fatalf("a resolved source must report nothing, got %+v", notes)
 	}
 }

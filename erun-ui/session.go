@@ -15,6 +15,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/seam"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // ignoreAlreadyClosed makes Close idempotent: a PTY whose process exited already
@@ -190,7 +191,7 @@ func withAppSession(args []string, sessionID string, ai, contribute bool) []stri
 	return args
 }
 
-func buildOpenIDEArgs(selection uiSelection, ide string) []string {
+func buildOpenIDEArgs(selection uimodel.Selection, ide string) []string {
 	args := buildOpenArgs(selection.Tenant, selection.Environment)
 	switch strings.TrimSpace(ide) {
 	case "vscode":
@@ -456,7 +457,7 @@ func formatLocalCommandLog(command, label string) string {
 	return "\x1b[2m$ " + command + "\x1b[0m" + suffix + "\r\n"
 }
 
-func localSessionBanner(selection uiSelection) []byte {
+func localSessionBanner(selection uimodel.Selection) []byte {
 	tenant := strings.TrimSpace(selection.Tenant)
 	environment := strings.TrimSpace(selection.Environment)
 	if tenant == "" || environment == "" {

@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // A stopped node and a missing or stale reading ("" or "unknown") must never
@@ -34,7 +35,7 @@ func (a *App) seedEnvironmentNodeSnapshots(state *uiState, result lifecycle.List
 		tenant := &state.Tenants[ti]
 		for ei := range tenant.Environments {
 			env := &tenant.Environments[ei]
-			link, ok := links[selectionKey(uiSelection{Tenant: tenant.Name, Environment: env.Name})]
+			link, ok := links[selectionKey(uimodel.Selection{Tenant: tenant.Name, Environment: env.Name})]
 			if !ok {
 				continue
 			}
@@ -52,7 +53,7 @@ func cloudContextLinksByEnvironment(result lifecycle.ListResult) map[string]clou
 	links := make(map[string]cloudContextLink)
 	for _, tenant := range result.Tenants {
 		for _, environment := range tenant.Environments {
-			key := selectionKey(uiSelection{
+			key := selectionKey(uimodel.Selection{
 				Tenant:      strings.TrimSpace(tenant.Name),
 				Environment: strings.TrimSpace(environment.Name),
 			})
@@ -81,7 +82,7 @@ func (a *App) refreshEnvironmentNodeStatuses() {
 			continue
 		}
 		for _, env := range envs {
-			selection := uiSelection{
+			selection := uimodel.Selection{
 				Tenant:      strings.TrimSpace(tenant.Name),
 				Environment: strings.TrimSpace(env.Name),
 			}
@@ -90,7 +91,7 @@ func (a *App) refreshEnvironmentNodeStatuses() {
 	}
 }
 
-func (a *App) emitEnvNodeIfChanged(selection uiSelection, node *uiEnvironmentNodeSnapshot) {
+func (a *App) emitEnvNodeIfChanged(selection uimodel.Selection, node *uiEnvironmentNodeSnapshot) {
 	key := selectionKey(selection)
 	var current uiEnvironmentNodeSnapshot
 	if node != nil {
@@ -109,7 +110,7 @@ func (a *App) emitEnvNodeIfChanged(selection uiSelection, node *uiEnvironmentNod
 	if unchanged {
 		return
 	}
-	a.emitEvent(envNodeEvent, envNodePayload{
+	a.emitEvent(uimodel.EnvNodeEvent, envNodePayload{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 		Node:        node,

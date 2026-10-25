@@ -14,6 +14,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/kube"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // "Answered with no work" and "nobody got an answer" both leave busy false, so
@@ -63,7 +64,7 @@ func observeWith(
 		loadIdleStatus:      load,
 	})
 	t.Cleanup(func() { app.shutdown(context.Background()) })
-	return app.observeEnvironmentActivity(uiSelection{Tenant: "acme", Environment: "dev"}).state
+	return app.observeEnvironmentActivity(uimodel.Selection{Tenant: "acme", Environment: "dev"}).state
 }
 
 func TestObserveEnvironmentActivityWedgedEdgeGivesNoVerdict(t *testing.T) {
@@ -118,7 +119,7 @@ func TestEnvActivityStateComparesTheVerdict(t *testing.T) {
 func observeViaPodWith(
 	t *testing.T,
 	kubernetesContext string,
-	execRuntimePod func(context.Context, uiSelection, string) (string, error),
+	execRuntimePod func(context.Context, uimodel.Selection, string) (string, error),
 ) environmentActivityState {
 	t.Helper()
 	store := stubUIStore{envs: map[string]config.EnvConfig{
@@ -126,12 +127,12 @@ func observeViaPodWith(
 	}}
 	app := NewApp(erunUIDeps{store: store, execRuntimePod: execRuntimePod})
 	t.Cleanup(func() { app.shutdown(context.Background()) })
-	selection := uiSelection{Tenant: "acme", Environment: "dev"}
+	selection := uimodel.Selection{Tenant: "acme", Environment: "dev"}
 	return app.observeEnvironmentActivityViaPod(selection, environmentActivity{selection: selection}).state
 }
 
 func TestObserveEnvironmentActivityViaPodReportsAHeldLease(t *testing.T) {
-	got := observeViaPodWith(t, "ctx", func(context.Context, uiSelection, string) (string, error) {
+	got := observeViaPodWith(t, "ctx", func(context.Context, uimodel.Selection, string) (string, error) {
 		status := model.EnvironmentIdleStatus{
 			Leases: []model.EnvironmentActivityLease{
 				{ID: "job-fix-1570", Name: "job-fix-1570", ExpiresAt: time.Now().Add(time.Hour)},
@@ -156,7 +157,7 @@ func TestObserveEnvironmentActivityViaPodReportsAHeldLease(t *testing.T) {
 }
 
 func TestObserveEnvironmentActivityViaPodReportsIdle(t *testing.T) {
-	got := observeViaPodWith(t, "ctx", func(context.Context, uiSelection, string) (string, error) {
+	got := observeViaPodWith(t, "ctx", func(context.Context, uimodel.Selection, string) (string, error) {
 		data, err := json.Marshal(model.EnvironmentIdleStatus{
 			Markers: []model.EnvironmentIdleMarker{{Name: activity.ActivityKindProcess, Idle: true}},
 		})
@@ -171,7 +172,7 @@ func TestObserveEnvironmentActivityViaPodReportsIdle(t *testing.T) {
 }
 
 func TestObserveEnvironmentActivityViaPodNamesAFailedCheckDistinctly(t *testing.T) {
-	got := observeViaPodWith(t, "ctx", func(context.Context, uiSelection, string) (string, error) {
+	got := observeViaPodWith(t, "ctx", func(context.Context, uimodel.Selection, string) (string, error) {
 		return "", errors.New("kubectl exec: the connection to the server was refused")
 	})
 	if got.reachable || got.observed || got.busy {
@@ -183,7 +184,7 @@ func TestObserveEnvironmentActivityViaPodNamesAFailedCheckDistinctly(t *testing.
 }
 
 func TestObserveEnvironmentActivityViaPodNamesAFailedCheckOnGarbledOutput(t *testing.T) {
-	got := observeViaPodWith(t, "ctx", func(context.Context, uiSelection, string) (string, error) {
+	got := observeViaPodWith(t, "ctx", func(context.Context, uimodel.Selection, string) (string, error) {
 		return "not json", nil
 	})
 	if got.reachable || got.observed || got.busy {
@@ -195,7 +196,7 @@ func TestObserveEnvironmentActivityViaPodNamesAFailedCheckOnGarbledOutput(t *tes
 }
 
 func TestObserveEnvironmentActivityViaPodSkipsEnvironmentsWithNoCluster(t *testing.T) {
-	got := observeViaPodWith(t, "", func(context.Context, uiSelection, string) (string, error) {
+	got := observeViaPodWith(t, "", func(context.Context, uimodel.Selection, string) (string, error) {
 		t.Fatal("an environment with no kubernetes context must never be exec'd into")
 		return "", nil
 	})

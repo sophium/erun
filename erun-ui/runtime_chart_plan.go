@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
@@ -96,10 +95,7 @@ func (a *App) probePublishedChart(tenant, environment, version, chart string) (p
 	if override, ok := chartAvailabilityOverride(version); ok {
 		return override[chart], true
 	}
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	namespace := strings.TrimSpace(a.runtimeRegistryNamespace(tenant, environment))
 	if namespace == "" {
 		namespace = config.DefaultContainerRegistry

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,6 +15,7 @@ import (
 	"github.com/sophium/erun/erun-common/command/workspace"
 	"github.com/sophium/erun/erun-common/infra/codesign"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // A host workspace is the local-agent worktree or the remote-agent sync mirror;
@@ -31,7 +31,7 @@ func hostWorkspacePath(result config.OpenResult, findProjectRoot seam.ProjectFin
 	return ""
 }
 
-func (a *App) resolveHostWorkspace(selection uiSelection) (config.OpenResult, string, error) {
+func (a *App) resolveHostWorkspace(selection uimodel.Selection) (config.OpenResult, string, error) {
 	result, err := resolve.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
@@ -69,9 +69,9 @@ func (a *App) LoadDirectoryDiff(directory string, options uiDiffOptions) (model.
 
 // LoadHostDiff diffs the env's host workspace with host git, never dialing the
 // in-pod MCP, so it works while the pod is stopped.
-func (a *App) LoadHostDiff(selection uiSelection, options uiDiffOptions) (model.DiffResult, error) {
-	selection = normalizeSelection(selection)
-	if err := errMissingTenantOrEnvironment("load host diff", selection.Tenant, selection.Environment); err != nil {
+func (a *App) LoadHostDiff(selection uimodel.Selection, options uiDiffOptions) (model.DiffResult, error) {
+	selection = uimodel.NormalizeSelection(selection)
+	if err := uimodel.ErrMissingTenantOrEnvironment("load host diff", selection.Tenant, selection.Environment); err != nil {
 		return model.DiffResult{}, err
 	}
 	_, path, err := a.resolveHostWorkspace(selection)
@@ -86,10 +86,10 @@ func (a *App) LoadHostDiff(selection uiSelection, options uiDiffOptions) (model.
 }
 
 // OpenHostIDE launches VS Code or IntelliJ against the env's host workspace.
-func (a *App) OpenHostIDE(selection uiSelection, ide string) error {
-	selection = normalizeSelection(selection)
+func (a *App) OpenHostIDE(selection uimodel.Selection, ide string) error {
+	selection = uimodel.NormalizeSelection(selection)
 	ide = strings.TrimSpace(ide)
-	if err := errMissingTenantOrEnvironment("open host IDE", selection.Tenant, selection.Environment); err != nil {
+	if err := uimodel.ErrMissingTenantOrEnvironment("open host IDE", selection.Tenant, selection.Environment); err != nil {
 		return err
 	}
 	if ide != "vscode" && ide != "intellij" {
@@ -103,10 +103,7 @@ func (a *App) OpenHostIDE(selection uiSelection, ide string) error {
 	if err != nil {
 		return err
 	}
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	output, err := a.deps.runIDECommand(ctx, startTerminalSessionParams{
 		Dir:        path,
 		Executable: executable,
@@ -126,9 +123,9 @@ type hostArtifact struct {
 }
 
 // ListHostArtifacts lists artifacts sync mirrored from the pod's outputs dir.
-func (a *App) ListHostArtifacts(selection uiSelection) ([]hostArtifact, error) {
-	selection = normalizeSelection(selection)
-	if err := errMissingTenantOrEnvironment("list host artifacts", selection.Tenant, selection.Environment); err != nil {
+func (a *App) ListHostArtifacts(selection uimodel.Selection) ([]hostArtifact, error) {
+	selection = uimodel.NormalizeSelection(selection)
+	if err := uimodel.ErrMissingTenantOrEnvironment("list host artifacts", selection.Tenant, selection.Environment); err != nil {
 		return nil, err
 	}
 	_, path, err := a.resolveHostWorkspace(selection)
@@ -157,10 +154,10 @@ func (a *App) ListHostArtifacts(selection uiSelection) ([]hostArtifact, error) {
 
 // RunHostArtifact launches a synced artifact on the host, detached; relPath
 // must stay within the artifact directory.
-func (a *App) RunHostArtifact(selection uiSelection, relPath string) error {
-	selection = normalizeSelection(selection)
+func (a *App) RunHostArtifact(selection uimodel.Selection, relPath string) error {
+	selection = uimodel.NormalizeSelection(selection)
 	relPath = strings.TrimSpace(relPath)
-	if err := errMissingTenantOrEnvironment("run host artifact", selection.Tenant, selection.Environment); err != nil {
+	if err := uimodel.ErrMissingTenantOrEnvironment("run host artifact", selection.Tenant, selection.Environment); err != nil {
 		return err
 	}
 	if !workspace.SafeWorkspaceSyncPath(relPath) {

@@ -11,6 +11,7 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // envInfos keys env state by selectionKey, as the poller does, so the card and
@@ -19,7 +20,7 @@ func envInfos(envs []configpkg.OrchestratorEnvConfig, envActivity map[string]env
 	out := make([]orchestratorEnvInfo, 0, len(envs))
 	for _, env := range envs {
 		info := orchestratorEnvInfo{Tenant: env.Tenant, Environment: env.Environment, Directory: env.Directory, Role: env.Role}
-		key := selectionKey(uiSelection{Tenant: env.Tenant, Environment: env.Environment})
+		key := selectionKey(uimodel.Selection{Tenant: env.Tenant, Environment: env.Environment})
 		if state, ok := envActivity[key]; ok {
 			info.Activity = &uiEnvironmentActivitySnapshot{
 				Reachable:   state.reachable,
@@ -286,7 +287,7 @@ func (a *App) linkOrchestratorEnvironments(refs []configpkg.OrchestratorEnvConfi
 		if a.orchestratorRefNamesHostEnv(ref) {
 			continue
 		}
-		a.ensureEnvRuntimeOnce(uiSelection{Tenant: ref.Tenant, Environment: ref.Environment})
+		a.ensureEnvRuntimeOnce(uimodel.Selection{Tenant: ref.Tenant, Environment: ref.Environment})
 	}
 	return nil
 }

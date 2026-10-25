@@ -10,6 +10,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // reviewDetailFixedResponses are method-independent; comment creation is
@@ -66,7 +67,7 @@ func loadReviewDetailFrom(t *testing.T, app *App) uiReviewDetail {
 
 func TestLoadReviewDetailRequiresATenant(t *testing.T) {
 	_, err := NewApp(erunUIDeps{store: stubUIStore{}}).LoadReviewDetail(uiReviewDetailInput{ReviewID: "review-1"})
-	if err == nil || !errors.Is(err, ErrTenantNotGiven) {
+	if err == nil || !errors.Is(err, uimodel.ErrTenantNotGiven) {
 		t.Fatalf("expected ErrTenantNotGiven, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "loading review detail") {
@@ -147,7 +148,7 @@ func TestCreateReviewReplyRequiresATenant(t *testing.T) {
 	_, err := NewApp(erunUIDeps{store: stubUIStore{}}).CreateReviewReply(uiCreateReviewReplyInput{
 		ReviewID: "review-1", ParentCommentID: "comment-1", Body: "fixed, thanks",
 	})
-	if err == nil || !errors.Is(err, ErrTenantNotGiven) {
+	if err == nil || !errors.Is(err, uimodel.ErrTenantNotGiven) {
 		t.Fatalf("expected ErrTenantNotGiven, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "replying to a review comment") {

@@ -14,6 +14,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/primitive/deploy/kubecheck"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // deploymentAbsentErrorForTest builds ensureRuntimeDeployed's exact "is not deployed" error.
@@ -76,7 +77,7 @@ func TestEnsureEnvRuntimeOnceDedupesAcrossTabs(t *testing.T) {
 	var ensures int32
 	var ensuresMu sync.Mutex
 	app := envEnsureTestApp(t, &ensures, &ensuresMu)
-	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 
 	if _, err := app.StartSession(selection, 0, 80, 24); err != nil {
 		t.Fatalf("StartSession failed: %v", err)
@@ -99,13 +100,13 @@ func TestEnsureEnvRuntimeOnceRunsAgainAfterTheWindow(t *testing.T) {
 	var ensures int32
 	var ensuresMu sync.Mutex
 	app := envEnsureTestApp(t, &ensures, &ensuresMu)
-	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 
 	app.ensureEnvRuntimeOnce(selection)
 	waitForEnsureCount(t, &ensures, &ensuresMu, 1, 2*time.Second)
 
 	// Age the window out by hand instead of sleeping out the TTL.
-	key := selectionKey(normalizeSelection(selection))
+	key := selectionKey(uimodel.NormalizeSelection(selection))
 	app.envEnsureMu.Lock()
 	app.envEnsureDone[key] = time.Now().Add(-envEnsureTTL)
 	app.envEnsureMu.Unlock()
@@ -150,15 +151,15 @@ func TestEnsureFailureNotificationDedupesPerEpisode(t *testing.T) {
 	app.SetEmitter(emits.fn())
 	t.Cleanup(func() { app.shutdown(context.Background()) })
 
-	selection := uiSelection{Tenant: "erun", Environment: "remote"}
-	key := selectionKey(normalizeSelection(selection))
+	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
+	key := selectionKey(uimodel.NormalizeSelection(selection))
 
 	app.surfaceEnvRuntimeEnsureFailure(selection, errors.New("boom"))
 	app.surfaceEnvRuntimeEnsureFailure(selection, errors.New("boom"))
-	if got := len(emits.events(appNotificationEvent)); got != 1 {
+	if got := len(emits.events(uimodel.AppNotificationEvent)); got != 1 {
 		t.Fatalf("notification emitted %d times in one failure episode, want 1", got)
 	}
-	if got := len(emits.events(envStatusEvent)); got != 2 {
+	if got := len(emits.events(uimodel.EnvStatusEvent)); got != 2 {
 		t.Fatalf("env-status emitted %d times, want 2 (flagged on each attempt)", got)
 	}
 
@@ -170,7 +171,7 @@ func TestEnsureFailureNotificationDedupesPerEpisode(t *testing.T) {
 	waitForFailEpisodeCleared(t, app, key, 2*time.Second)
 
 	app.surfaceEnvRuntimeEnsureFailure(selection, errors.New("boom again"))
-	if got := len(emits.events(appNotificationEvent)); got != 2 {
+	if got := len(emits.events(uimodel.AppNotificationEvent)); got != 2 {
 		t.Fatalf("notification emitted %d times after recovery, want 2", got)
 	}
 }
@@ -227,7 +228,7 @@ func TestSurfaceEnsureFailureSuppressedWhileDeployInFlight(t *testing.T) {
 	app, emits := capturedEnsureApp(t, func(context.Context, config.OpenResult, func(string)) error {
 		return nil
 	}, nil)
-	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 	absentErr := deploymentAbsentErrorForTest("erun", "remote")
 
 	app.mu.Lock()
@@ -242,10 +243,10 @@ func TestSurfaceEnsureFailureSuppressedWhileDeployInFlight(t *testing.T) {
 
 	app.surfaceEnvRuntimeEnsureFailure(selection, absentErr)
 
-	if got := len(emits.events(appNotificationEvent)); got != 0 {
+	if got := len(emits.events(uimodel.AppNotificationEvent)); got != 0 {
 		t.Fatalf("banner emitted %d times during an in-flight deploy, want 0", got)
 	}
-	if got := len(emits.events(envStatusEvent)); got != 0 {
+	if got := len(emits.events(uimodel.EnvStatusEvent)); got != 0 {
 		t.Fatalf("failed status emitted %d times during an in-flight deploy, want 0", got)
 	}
 
@@ -253,11 +254,11 @@ func TestSurfaceEnsureFailureSuppressedWhileDeployInFlight(t *testing.T) {
 	app.sessions["s1"].lockedByActivity = ""
 	app.mu.Unlock()
 	app.surfaceEnvRuntimeEnsureFailure(selection, absentErr)
-	notes := emits.events(appNotificationEvent)
+	notes := emits.events(uimodel.AppNotificationEvent)
 	if len(notes) != 1 {
 		t.Fatalf("banner emitted %d times once the deploy cleared, want 1", len(notes))
 	}
-	note, ok := notes[0].(appNotificationPayload)
+	note, ok := notes[0].(uimodel.AppNotificationPayload)
 	if !ok {
 		t.Fatalf("notification payload has unexpected type %T", notes[0])
 	}
@@ -276,19 +277,19 @@ func TestSurfaceEnsureFailureRendersAStoppedRuntimeAsStopped(t *testing.T) {
 	}, func(core.Context, lifecycle.RuntimeScaleTarget) (lifecycle.RuntimeRunState, error) {
 		return lifecycle.RuntimeRunState{Present: true, DesiredReplicas: 0, ReadyReplicas: 1}, nil
 	})
-	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 
 	app.surfaceEnvRuntimeEnsureFailure(selection, errors.New("erun/remote is stopped, and a session reconnect does not start it"))
 
 	statuses := envStatuses(emits)
-	if len(statuses) != 1 || statuses[0].Status != envStatusRuntimeStopped {
-		t.Fatalf("env status = %+v, want a single %q", statuses, envStatusRuntimeStopped)
+	if len(statuses) != 1 || statuses[0].Status != uimodel.EnvStatusRuntimeStopped {
+		t.Fatalf("env status = %+v, want a single %q", statuses, uimodel.EnvStatusRuntimeStopped)
 	}
-	notes := emits.events(appNotificationEvent)
+	notes := emits.events(uimodel.AppNotificationEvent)
 	if len(notes) != 1 {
 		t.Fatalf("notification emitted %d times, want 1", len(notes))
 	}
-	note, ok := notes[0].(appNotificationPayload)
+	note, ok := notes[0].(uimodel.AppNotificationPayload)
 	if !ok {
 		t.Fatalf("notification payload has unexpected type %T", notes[0])
 	}
@@ -305,22 +306,22 @@ func TestEnsureSuccessClearsRuntimeUnreachableNotification(t *testing.T) {
 	app, emits := capturedEnsureApp(t, func(context.Context, config.OpenResult, func(string)) error {
 		return nil
 	}, nil)
-	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 
 	app.ensureEnvRuntimeOnce(selection)
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if len(emits.events(appNotificationClearEvent)) > 0 {
+		if len(emits.events(uimodel.AppNotificationClearEvent)) > 0 {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	events := emits.events(appNotificationClearEvent)
+	events := emits.events(uimodel.AppNotificationClearEvent)
 	if len(events) == 0 {
 		t.Fatal("a successful ensure did not clear the runtime-unreachable banner")
 	}
-	payload, ok := events[0].(appNotificationClearPayload)
+	payload, ok := events[0].(uimodel.AppNotificationClearPayload)
 	if !ok {
 		t.Fatalf("clear payload has unexpected type %T", events[0])
 	}
@@ -333,15 +334,15 @@ func TestSurfaceEnsureFailureOffersDeployForGenuinelyAbsentDeployment(t *testing
 	app, emits := capturedEnsureApp(t, func(context.Context, config.OpenResult, func(string)) error {
 		return nil
 	}, nil)
-	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 
 	app.surfaceEnvRuntimeEnsureFailure(selection, deploymentAbsentErrorForTest("erun", "remote"))
 
-	notes := emits.events(appNotificationEvent)
+	notes := emits.events(uimodel.AppNotificationEvent)
 	if len(notes) != 1 {
 		t.Fatalf("notification emitted %d times, want 1", len(notes))
 	}
-	note, ok := notes[0].(appNotificationPayload)
+	note, ok := notes[0].(uimodel.AppNotificationPayload)
 	if !ok {
 		t.Fatalf("notification payload has unexpected type %T", notes[0])
 	}
@@ -358,16 +359,16 @@ func TestSurfaceEnsureFailureOffersNoDeployForACheckThatCouldNotAsk(t *testing.T
 	app, emits := capturedEnsureApp(t, func(context.Context, config.OpenResult, func(string)) error {
 		return nil
 	}, nil)
-	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 	checkErr := errors.New(`could not determine whether deployment "frs-devops" is deployed (the configured kubernetes context was not found in kubeconfig): error: context "frs-prod" does not exist`)
 
 	app.surfaceEnvRuntimeEnsureFailure(selection, checkErr)
 
-	notes := emits.events(appNotificationEvent)
+	notes := emits.events(uimodel.AppNotificationEvent)
 	if len(notes) != 1 {
 		t.Fatalf("notification emitted %d times, want 1", len(notes))
 	}
-	note, ok := notes[0].(appNotificationPayload)
+	note, ok := notes[0].(uimodel.AppNotificationPayload)
 	if !ok {
 		t.Fatalf("notification payload has unexpected type %T", notes[0])
 	}
@@ -386,15 +387,15 @@ func TestSurfaceEnsureFailureOffersNoDeployForAnUnclassifiedFailure(t *testing.T
 	app, emits := capturedEnsureApp(t, func(context.Context, config.OpenResult, func(string)) error {
 		return nil
 	}, nil)
-	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 
 	app.surfaceEnvRuntimeEnsureFailure(selection, errors.New("timed out waiting for API port-forward"))
 
-	notes := emits.events(appNotificationEvent)
+	notes := emits.events(uimodel.AppNotificationEvent)
 	if len(notes) != 1 {
 		t.Fatalf("notification emitted %d times, want 1", len(notes))
 	}
-	note, ok := notes[0].(appNotificationPayload)
+	note, ok := notes[0].(uimodel.AppNotificationPayload)
 	if !ok {
 		t.Fatalf("notification payload has unexpected type %T", notes[0])
 	}

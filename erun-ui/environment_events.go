@@ -1,6 +1,10 @@
 package main
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
+)
 
 type uiEnvironmentInitializedPayload struct {
 	Tenant      string `json:"tenant"`
@@ -37,7 +41,7 @@ func (a *App) emitEnvironmentInitialized(tenant, environment string) {
 	}
 	a.initEmitted[key] = struct{}{}
 	a.initEmittedMu.Unlock()
-	a.emitEvent(environmentInitializedEvent, uiEnvironmentInitializedPayload{
+	a.emitEvent(uimodel.EnvironmentInitializedEvent, uiEnvironmentInitializedPayload{
 		Tenant:      tenant,
 		Environment: environment,
 	})
@@ -50,7 +54,7 @@ func (a *App) emitEnvironmentInitFailed(tenant, environment string) {
 		return
 	}
 	a.clearInitEmitted(tenant, environment)
-	a.emitEvent(environmentInitFailedEvent, uiEnvironmentInitializedPayload{
+	a.emitEvent(uimodel.EnvironmentInitFailedEvent, uiEnvironmentInitializedPayload{
 		Tenant:      tenant,
 		Environment: environment,
 	})
@@ -63,7 +67,7 @@ func (a *App) emitEnvironmentDeployed(tenant, environment string) {
 	if tenant == "" || environment == "" {
 		return
 	}
-	a.emitEvent(environmentDeployedEvent, uiEnvironmentInitializedPayload{
+	a.emitEvent(uimodel.EnvironmentDeployedEvent, uiEnvironmentInitializedPayload{
 		Tenant:      tenant,
 		Environment: environment,
 	})
@@ -71,7 +75,7 @@ func (a *App) emitEnvironmentDeployed(tenant, environment string) {
 
 // A config-file change carries no selection, so the frontend must not auto-open.
 func (a *App) emitEnvironmentsChanged() {
-	a.emitEvent(environmentsChangedEvent, struct{}{})
+	a.emitEvent(uimodel.EnvironmentsChangedEvent, struct{}{})
 }
 
 type uiHostedDefinitionUploadedPayload struct {
@@ -88,7 +92,7 @@ func (a *App) emitHostedDefinitionUploaded(tenant, environment string, revision 
 	if tenant == "" || environment == "" {
 		return
 	}
-	a.emitEvent(hostedDefinitionUploadedEvent, uiHostedDefinitionUploadedPayload{
+	a.emitEvent(uimodel.HostedDefinitionUploadedEvent, uiHostedDefinitionUploadedPayload{
 		Tenant:      tenant,
 		Environment: environment,
 		Revision:    revision,
@@ -109,7 +113,7 @@ func (a *App) emitDoctorCompleted(tenant, environment string, success bool, mess
 	if tenant == "" || environment == "" {
 		return
 	}
-	a.emitEvent(doctorCompletedEvent, uiDoctorCompletedPayload{
+	a.emitEvent(uimodel.DoctorCompletedEvent, uiDoctorCompletedPayload{
 		Tenant:      tenant,
 		Environment: environment,
 		Success:     success,
@@ -132,7 +136,7 @@ func (a *App) emitSSHDInitCompleted(tenant, environment string, success bool, me
 	if tenant == "" || environment == "" {
 		return
 	}
-	a.emitEvent(sshdInitCompletedEvent, uiSSHDInitCompletedPayload{
+	a.emitEvent(uimodel.SSHDInitCompletedEvent, uiSSHDInitCompletedPayload{
 		Tenant:      tenant,
 		Environment: environment,
 		Success:     success,

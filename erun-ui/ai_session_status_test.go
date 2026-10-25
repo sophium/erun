@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // aiSessionProbeOutput frames statuses the way aiSessionStatusScript output does.
@@ -46,7 +47,7 @@ func newAISessionStatusTestApp(output string, execErr error) (*App, *capturedEmi
 		emitFn:            emits.fn(),
 	}
 	app.deps = erunUIDeps{
-		execRuntimePod: func(_ context.Context, _ uiSelection, script string) (string, error) {
+		execRuntimePod: func(_ context.Context, _ uimodel.Selection, script string) (string, error) {
 			*scripts = append(*scripts, script)
 			if execErr != nil {
 				return "", execErr
@@ -58,7 +59,7 @@ func newAISessionStatusTestApp(output string, execErr error) (*App, *capturedEmi
 }
 
 // aiStatusTestTab is latched busy by volume, now silent, with a live process.
-func aiStatusTestTab(selection uiSelection) *managedTerminal {
+func aiStatusTestTab(selection uimodel.Selection) *managedTerminal {
 	return &managedTerminal{
 		kind:          sessionKindAI,
 		selection:     selection,
@@ -74,7 +75,7 @@ func aiStatusTestTab(selection uiSelection) *managedTerminal {
 // A reported awaiting-input boundary must release the badge even though the
 // process is alive and output is silent.
 func TestAwaitingInputReleasesTheBadgeOnALiveSession(t *testing.T) {
-	selection := uiSelection{Tenant: "petios", Environment: "local"}
+	selection := uimodel.Selection{Tenant: "petios", Environment: "local"}
 	tests := []struct {
 		name        string
 		state       model.AISessionState
@@ -103,10 +104,10 @@ func TestAwaitingInputReleasesTheBadgeOnALiveSession(t *testing.T) {
 
 			app.clearAIActivityIfQuiet(managed)
 
-			cleared := len(emits.events(aiActivityEvent)) > 0
+			cleared := len(emits.events(uimodel.AIActivityEvent)) > 0
 			if cleared != tc.wantCleared {
 				t.Fatalf("badge cleared = %v, want %v; events: %+v",
-					cleared, tc.wantCleared, emits.events(aiActivityEvent))
+					cleared, tc.wantCleared, emits.events(uimodel.AIActivityEvent))
 			}
 			if managed.aiBusyEmitted == tc.wantCleared {
 				t.Fatalf("latch state %v contradicts the emitted signal", managed.aiBusyEmitted)
@@ -117,7 +118,7 @@ func TestAwaitingInputReleasesTheBadgeOnALiveSession(t *testing.T) {
 
 // A reported working state lights the badge without any output.
 func TestModelReportedWorkLightsTheBadgeWithoutOutput(t *testing.T) {
-	selection := uiSelection{Tenant: "petios", Environment: "local"}
+	selection := uimodel.Selection{Tenant: "petios", Environment: "local"}
 	app, emits, scripts := newAISessionStatusTestApp(
 		aiSessionProbeOutput(reportedAISessionStatus("conv-1", model.AISessionStateBusy, time.Now())), nil)
 	managed := aiStatusTestTab(selection)
@@ -127,7 +128,7 @@ func TestModelReportedWorkLightsTheBadgeWithoutOutput(t *testing.T) {
 
 	app.reconcileAISessionStatusesOnce()
 
-	events := emits.events(aiActivityEvent)
+	events := emits.events(uimodel.AIActivityEvent)
 	if len(events) != 1 {
 		t.Fatalf("expected one busy=true emit from the report alone, got %+v", events)
 	}
@@ -154,7 +155,7 @@ func TestModelReportedWorkLightsTheBadgeWithoutOutput(t *testing.T) {
 
 // Where the tool reports state, repaint volume must not raise the badge.
 func TestReportedStateOutranksVolumeWhenTheToolRepaints(t *testing.T) {
-	selection := uiSelection{Tenant: "petios", Environment: "local"}
+	selection := uimodel.Selection{Tenant: "petios", Environment: "local"}
 	tests := []struct {
 		name       string
 		reporting  bool
@@ -196,7 +197,7 @@ func TestReportedStateOutranksVolumeWhenTheToolRepaints(t *testing.T) {
 				managed.aiInactivityTimer.Stop()
 			}
 
-			events := emits.events(aiActivityEvent)
+			events := emits.events(uimodel.AIActivityEvent)
 			if got := len(events) > 0; got != tc.wantEmit {
 				t.Fatalf("emitted = %v, want %v (%s); events: %+v", got, tc.wantEmit, tc.reportNote, events)
 			}
@@ -209,7 +210,7 @@ func TestReportedStateOutranksVolumeWhenTheToolRepaints(t *testing.T) {
 
 // Stale, empty, failed, and unparseable reads all leave the volume latch alone.
 func TestAISessionStatusLeavesTheVolumeLatchAloneWhenItSaysNothing(t *testing.T) {
-	selection := uiSelection{Tenant: "petios", Environment: "local"}
+	selection := uimodel.Selection{Tenant: "petios", Environment: "local"}
 	tests := []struct {
 		name    string
 		output  string
@@ -246,7 +247,7 @@ func TestAISessionStatusLeavesTheVolumeLatchAloneWhenItSaysNothing(t *testing.T)
 			}
 
 			app.reconcileAISessionStatusesOnce()
-			if events := emits.events(aiActivityEvent); len(events) != 0 {
+			if events := emits.events(uimodel.AIActivityEvent); len(events) != 0 {
 				t.Fatalf("no evidence must leave the volume latch untouched, got %+v", events)
 			}
 			if !managed.aiBusyEmitted {
@@ -258,7 +259,7 @@ func TestAISessionStatusLeavesTheVolumeLatchAloneWhenItSaysNothing(t *testing.T)
 
 // A tool-raised latch must clear when reports stop, even with the process alive.
 func TestModelLatchIsReleasedWhenItsReportStopsArriving(t *testing.T) {
-	selection := uiSelection{Tenant: "petios", Environment: "local"}
+	selection := uimodel.Selection{Tenant: "petios", Environment: "local"}
 	app, emits, _ := newAISessionStatusTestApp("", nil)
 	managed := aiStatusTestTab(selection)
 	managed.aiBusyEmitted = false
@@ -270,8 +271,8 @@ func TestModelLatchIsReleasedWhenItsReportStopsArriving(t *testing.T) {
 		reportedAISessionStatus("conv-1", model.AISessionStateBusy, time.Now()),
 	})
 	app.latchAIActivity(managed)
-	if len(emits.events(aiActivityEvent)) != 1 {
-		t.Fatalf("expected the report to raise the latch, got %+v", emits.events(aiActivityEvent))
+	if len(emits.events(uimodel.AIActivityEvent)) != 1 {
+		t.Fatalf("expected the report to raise the latch, got %+v", emits.events(uimodel.AIActivityEvent))
 	}
 
 	reading := app.aiSessionReadings[selectionKey(selection)]
@@ -280,7 +281,7 @@ func TestModelLatchIsReleasedWhenItsReportStopsArriving(t *testing.T) {
 
 	app.releaseUnobservedAIActivity()
 
-	events := emits.events(aiActivityEvent)
+	events := emits.events(uimodel.AIActivityEvent)
 	if len(events) != 2 {
 		t.Fatalf("a latch with no report left to re-assert it must be released, got %+v", events)
 	}

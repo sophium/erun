@@ -11,6 +11,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/command/orchestrator"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // Named because the probe looks for this orchestrator's per-id config path.
@@ -130,8 +131,8 @@ func TestSpawnOrchestratorOpensTheEdgeBeforeWritingMCPConfig(t *testing.T) {
 	if !strings.Contains(string(data), "frs-dev") {
 		t.Fatalf("the linked env must still be wired:\n%s", data)
 	}
-	for _, event := range emits.events(appNotificationEvent) {
-		if payload, ok := event.(appNotificationPayload); ok && strings.Contains(payload.Message, "not answering") {
+	for _, event := range emits.events(uimodel.AppNotificationEvent) {
+		if payload, ok := event.(uimodel.AppNotificationPayload); ok && strings.Contains(payload.Message, "not answering") {
 			t.Fatalf("a repaired edge must not be reported unreachable: %q", payload.Message)
 		}
 	}
@@ -176,7 +177,7 @@ func TestWireOrchestratorMCPRetriesAnEdgeRepairThatFailed(t *testing.T) {
 
 	app.wireOrchestratorMCP(orchestratorEdgeTestID, "Petios", spawnEdgeTestTarget())
 
-	key := selectionKey(normalizeSelection(uiSelection{Tenant: "frs", Environment: "dev"}))
+	key := selectionKey(uimodel.NormalizeSelection(uimodel.Selection{Tenant: "frs", Environment: "dev"}))
 	app.envEnsureMu.Lock()
 	_, stamped := app.envEnsureDone[key]
 	app.envEnsureMu.Unlock()
@@ -200,18 +201,18 @@ func TestWireOrchestratorMCPLeavesAnAnsweringEdgeAlone(t *testing.T) {
 	if attempts, _, _ := edge.snapshot(); attempts != 0 {
 		t.Fatalf("edge rebinds = %d, want 0 — an answering edge must not be reopened", attempts)
 	}
-	for _, event := range emits.events(appNotificationEvent) {
-		if payload, ok := event.(appNotificationPayload); ok && strings.Contains(payload.Message, "not answering") {
+	for _, event := range emits.events(uimodel.AppNotificationEvent) {
+		if payload, ok := event.(uimodel.AppNotificationPayload); ok && strings.Contains(payload.Message, "not answering") {
 			t.Fatalf("an answering edge was reported unreachable: %q", payload.Message)
 		}
 	}
 }
 
-func unreachableNoticeFor(t *testing.T, emits *capturedEmits, label string) appNotificationPayload {
+func unreachableNoticeFor(t *testing.T, emits *capturedEmits, label string) uimodel.AppNotificationPayload {
 	t.Helper()
-	var found []appNotificationPayload
-	for _, event := range emits.events(appNotificationEvent) {
-		payload, ok := event.(appNotificationPayload)
+	var found []uimodel.AppNotificationPayload
+	for _, event := range emits.events(uimodel.AppNotificationEvent) {
+		payload, ok := event.(uimodel.AppNotificationPayload)
 		if !ok {
 			t.Fatalf("unexpected payload type: %T", event)
 		}
@@ -220,7 +221,7 @@ func unreachableNoticeFor(t *testing.T, emits *capturedEmits, label string) appN
 		}
 	}
 	if len(found) != 1 {
-		t.Fatalf("notices naming %s and its silent edge = %d, want 1: %+v", label, len(found), emits.events(appNotificationEvent))
+		t.Fatalf("notices naming %s and its silent edge = %d, want 1: %+v", label, len(found), emits.events(uimodel.AppNotificationEvent))
 	}
 	return found[0]
 }

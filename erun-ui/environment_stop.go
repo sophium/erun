@@ -10,15 +10,16 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // Waking has no desktop path: opening an environment runs `erun open`, which wakes it.
 
 // StopEnvironment records the stop on the env config too, so a later deploy
 // keeps it stopped.
-func (a *App) StopEnvironment(selection uiSelection) (uiEnvironmentStopResult, error) {
-	selection = normalizeSelection(selection)
-	if err := errMissingTenantOrEnvironment("stop environment", selection.Tenant, selection.Environment); err != nil {
+func (a *App) StopEnvironment(selection uimodel.Selection) (uiEnvironmentStopResult, error) {
+	selection = uimodel.NormalizeSelection(selection)
+	if err := uimodel.ErrMissingTenantOrEnvironment("stop environment", selection.Tenant, selection.Environment); err != nil {
 		return uiEnvironmentStopResult{}, err
 	}
 	result, err := resolve.ResolveOpen(a.deps.store, model.OpenParams{
@@ -41,7 +42,7 @@ func (a *App) StopEnvironment(selection uiSelection) (uiEnvironmentStopResult, e
 		return uiEnvironmentStopResult{}, err
 	}
 
-	a.emitEnvStatus(selection, envStatusRuntimeStopped)
+	a.emitEnvStatus(selection, uimodel.EnvStatusRuntimeStopped)
 	a.emitAppNotification("info", stopEnvironmentNotice(stopped))
 	return uiEnvironmentStopResult{
 		Tenant:              stopped.Tenant,
@@ -77,14 +78,14 @@ func stopEnvironmentKeptComponents(result model.StopEnvironmentResult) string {
 }
 
 // markRuntimeStopped latches a per-env stop the cluster read cannot yet see.
-func (a *App) markRuntimeStopped(selection uiSelection) {
+func (a *App) markRuntimeStopped(selection uimodel.Selection) {
 	key := selectionKey(selection)
 	a.mu.Lock()
 	a.runtimeStops[key] = struct{}{}
 	a.mu.Unlock()
 }
 
-func (a *App) clearRuntimeStopped(selection uiSelection) {
+func (a *App) clearRuntimeStopped(selection uimodel.Selection) {
 	key := selectionKey(selection)
 	a.mu.Lock()
 	delete(a.runtimeStops, key)
@@ -92,7 +93,7 @@ func (a *App) clearRuntimeStopped(selection uiSelection) {
 }
 
 // isRuntimeStopped does not consume the latch: every tab of the env must see it.
-func (a *App) isRuntimeStopped(selection uiSelection) bool {
+func (a *App) isRuntimeStopped(selection uimodel.Selection) bool {
 	key := selectionKey(selection)
 	a.mu.Lock()
 	_, ok := a.runtimeStops[key]
@@ -102,7 +103,7 @@ func (a *App) isRuntimeStopped(selection uiSelection) bool {
 
 // runtimeStoppedForSelection trusts the cluster, not the env config; an
 // unreadable cluster reads as not stopped.
-func (a *App) runtimeStoppedForSelection(selection uiSelection) bool {
+func (a *App) runtimeStoppedForSelection(selection uimodel.Selection) bool {
 	if a.isRuntimeStopped(selection) {
 		return true
 	}
@@ -117,7 +118,7 @@ func (a *App) runtimeStoppedForSelection(selection uiSelection) bool {
 
 // readRuntimeRunStateForSelection is shared so the gate and the Runtime tab
 // resolve the same Deployment.
-func (a *App) readRuntimeRunStateForSelection(selection uiSelection) (config.OpenResult, lifecycle.RuntimeRunState, error) {
+func (a *App) readRuntimeRunStateForSelection(selection uimodel.Selection) (config.OpenResult, lifecycle.RuntimeRunState, error) {
 	if a.deps.store == nil || a.deps.readRuntimeRunState == nil {
 		return config.OpenResult{}, lifecycle.RuntimeRunState{}, errors.New("the Kubernetes reader is not wired")
 	}
@@ -137,9 +138,9 @@ func (a *App) readRuntimeRunStateForSelection(selection uiSelection) (config.Ope
 
 // LoadRuntimeRunState is fail-soft: an unreadable cluster sets Message, which is
 // distinct from Present=false.
-func (a *App) LoadRuntimeRunState(selection uiSelection) (uiRuntimeRunState, error) {
-	selection = normalizeSelection(selection)
-	if err := errMissingTenantOrEnvironment("load runtime run state", selection.Tenant, selection.Environment); err != nil {
+func (a *App) LoadRuntimeRunState(selection uimodel.Selection) (uiRuntimeRunState, error) {
+	selection = uimodel.NormalizeSelection(selection)
+	if err := uimodel.ErrMissingTenantOrEnvironment("load runtime run state", selection.Tenant, selection.Environment); err != nil {
 		return uiRuntimeRunState{}, err
 	}
 	state := uiRuntimeRunState{Tenant: selection.Tenant, Environment: selection.Environment}
@@ -164,7 +165,7 @@ func (a *App) LoadRuntimeRunState(selection uiSelection) (uiRuntimeRunState, err
 }
 
 // runtimeStopRemainingComponents returns no names on a failed resolve.
-func (a *App) runtimeStopRemainingComponents(selection uiSelection) []string {
+func (a *App) runtimeStopRemainingComponents(selection uimodel.Selection) []string {
 	if a.deps.store == nil {
 		return nil
 	}

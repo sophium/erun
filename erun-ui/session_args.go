@@ -4,13 +4,14 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
-func buildSSHDInitArgs(selection uiSelection) []string {
+func buildSSHDInitArgs(selection uimodel.Selection) []string {
 	return []string{"sshd", "init", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment)}
 }
 
-func buildDoctorArgs(selection uiSelection) []string {
+func buildDoctorArgs(selection uimodel.Selection) []string {
 	return []string{"doctor", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment)}
 }
 
@@ -19,7 +20,7 @@ func buildOpenNoShellArgs(tenant, environment string) []string {
 	return []string{"open", strings.TrimSpace(tenant), strings.TrimSpace(environment), "--no-shell", "--no-alias-prompt", "--reconnect"}
 }
 
-func buildInitArgs(selection uiSelection) []string {
+func buildInitArgs(selection uimodel.Selection) []string {
 	envType := strings.TrimSpace(selection.Type)
 	if envType == "" {
 		// Older frontends omit Type and expect remote-agent; the CLI default is local-agent.
@@ -44,7 +45,7 @@ func buildInitArgs(selection uiSelection) []string {
 	return args
 }
 
-func appendInitOptionalFlags(args []string, selection uiSelection) []string {
+func appendInitOptionalFlags(args []string, selection uimodel.Selection) []string {
 	pairs := []struct{ flag, value string }{
 		{"--version", strings.TrimSpace(selection.Version)},
 		{"--runtime-image", strings.TrimSpace(selection.RuntimeImage)},
@@ -77,7 +78,7 @@ func appendInitOptionalFlags(args []string, selection uiSelection) []string {
 	return args
 }
 
-func buildDeployArgs(selection uiSelection) []string {
+func buildDeployArgs(selection uimodel.Selection) []string {
 	args := []string{"deploy", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment)}
 	if version := strings.TrimSpace(selection.Version); version != "" {
 		args = append(args, "--version", version)
@@ -93,7 +94,7 @@ func buildDeployArgs(selection uiSelection) []string {
 }
 
 // An empty selection lets deploy fall back to the env's saved default.
-func appendDeployComponentsFlag(args []string, selection uiSelection) []string {
+func appendDeployComponentsFlag(args []string, selection uimodel.Selection) []string {
 	names := make([]string, 0, len(selection.Components))
 	for _, raw := range selection.Components {
 		if name := strings.TrimSpace(raw); name != "" {
@@ -107,7 +108,7 @@ func appendDeployComponentsFlag(args []string, selection uiSelection) []string {
 }
 
 // deployRuntimeImageOverride returns "" when the pick is the env's own image.
-func deployRuntimeImageOverride(selection uiSelection) string {
+func deployRuntimeImageOverride(selection uimodel.Selection) string {
 	image := strings.TrimSpace(selection.RuntimeImage)
 	if image == "" {
 		return ""
@@ -125,7 +126,7 @@ func deployRuntimeImageOverride(selection uiSelection) string {
 	return image
 }
 
-func buildUpgradeArgs(selection uiSelection) []string {
+func buildUpgradeArgs(selection uimodel.Selection) []string {
 	args := []string{"upgrade", "--tenant", selection.Tenant, "--environment", selection.Environment}
 	if version := strings.TrimSpace(selection.Version); version != "" {
 		args = append(args, "--version", version)

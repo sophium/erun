@@ -13,6 +13,7 @@ import (
 	"github.com/sophium/erun/erun-common/command/workspace"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/open/runtimeref"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // hostOpenCommand passes the path as a discrete exec argument, never
@@ -102,10 +103,10 @@ type podPathResolution struct {
 
 // ResolveEnvironmentHostPath maps a pod-side terminal path onto its host
 // equivalent via the outputs mirror or host workspace, else unresolved.
-func (a *App) ResolveEnvironmentHostPath(selection uiSelection, podPath string) (podPathResolution, error) {
-	selection = normalizeSelection(selection)
+func (a *App) ResolveEnvironmentHostPath(selection uimodel.Selection, podPath string) (podPathResolution, error) {
+	selection = uimodel.NormalizeSelection(selection)
 	podPath = strings.TrimSpace(podPath)
-	if err := errMissingTenantOrEnvironment("resolve environment host path", selection.Tenant, selection.Environment); err != nil {
+	if err := uimodel.ErrMissingTenantOrEnvironment("resolve environment host path", selection.Tenant, selection.Environment); err != nil {
 		return podPathResolution{}, err
 	}
 	if podPath == "" {

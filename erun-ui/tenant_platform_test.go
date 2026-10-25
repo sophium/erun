@@ -12,12 +12,13 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestLoadTenantDashboardRequiresATenant(t *testing.T) {
 	app := NewApp(erunUIDeps{store: stubUIStore{}})
 	_, err := app.LoadTenantDashboard(uiTenantDashboardInput{})
-	if err == nil || !errors.Is(err, ErrTenantNotGiven) {
+	if err == nil || !errors.Is(err, uimodel.ErrTenantNotGiven) {
 		t.Fatalf("expected ErrTenantNotGiven, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "loading the tenant dashboard") {

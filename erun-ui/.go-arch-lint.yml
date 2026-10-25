@@ -33,6 +33,8 @@ exclude:
 components:
   headlessserver:
     in: "headlessserver"
+  internal-uimodel:
+    in: "internal/uimodel"
   root:
     in: "."
 
@@ -40,6 +42,7 @@ deps:
   root:
     mayDependOn:
       - headlessserver
+      - internal-uimodel
     canUse:
       - cgo
       - github-com-ActiveState-termtest-conpty

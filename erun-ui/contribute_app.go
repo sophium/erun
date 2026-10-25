@@ -16,6 +16,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // contributeAppForward port-forwards the contribute clone's in-pod headless app to the host.
@@ -106,7 +107,7 @@ var spawnContributeAppForwardCmd = func(ctx context.Context, args []string) (*ex
 	return cmd, stderr, nil
 }
 
-func (a *App) startContributeAppForward(ctx context.Context, selection uiSelection) (*contributeAppForward, []string, int, error) {
+func (a *App) startContributeAppForward(ctx context.Context, selection uimodel.Selection) (*contributeAppForward, []string, int, error) {
 	result, err := resolve.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
@@ -245,7 +246,7 @@ func newContributeAppForwards() *contributeAppForwards {
 	return &contributeAppForwards{forwards: map[string]*contributeAppForward{}}
 }
 
-func (c *contributeAppForwards) put(selection uiSelection, forward *contributeAppForward) {
+func (c *contributeAppForwards) put(selection uimodel.Selection, forward *contributeAppForward) {
 	if c == nil || forward == nil {
 		return
 	}
@@ -254,7 +255,7 @@ func (c *contributeAppForwards) put(selection uiSelection, forward *contributeAp
 	c.mu.Unlock()
 }
 
-func (c *contributeAppForwards) take(selection uiSelection) *contributeAppForward {
+func (c *contributeAppForwards) take(selection uimodel.Selection) *contributeAppForward {
 	if c == nil {
 		return nil
 	}
@@ -266,7 +267,7 @@ func (c *contributeAppForwards) take(selection uiSelection) *contributeAppForwar
 	return forward
 }
 
-func contributeAppForwardKey(selection uiSelection) string {
-	selection = normalizeSelection(selection)
+func contributeAppForwardKey(selection uimodel.Selection) string {
+	selection = uimodel.NormalizeSelection(selection)
 	return selection.Tenant + "/" + selection.Environment
 }

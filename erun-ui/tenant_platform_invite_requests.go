@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/infra/platformclient"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // Invite requests need only a verified bearer, never tenant membership;
@@ -86,7 +87,7 @@ type uiSubmitInviteRequestOutcome struct {
 
 // SubmitTenantInviteRequest submits, or updates a pending, invite request.
 func (a *App) SubmitTenantInviteRequest(input uiSubmitInviteRequestInput) (uiSubmitInviteRequestOutcome, error) {
-	tenant, err := requireTenant("requesting an invitation", input.Tenant)
+	tenant, err := uimodel.RequireTenant("requesting an invitation", input.Tenant)
 	if err != nil {
 		return uiSubmitInviteRequestOutcome{}, err
 	}
@@ -146,7 +147,7 @@ type uiTenantInput struct {
 
 // GetMyTenantInviteRequest returns the caller's latest invite request, or nil.
 func (a *App) GetMyTenantInviteRequest(input uiTenantInput) (*uiInviteRequest, error) {
-	tenant, err := requireTenant("checking your invitation request", input.Tenant)
+	tenant, err := uimodel.RequireTenant("checking your invitation request", input.Tenant)
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +178,7 @@ type uiDecideInviteRequestInput struct {
 
 // ApproveTenantInviteRequest enrolls the requester and mints their invite.
 func (a *App) ApproveTenantInviteRequest(input uiDecideInviteRequestInput) (uiInviteRequest, error) {
-	tenant, err := requireTenant("issuing an invitation", input.Tenant)
+	tenant, err := uimodel.RequireTenant("issuing an invitation", input.Tenant)
 	if err != nil {
 		return uiInviteRequest{}, err
 	}
@@ -185,10 +186,7 @@ func (a *App) ApproveTenantInviteRequest(input uiDecideInviteRequestInput) (uiIn
 	if inviteRequestID == "" {
 		return uiInviteRequest{}, errors.New("issuing an invitation requires an invite request id")
 	}
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	client, ctx, cancel, err := a.tenantPlatformClient(ctx, tenant)
 	if err != nil {
 		return uiInviteRequest{}, err
@@ -210,7 +208,7 @@ type uiDeclineInviteRequestInput struct {
 
 // DeclineTenantInviteRequest declines a pending request with a reason.
 func (a *App) DeclineTenantInviteRequest(input uiDeclineInviteRequestInput) (uiInviteRequest, error) {
-	tenant, err := requireTenant("declining an invitation request", input.Tenant)
+	tenant, err := uimodel.RequireTenant("declining an invitation request", input.Tenant)
 	if err != nil {
 		return uiInviteRequest{}, err
 	}
@@ -222,10 +220,7 @@ func (a *App) DeclineTenantInviteRequest(input uiDeclineInviteRequestInput) (uiI
 	if reason == "" {
 		return uiInviteRequest{}, errors.New("declining an invitation request requires a reason")
 	}
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	client, ctx, cancel, err := a.tenantPlatformClient(ctx, tenant)
 	if err != nil {
 		return uiInviteRequest{}, err
@@ -286,10 +281,7 @@ func (a *App) tenantPlatformEnrollmentStatus(tenant string) uiTenantPlatformEnro
 
 	status.PlatformHost = tenantPlatformHost(resolution.apiURL)
 
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	requestCtx, cancel := context.WithTimeout(ctx, tenantDashboardTimeout)
 	defer cancel()
 
@@ -376,10 +368,7 @@ func (a *App) tenantPlatformClientForIdentityCall(tenant string) (*platformclien
 	if resolution.client == nil {
 		return nil, nil, nil, fmt.Errorf("tenant platform is not ready (%s); connect and sign in first", resolution.state)
 	}
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	requestCtx, cancel := context.WithTimeout(ctx, tenantDashboardTimeout)
 	return resolution.client, requestCtx, cancel, nil
 }

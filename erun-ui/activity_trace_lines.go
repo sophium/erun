@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // activityDeployingLineRe: a non-runtime component follows ` · `; an empty release means the runtime chart.
@@ -70,7 +72,7 @@ func cleanActivityFailureLine(line string) string {
 
 // newActivityTraceLineHandler registers and finalizes activity entries from PTY
 // trace lines; the helm poller converges on the same entries by ID.
-func newActivityTraceLineHandler(app *App, selection uiSelection, kind sessionKind) func(string) {
+func newActivityTraceLineHandler(app *App, selection uimodel.Selection, kind sessionKind) func(string) {
 	// Matches both "Deploy of <rel> failed" and "Deploy failed".
 	failedRe := regexp.MustCompile(`^==> Deploy (?:of \S+ )?failed`)
 	errorRe := regexp.MustCompile(`(?i)^Error: `)
@@ -99,7 +101,7 @@ func newActivityTraceLineHandler(app *App, selection uiSelection, kind sessionKi
 }
 
 // handleDeployTraceLine reports whether it matched; the match order is part of the contract.
-func (a *App) handleDeployTraceLine(selection uiSelection, line string) bool {
+func (a *App) handleDeployTraceLine(selection uimodel.Selection, line string) bool {
 	if match := activityDeployingLineRe.FindStringSubmatch(line); match != nil {
 		a.startDeployFromTrace(selection, match[1], match[2], match[3], match[4])
 		return true
@@ -129,7 +131,7 @@ func (a *App) surfaceDeployFailure(tenant, environment, reason string) {
 	if tenant == "" || environment == "" {
 		return
 	}
-	a.emitEnvStatus(uiSelection{Tenant: tenant, Environment: environment}, envStatusFailed)
+	a.emitEnvStatus(uimodel.Selection{Tenant: tenant, Environment: environment}, uimodel.EnvStatusFailed)
 	message := fmt.Sprintf("Deploy of %s/%s failed.", tenant, environment)
 	if reason != "" {
 		message = fmt.Sprintf("Deploy of %s/%s failed: %s", tenant, environment, reason)
@@ -137,7 +139,7 @@ func (a *App) surfaceDeployFailure(tenant, environment, reason string) {
 	a.emitEnvNotification("error", tenant, environment, notificationSourceDeployFailed, message, "")
 }
 
-func (a *App) handleDoctorTraceLine(selection uiSelection, line string) bool {
+func (a *App) handleDoctorTraceLine(selection uimodel.Selection, line string) bool {
 	if match := activityDoctorLineRe.FindStringSubmatch(line); match != nil {
 		a.startDoctorFromTrace(selection, match[1], match[2])
 		return true
@@ -153,7 +155,7 @@ func (a *App) handleDoctorTraceLine(selection uiSelection, line string) bool {
 	return false
 }
 
-func (a *App) handleSSHDInitTraceLine(selection uiSelection, line string) bool {
+func (a *App) handleSSHDInitTraceLine(selection uimodel.Selection, line string) bool {
 	if match := activitySSHDInitLineRe.FindStringSubmatch(line); match != nil {
 		a.startSSHDInitFromTrace(selection, match[1], match[2])
 		return true
@@ -169,7 +171,7 @@ func (a *App) handleSSHDInitTraceLine(selection uiSelection, line string) bool {
 	return false
 }
 
-func (a *App) handleInitTraceLine(selection uiSelection, line string) bool {
+func (a *App) handleInitTraceLine(selection uimodel.Selection, line string) bool {
 	if match := activityInitializingLineRe.FindStringSubmatch(line); match != nil {
 		a.startInitFromTrace(selection, match[1], match[2])
 		return true
@@ -188,7 +190,7 @@ func (a *App) handleInitTraceLine(selection uiSelection, line string) bool {
 }
 
 // handleCommandTraceLine keys on the session selection; the match order is part of the contract.
-func (a *App) handleCommandTraceLine(selection uiSelection, line string) bool {
+func (a *App) handleCommandTraceLine(selection uimodel.Selection, line string) bool {
 	if activityBuildingLineRe.MatchString(line) {
 		a.startCommandFromTrace(selection, "build")
 		return true
@@ -232,7 +234,7 @@ func (a *App) handleCommandTraceLine(selection uiSelection, line string) bool {
 // when several entries are active; deploy is the likeliest source.
 var activityCommandErrorPriority = []string{"deploy", "push", "build", "release", "init"}
 
-func (a *App) captureActivityErrorIfRunning(selection uiSelection, line string) {
+func (a *App) captureActivityErrorIfRunning(selection uimodel.Selection, line string) {
 	if a.activityQueue == nil {
 		return
 	}

@@ -9,6 +9,7 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/workspace"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestStartWorkspaceSyncForSelectionRequiresRemoteSSHDWorkspaceSync(t *testing.T) {
@@ -32,7 +33,7 @@ func TestStartWorkspaceSyncForSelectionRequiresRemoteSSHDWorkspaceSync(t *testin
 	})
 	defer app.shutdown(context.Background())
 
-	app.startWorkspaceSyncForSelection(uiSelection{Tenant: "frs", Environment: "dev"})
+	app.startWorkspaceSyncForSelection(uimodel.Selection{Tenant: "frs", Environment: "dev"})
 
 	select {
 	case params := <-called:
@@ -65,7 +66,7 @@ func TestStartWorkspaceSyncForSelectionSkipsWhenSSHDWorkspaceSyncDisabled(t *tes
 	})
 	defer app.shutdown(context.Background())
 
-	app.startWorkspaceSyncForSelection(uiSelection{Tenant: "frs", Environment: "dev"})
+	app.startWorkspaceSyncForSelection(uimodel.Selection{Tenant: "frs", Environment: "dev"})
 
 	select {
 	case params := <-called:
@@ -99,7 +100,7 @@ func TestStartSessionStartsConfiguredWorkspaceSync(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	if _, err := app.StartSession(uiSelection{Tenant: "frs", Environment: "dev"}, 0, 80, 24); err != nil {
+	if _, err := app.StartSession(uimodel.Selection{Tenant: "frs", Environment: "dev"}, 0, 80, 24); err != nil {
 		t.Fatalf("StartSession failed: %v", err)
 	}
 
@@ -140,12 +141,12 @@ func TestSaveEnvironmentConfigPersistsWorkspaceSyncLocalPath(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	config, err := app.LoadEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "dev"})
+	config, err := app.LoadEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "dev"})
 	requireWorkspaceSyncNoError(t, err, "load config")
 	config.SSHD.WorkspaceSyncEnabled = true
 	config.SSHD.WorkspaceSyncLocalPath = localRoot
 
-	if _, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "dev"}, config); err != nil {
+	if _, err := app.SaveEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "dev"}, config); err != nil {
 		t.Fatalf("SaveEnvironmentConfig failed: %v", err)
 	}
 	stored := store.envs["frs/dev"]
@@ -170,11 +171,11 @@ func TestSaveEnvironmentConfigRejectsEnabledWorkspaceSyncWithoutLocalPath(t *tes
 	app := NewApp(erunUIDeps{store: store})
 	defer app.shutdown(context.Background())
 
-	config, err := app.LoadEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "dev"})
+	config, err := app.LoadEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "dev"})
 	requireWorkspaceSyncNoError(t, err, "load config")
 	config.SSHD.WorkspaceSyncEnabled = true
 
-	if _, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "dev"}, config); err == nil {
+	if _, err := app.SaveEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "dev"}, config); err == nil {
 		t.Fatal("expected missing local sync folder error")
 	}
 }
@@ -188,10 +189,10 @@ func TestSaveEnvironmentConfigAllowsDisabledWorkspaceSyncWithoutLocalPath(t *tes
 	app := NewApp(erunUIDeps{store: store})
 	defer app.shutdown(context.Background())
 
-	config, err := app.LoadEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "dev"})
+	config, err := app.LoadEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "dev"})
 	requireWorkspaceSyncNoError(t, err, "load config")
 
-	if _, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "dev"}, config); err != nil {
+	if _, err := app.SaveEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "dev"}, config); err != nil {
 		t.Fatalf("SaveEnvironmentConfig failed: %v", err)
 	}
 }
@@ -204,7 +205,7 @@ func TestLoadEnvironmentConfigTreatsEnabledWorkspaceSyncWithoutLocalPathAsOff(t 
 	app := NewApp(erunUIDeps{store: store})
 	defer app.shutdown(context.Background())
 
-	config, err := app.LoadEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "dev"})
+	config, err := app.LoadEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "dev"})
 	requireWorkspaceSyncNoError(t, err, "load config")
 	if config.SSHD.WorkspaceSyncEnabled {
 		t.Fatalf("expected workspace sync to load as off without local path, got %+v", config.SSHD)
@@ -315,16 +316,16 @@ func TestStartWorkspaceSyncForSelectionEmitsWarningWithoutLocalPath(t *testing.T
 	app.emitFn = emits.fn()
 	defer app.shutdown(context.Background())
 
-	app.startWorkspaceSyncForSelection(uiSelection{Tenant: "frs", Environment: "dev"})
+	app.startWorkspaceSyncForSelection(uimodel.Selection{Tenant: "frs", Environment: "dev"})
 
-	if got := emits.events(appStatusEvent); len(got) != 0 {
+	if got := emits.events(uimodel.AppStatusEvent); len(got) != 0 {
 		t.Fatalf("expected no unclassified app-status emit, got %+v", got)
 	}
-	events := emits.events(appNotificationEvent)
+	events := emits.events(uimodel.AppNotificationEvent)
 	if len(events) != 1 {
 		t.Fatalf("expected one classified notification, got %+v", events)
 	}
-	payload, ok := events[0].(appNotificationPayload)
+	payload, ok := events[0].(uimodel.AppNotificationPayload)
 	if !ok {
 		t.Fatalf("unexpected payload type: %T", events[0])
 	}
@@ -347,11 +348,11 @@ func TestSetWorkspaceSyncErrorEmitsClassifiedError(t *testing.T) {
 
 	app.setWorkspaceSyncError("frs/dev", "frs", "dev", errors.New("connection refused"))
 
-	events := emits.events(appNotificationEvent)
+	events := emits.events(uimodel.AppNotificationEvent)
 	if len(events) != 1 {
 		t.Fatalf("expected one classified notification, got %+v", events)
 	}
-	payload, ok := events[0].(appNotificationPayload)
+	payload, ok := events[0].(uimodel.AppNotificationPayload)
 	if !ok {
 		t.Fatalf("unexpected payload type: %T", events[0])
 	}

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // pacingEnvBusyTestApp builds one alive, stale orchestrator linked to "acme/dev".
@@ -31,7 +32,7 @@ func pacingEnvBusyTestApp(t *testing.T, startedAt time.Time) (*App, *callRecordi
 
 func TestOrchestratorPacingSuppressedWhileLinkedEnvBusy(t *testing.T) {
 	app, session := pacingEnvBusyTestApp(t, time.Now().Add(-orchestratorPacingStaleAfter-time.Minute))
-	key := selectionKey(uiSelection{Tenant: "acme", Environment: "dev"})
+	key := selectionKey(uimodel.Selection{Tenant: "acme", Environment: "dev"})
 	app.envActivity = map[string]environmentActivityState{
 		key: {observed: true, busy: true, detail: "holding: 1682 desktop ux and co", busyHolderOrchestrators: "agent"},
 	}
@@ -57,7 +58,7 @@ func TestOrchestratorPacingSuppressedWhileLinkedEnvBusy(t *testing.T) {
 
 func TestOrchestratorPacingBusySuppressionOnlyCountsLinkedEnvironments(t *testing.T) {
 	app, session := pacingEnvBusyTestApp(t, time.Now().Add(-orchestratorPacingStaleAfter-time.Minute))
-	unrelatedKey := selectionKey(uiSelection{Tenant: "other", Environment: "prod"})
+	unrelatedKey := selectionKey(uimodel.Selection{Tenant: "other", Environment: "prod"})
 	app.envActivity = map[string]environmentActivityState{
 		unrelatedKey: {observed: true, busy: true, detail: "holding: something-else", busyHolderOrchestrators: "agent"},
 	}
@@ -71,7 +72,7 @@ func TestOrchestratorPacingBusySuppressionOnlyCountsLinkedEnvironments(t *testin
 
 func TestOrchestratorPacingBusySuppressionOnlyCountsThisOrchestratorsLease(t *testing.T) {
 	app, session := pacingEnvBusyTestApp(t, time.Now().Add(-orchestratorPacingStaleAfter-time.Minute))
-	key := selectionKey(uiSelection{Tenant: "acme", Environment: "dev"})
+	key := selectionKey(uimodel.Selection{Tenant: "acme", Environment: "dev"})
 	app.envActivity = map[string]environmentActivityState{
 		key: {observed: true, busy: true, detail: "holding: someone-elses-job", busyHolderOrchestrators: "another-orchestrator"},
 	}
@@ -85,7 +86,7 @@ func TestOrchestratorPacingBusySuppressionOnlyCountsThisOrchestratorsLease(t *te
 
 func TestOrchestratorPacingAllLinkedEnvsIdlePacesAsToday(t *testing.T) {
 	app, session := pacingEnvBusyTestApp(t, time.Now().Add(-orchestratorPacingStaleAfter-time.Minute))
-	key := selectionKey(uiSelection{Tenant: "acme", Environment: "dev"})
+	key := selectionKey(uimodel.Selection{Tenant: "acme", Environment: "dev"})
 	app.envActivity = map[string]environmentActivityState{
 		key: {observed: true, busy: false},
 	}
@@ -117,7 +118,7 @@ func TestOrchestratorPacingUnknownEnvActivityFallsBackToBaseSignal(t *testing.T)
 func TestOrchestratorPacingSurfacesPastTheEnvBusyBound(t *testing.T) {
 	bound := orchestratorPacingEnvBusyBound(getOrchestratorWhipConfig())
 	app, session := pacingEnvBusyTestApp(t, time.Now().Add(-bound-time.Minute))
-	key := selectionKey(uiSelection{Tenant: "acme", Environment: "dev"})
+	key := selectionKey(uimodel.Selection{Tenant: "acme", Environment: "dev"})
 	app.envActivity = map[string]environmentActivityState{
 		key: {observed: true, busy: true, detail: "holding: a build that never finished", busyHolderOrchestrators: "agent"},
 	}
@@ -142,7 +143,7 @@ func TestOrchestratorPacingSurfacesPastTheEnvBusyBound(t *testing.T) {
 func TestOrchestratorPacingBusySuppressionDoesNotConsumeTheCap(t *testing.T) {
 	bound := orchestratorPacingEnvBusyBound(getOrchestratorWhipConfig())
 	app, session := pacingEnvBusyTestApp(t, time.Now().Add(-orchestratorPacingStaleAfter-time.Minute))
-	key := selectionKey(uiSelection{Tenant: "acme", Environment: "dev"})
+	key := selectionKey(uimodel.Selection{Tenant: "acme", Environment: "dev"})
 	app.envActivity = map[string]environmentActivityState{
 		key: {observed: true, busy: true, detail: "holding: a long gate run", busyHolderOrchestrators: "agent"},
 	}
@@ -176,8 +177,8 @@ func TestOrchestratorLinkedEnvBusyStateForDiscriminatesByHolder(t *testing.T) {
 		{Tenant: "acme", Environment: "dev"},
 		{Tenant: "acme", Environment: "build"},
 	}
-	devKey := selectionKey(uiSelection{Tenant: "acme", Environment: "dev"})
-	buildKey := selectionKey(uiSelection{Tenant: "acme", Environment: "build"})
+	devKey := selectionKey(uimodel.Selection{Tenant: "acme", Environment: "dev"})
+	buildKey := selectionKey(uimodel.Selection{Tenant: "acme", Environment: "build"})
 
 	cases := []struct {
 		name     string

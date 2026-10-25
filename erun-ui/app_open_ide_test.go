@@ -9,6 +9,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestOpenIDERunsWithoutConsumingTerminalWhenSSHDEnabled(t *testing.T) {
@@ -49,7 +50,7 @@ func TestOpenIDERunsWithoutConsumingTerminalWhenSSHDEnabled(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	if err := app.OpenIDE(uiSelection{Tenant: " erun ", Environment: " remote "}, "vscode"); err != nil {
+	if err := app.OpenIDE(uimodel.Selection{Tenant: " erun ", Environment: " remote "}, "vscode"); err != nil {
 		t.Fatalf("OpenIDE failed: %v", err)
 	}
 	if startCalls != 0 {
@@ -93,7 +94,7 @@ func TestOpenIDEOpensLocalProjectWithoutSSHD(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	if err := app.OpenIDE(uiSelection{Tenant: "erun", Environment: "local"}, "intellij"); err != nil {
+	if err := app.OpenIDE(uimodel.Selection{Tenant: "erun", Environment: "local"}, "intellij"); err != nil {
 		t.Fatalf("OpenIDE failed: %v", err)
 	}
 	wantExecutable, wantArgs, err := localOpenIDECommand(runtime.GOOS, "intellij", projectRoot)
@@ -161,7 +162,7 @@ func TestOpenIDERejectsMissingSSHDWithoutHiddenInit(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	err := app.OpenIDE(uiSelection{Tenant: "erun", Environment: "remote"}, "intellij")
+	err := app.OpenIDE(uimodel.Selection{Tenant: "erun", Environment: "remote"}, "intellij")
 	if err == nil {
 		t.Fatal("expected missing SSHD error")
 	}

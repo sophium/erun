@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -10,6 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // uiExecCommitInput.Branch is verified server-side and refused on mismatch.
@@ -34,8 +34,8 @@ func withDefaultExecWriteDeps(deps erunUIDeps) erunUIDeps {
 	return deps
 }
 
-func validateExecCommitInput(selection uiSelection, input uiExecCommitInput) (branch, message string, err error) {
-	if err := errMissingTenantOrEnvironment("commit environment working tree", selection.Tenant, selection.Environment); err != nil {
+func validateExecCommitInput(selection uimodel.Selection, input uiExecCommitInput) (branch, message string, err error) {
+	if err := uimodel.ErrMissingTenantOrEnvironment("commit environment working tree", selection.Tenant, selection.Environment); err != nil {
 		return "", "", err
 	}
 	branch = strings.TrimSpace(input.Branch)
@@ -51,8 +51,8 @@ func validateExecCommitInput(selection uiSelection, input uiExecCommitInput) (br
 
 // ExecCommit commits the selected environment's working tree immediately; there
 // is no preview.
-func (a *App) ExecCommit(selection uiSelection, input uiExecCommitInput) (model.CommitWorkingTreeResult, error) {
-	selection = normalizeSelection(selection)
+func (a *App) ExecCommit(selection uimodel.Selection, input uiExecCommitInput) (model.CommitWorkingTreeResult, error) {
+	selection = uimodel.NormalizeSelection(selection)
 	branch, message, err := validateExecCommitInput(selection, input)
 	if err != nil {
 		return model.CommitWorkingTreeResult{}, err
@@ -64,10 +64,7 @@ func (a *App) ExecCommit(selection uiSelection, input uiExecCommitInput) (model.
 	if err != nil {
 		return model.CommitWorkingTreeResult{}, err
 	}
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	mcpPort := config.MCPPortForResult(result)
 	if a.deps.canReachMCPEndpoint != nil && !a.deps.canReachMCPEndpoint(mcpPort) {
 		return model.CommitWorkingTreeResult{}, wrapMCPUnreachableErrorWithKind(
@@ -85,10 +82,10 @@ func (a *App) ExecCommit(selection uiSelection, input uiExecCommitInput) (model.
 }
 
 // ExecPush pushes the selected environment's current branch to its remote.
-func (a *App) ExecPush(selection uiSelection, input uiExecPushInput) (model.PushWorkingTreeBranchResult, error) {
-	selection = normalizeSelection(selection)
+func (a *App) ExecPush(selection uimodel.Selection, input uiExecPushInput) (model.PushWorkingTreeBranchResult, error) {
+	selection = uimodel.NormalizeSelection(selection)
 	branch := strings.TrimSpace(input.Branch)
-	if err := errMissingTenantOrEnvironment("push environment branch", selection.Tenant, selection.Environment); err != nil {
+	if err := uimodel.ErrMissingTenantOrEnvironment("push environment branch", selection.Tenant, selection.Environment); err != nil {
 		return model.PushWorkingTreeBranchResult{}, err
 	}
 	if branch == "" {
@@ -101,10 +98,7 @@ func (a *App) ExecPush(selection uiSelection, input uiExecPushInput) (model.Push
 	if err != nil {
 		return model.PushWorkingTreeBranchResult{}, err
 	}
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	mcpPort := config.MCPPortForResult(result)
 	if a.deps.canReachMCPEndpoint != nil && !a.deps.canReachMCPEndpoint(mcpPort) {
 		return model.PushWorkingTreeBranchResult{}, wrapMCPUnreachableErrorWithKind(

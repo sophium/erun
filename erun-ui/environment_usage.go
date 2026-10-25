@@ -1,6 +1,10 @@
 package main
 
-import "time"
+import (
+	"time"
+
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
+)
 
 // Usage is sampled by a bounded sweep (via LoadRuntimeUsage), never per hover.
 
@@ -37,7 +41,7 @@ func (a *App) reconcileEnvironmentUsageOnce() {
 	}
 }
 
-func (a *App) sampleEnvironmentUsageOnce(selection uiSelection, reachability map[string]environmentActivityState) {
+func (a *App) sampleEnvironmentUsageOnce(selection uimodel.Selection, reachability map[string]environmentActivityState) {
 	key := selectionKey(selection)
 	state, known := reachability[key]
 	var usage uiRuntimeUsage
@@ -50,7 +54,7 @@ func (a *App) sampleEnvironmentUsageOnce(selection uiSelection, reachability map
 			Message:     "Not running, or not open here: there is no runtime pod to measure.",
 		}
 	case a.deps.loadRuntimeUsage != nil:
-		read, err := a.deps.loadRuntimeUsage(a.backgroundContext(), selection)
+		read, err := a.deps.loadRuntimeUsage(a.context(), selection)
 		if err != nil {
 			usage = uiRuntimeUsage{
 				Tenant:      selection.Tenant,
@@ -105,7 +109,7 @@ func (a *App) seedEnvironmentUsageSnapshots(state *uiState) {
 		tenant := &state.Tenants[ti]
 		for ei := range tenant.Environments {
 			env := &tenant.Environments[ei]
-			key := selectionKey(uiSelection{Tenant: tenant.Name, Environment: env.Name})
+			key := selectionKey(uimodel.Selection{Tenant: tenant.Name, Environment: env.Name})
 			reading, ok := a.envUsage[key]
 			if !ok {
 				continue
@@ -115,9 +119,9 @@ func (a *App) seedEnvironmentUsageSnapshots(state *uiState) {
 	}
 }
 
-func (a *App) emitEnvUsage(selection uiSelection, reading environmentUsageReading) {
+func (a *App) emitEnvUsage(selection uimodel.Selection, reading environmentUsageReading) {
 	snapshot := uiEnvironmentUsageSnapshotFrom(reading)
-	a.emitEvent(envUsageEvent, envUsagePayload{
+	a.emitEvent(uimodel.EnvUsageEvent, envUsagePayload{
 		Tenant:            selection.Tenant,
 		Environment:       selection.Environment,
 		Usage:             snapshot.Usage,

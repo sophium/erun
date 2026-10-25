@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // reviewWriteAPI dispatches "METHOD /path" routes, refusing every path in
@@ -118,7 +120,7 @@ func TestCreateReviewRequiresATenant(t *testing.T) {
 	_, err := NewApp(erunUIDeps{store: stubUIStore{}}).CreateReview(uiCreateReviewInput{
 		Name: "Open the review", TargetBranch: "main", SourceBranch: "feature/1348-x",
 	})
-	if err == nil || !errors.Is(err, ErrTenantNotGiven) {
+	if err == nil || !errors.Is(err, uimodel.ErrTenantNotGiven) {
 		t.Fatalf("expected ErrTenantNotGiven, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "opening a review") {
@@ -154,7 +156,7 @@ func TestCreateReviewSurfacesForbiddenAsAnError(t *testing.T) {
 
 func TestCloseReviewRequiresATenant(t *testing.T) {
 	_, err := NewApp(erunUIDeps{store: stubUIStore{}}).CloseReview(uiCloseReviewInput{ReviewID: "review-1"})
-	if err == nil || !errors.Is(err, ErrTenantNotGiven) {
+	if err == nil || !errors.Is(err, uimodel.ErrTenantNotGiven) {
 		t.Fatalf("expected ErrTenantNotGiven, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "closing a review") {
@@ -191,7 +193,7 @@ func TestCloseReviewSurfacesForbiddenAsAnError(t *testing.T) {
 
 func TestAdvanceMergeQueueRequiresATenant(t *testing.T) {
 	_, err := NewApp(erunUIDeps{store: stubUIStore{}}).AdvanceMergeQueue(uiAdvanceMergeQueueInput{Repository: "https://github.com/org/repo", TargetBranch: "main"})
-	if err == nil || !errors.Is(err, ErrTenantNotGiven) {
+	if err == nil || !errors.Is(err, uimodel.ErrTenantNotGiven) {
 		t.Fatalf("expected ErrTenantNotGiven, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "advancing the merge queue") {
@@ -296,7 +298,7 @@ func TestOverrideAdvanceMergeQueueRequiresATenant(t *testing.T) {
 	_, err := NewApp(erunUIDeps{store: stubUIStore{}}).OverrideAdvanceMergeQueue(uiOverrideAdvanceMergeQueueInput{
 		Repository: "https://github.com/org/repo", TargetBranch: "blocked", Reason: "hotfix, reviewers unavailable",
 	})
-	if err == nil || !errors.Is(err, ErrTenantNotGiven) {
+	if err == nil || !errors.Is(err, uimodel.ErrTenantNotGiven) {
 		t.Fatalf("expected ErrTenantNotGiven, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "overriding the merge queue's unresolved-thread gate") {
@@ -335,7 +337,7 @@ func TestCreateReviewCommentRequiresATenant(t *testing.T) {
 	_, err := NewApp(erunUIDeps{store: stubUIStore{}}).CreateReviewComment(uiCreateReviewCommentInput{
 		ReviewID: "review-1", CommitID: "abc123", FilePath: "main.go", Line: 10, Body: "why this line?",
 	})
-	if err == nil || !errors.Is(err, ErrTenantNotGiven) {
+	if err == nil || !errors.Is(err, uimodel.ErrTenantNotGiven) {
 		t.Fatalf("expected ErrTenantNotGiven, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "commenting on a review") {
@@ -428,7 +430,7 @@ func TestResolveReviewCommentRequiresATenant(t *testing.T) {
 	_, err := NewApp(erunUIDeps{store: stubUIStore{}}).ResolveReviewComment(uiUpdateReviewCommentStatusInput{
 		ReviewID: "review-1", CommentID: "comment-1",
 	})
-	if err == nil || !errors.Is(err, ErrTenantNotGiven) {
+	if err == nil || !errors.Is(err, uimodel.ErrTenantNotGiven) {
 		t.Fatalf("expected ErrTenantNotGiven, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "resolving a review comment") {
@@ -440,7 +442,7 @@ func TestUnresolveReviewCommentRequiresATenant(t *testing.T) {
 	_, err := NewApp(erunUIDeps{store: stubUIStore{}}).UnresolveReviewComment(uiUpdateReviewCommentStatusInput{
 		ReviewID: "review-1", CommentID: "comment-1",
 	})
-	if err == nil || !errors.Is(err, ErrTenantNotGiven) {
+	if err == nil || !errors.Is(err, uimodel.ErrTenantNotGiven) {
 		t.Fatalf("expected ErrTenantNotGiven, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "reopening a review comment") {

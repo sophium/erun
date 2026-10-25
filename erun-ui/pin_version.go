@@ -11,6 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // The desktop shells `erun pin` so CLI, MCP and UI share one re-pin engine.
@@ -39,29 +40,26 @@ type uiPinSite struct {
 }
 
 // PreviewPinVersion resolves a re-pin without writing; empty target means latest stable.
-func (a *App) PreviewPinVersion(selection uiSelection, target string) (uiPinPlan, error) {
+func (a *App) PreviewPinVersion(selection uimodel.Selection, target string) (uiPinPlan, error) {
 	return a.runPinCommand(selection, target, true, false)
 }
 
 // ApplyPinVersion performs the re-pin and reports what moved.
-func (a *App) ApplyPinVersion(selection uiSelection, target string) (uiPinPlan, error) {
+func (a *App) ApplyPinVersion(selection uimodel.Selection, target string) (uiPinPlan, error) {
 	return a.runPinCommand(selection, target, false, false)
 }
 
 // RevertPinVersion pins back to the version recorded before the last re-pin.
-func (a *App) RevertPinVersion(selection uiSelection) (uiPinPlan, error) {
+func (a *App) RevertPinVersion(selection uimodel.Selection) (uiPinPlan, error) {
 	return a.runPinCommand(selection, "", false, true)
 }
 
-func (a *App) runPinCommand(selection uiSelection, target string, preview, revert bool) (uiPinPlan, error) {
-	selection = normalizeSelection(selection)
-	if err := errMissingTenantOrEnvironment("run pin command", selection.Tenant, selection.Environment); err != nil {
+func (a *App) runPinCommand(selection uimodel.Selection, target string, preview, revert bool) (uiPinPlan, error) {
+	selection = uimodel.NormalizeSelection(selection)
+	if err := uimodel.ErrMissingTenantOrEnvironment("run pin command", selection.Tenant, selection.Environment); err != nil {
 		return uiPinPlan{}, err
 	}
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 
 	args := []string{"pin", selection.Tenant, selection.Environment, "--output", "json"}
 	if preview {
@@ -158,15 +156,12 @@ func pinSiteLabel(site model.PinSite) string {
 }
 
 // ListPinnableVersions lists the published versions the environment can pin to.
-func (a *App) ListPinnableVersions(selection uiSelection) ([]string, error) {
-	selection = normalizeSelection(selection)
-	if err := errMissingTenantOrEnvironment("list pinnable versions", selection.Tenant, selection.Environment); err != nil {
+func (a *App) ListPinnableVersions(selection uimodel.Selection) ([]string, error) {
+	selection = uimodel.NormalizeSelection(selection)
+	if err := uimodel.ErrMissingTenantOrEnvironment("list pinnable versions", selection.Tenant, selection.Environment); err != nil {
 		return nil, err
 	}
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	cmd := exec.CommandContext(ctx, a.deps.resolveCLIPath(), "pin", selection.Tenant, selection.Environment, "--list", "--output", "json")
 	core.HideConsoleWindow(cmd)
 	core.BoundCommandWait(cmd)
@@ -194,9 +189,9 @@ type uiPinRepoCheckoutStatus struct {
 
 // PinRepoCheckoutStatus mirrors the CLI's resolvePinProjectRoot: a remote-worktree env
 // needs a same-tenant sibling with a local checkout.
-func (a *App) PinRepoCheckoutStatus(selection uiSelection) (uiPinRepoCheckoutStatus, error) {
-	selection = normalizeSelection(selection)
-	if err := errMissingTenantOrEnvironment("resolve pin repo checkout status", selection.Tenant, selection.Environment); err != nil {
+func (a *App) PinRepoCheckoutStatus(selection uimodel.Selection) (uiPinRepoCheckoutStatus, error) {
+	selection = uimodel.NormalizeSelection(selection)
+	if err := uimodel.ErrMissingTenantOrEnvironment("resolve pin repo checkout status", selection.Tenant, selection.Environment); err != nil {
 		return uiPinRepoCheckoutStatus{}, err
 	}
 	target, _, err := a.deps.store.LoadEnvConfig(selection.Tenant, selection.Environment)

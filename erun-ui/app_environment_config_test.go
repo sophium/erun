@@ -10,6 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	componentspkg "github.com/sophium/erun/erun-common/primitive/deploy/components"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
@@ -67,13 +68,13 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 	// Cloud-context Status is not persisted; seed the in-memory cache instead.
 	app.setCloudContextStatusInCache("team-context", cloud.CloudContextStatusStopped)
 
-	loaded, err := app.LoadEnvironmentConfig(uiSelection{Tenant: " frs ", Environment: " prod "})
+	loaded, err := app.LoadEnvironmentConfig(uimodel.Selection{Tenant: " frs ", Environment: " prod "})
 	if err != nil {
 		t.Fatalf("LoadEnvironmentConfig failed: %v", err)
 	}
 	assertLoadedEnvironmentConfig(t, loaded, projectRoot)
 
-	saved, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "prod"}, uiEnvironmentConfig{
+	saved, err := app.SaveEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "prod"}, uiEnvironmentConfig{
 		Name:              "prod",
 		RepoPath:          " /tmp/repo ",
 		KubernetesContext: " cluster-new ",
@@ -118,7 +119,7 @@ func TestSaveAndLoadDeployComponentsRoundTrip(t *testing.T) {
 	}
 	app := NewApp(erunUIDeps{store: store})
 
-	saved, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "prod"}, uiEnvironmentConfig{
+	saved, err := app.SaveEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "prod"}, uiEnvironmentConfig{
 		Name:             "prod",
 		RepoPath:         projectRoot,
 		DeployComponents: []string{"frs-backend-postgres", " ", "frs-backend-api"},
@@ -133,7 +134,7 @@ func TestSaveAndLoadDeployComponentsRoundTrip(t *testing.T) {
 	if got := store.envs["frs/prod"].Deploy.Components; !reflect.DeepEqual(got, want) {
 		t.Fatalf("persisted deploy.components = %v, want %v", got, want)
 	}
-	loaded, err := app.LoadEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "prod"})
+	loaded, err := app.LoadEnvironmentConfig(uimodel.Selection{Tenant: "frs", Environment: "prod"})
 	if err != nil {
 		t.Fatalf("LoadEnvironmentConfig failed: %v", err)
 	}
@@ -184,7 +185,7 @@ func TestLoadDeployComponentsLocalAgentShowsPublishedVersionView(t *testing.T) {
 		return out
 	}
 
-	at100, err := app.LoadDeployComponents(uiSelection{Tenant: "frs", Environment: "local", Version: "1.0.0"})
+	at100, err := app.LoadDeployComponents(uimodel.Selection{Tenant: "frs", Environment: "local", Version: "1.0.0"})
 	if err != nil {
 		t.Fatalf("LoadDeployComponents(1.0.0) failed: %v", err)
 	}
@@ -201,7 +202,7 @@ func TestLoadDeployComponentsLocalAgentShowsPublishedVersionView(t *testing.T) {
 	}
 
 	// No version-to-deploy: the current version (1.0.106) publishes no component charts.
-	atCurrent, err := app.LoadDeployComponents(uiSelection{Tenant: "frs", Environment: "local"})
+	atCurrent, err := app.LoadDeployComponents(uimodel.Selection{Tenant: "frs", Environment: "local"})
 	if err != nil {
 		t.Fatalf("LoadDeployComponents(current) failed: %v", err)
 	}
@@ -248,7 +249,7 @@ func TestLoadDeployComponentsVersionAwareFiltersUnavailableCharts(t *testing.T) 
 		return out
 	}
 
-	at112, err := app.LoadDeployComponents(uiSelection{Tenant: "frs", Environment: "prod", Version: "1.0.112"})
+	at112, err := app.LoadDeployComponents(uimodel.Selection{Tenant: "frs", Environment: "prod", Version: "1.0.112"})
 	if err != nil {
 		t.Fatalf("LoadDeployComponents(1.0.112) failed: %v", err)
 	}
@@ -256,7 +257,7 @@ func TestLoadDeployComponentsVersionAwareFiltersUnavailableCharts(t *testing.T) 
 		t.Fatalf("components at 1.0.112 = %v, want %v (runtime first; unpublished db/powerdns/docs filtered out)", got, want)
 	}
 
-	atCurrent, err := app.LoadDeployComponents(uiSelection{Tenant: "frs", Environment: "prod"})
+	atCurrent, err := app.LoadDeployComponents(uimodel.Selection{Tenant: "frs", Environment: "prod"})
 	if err != nil {
 		t.Fatalf("LoadDeployComponents(current) failed: %v", err)
 	}
@@ -289,7 +290,7 @@ func TestLoadDeployComponentsRuntimeChartReflectsTenantChart(t *testing.T) {
 				return model.RuntimeRegistryVersions{Tags: tags[repository]}, nil
 			},
 		})
-		components, err := app.LoadDeployComponents(uiSelection{Tenant: "frs", Environment: "prod", Version: "1.0.20"})
+		components, err := app.LoadDeployComponents(uimodel.Selection{Tenant: "frs", Environment: "prod", Version: "1.0.20"})
 		if err != nil {
 			t.Fatalf("LoadDeployComponents failed: %v", err)
 		}

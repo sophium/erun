@@ -14,6 +14,7 @@ import (
 	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // Fixtures are report shapes observed on the environment that ran out of quota.
@@ -282,7 +283,7 @@ func TestInvestigationPastItsLifetimeBoundIsTerminated(t *testing.T) {
 		t.Fatalf("the investigation log must say it was terminated (%v): %q", err, data)
 	}
 	if !emittedNotificationContains(harness.emits, "was stopped after") {
-		t.Fatalf("the operator must be told the investigation was stopped, got %+v", harness.emits.events(appNotificationEvent))
+		t.Fatalf("the operator must be told the investigation was stopped, got %+v", harness.emits.events(uimodel.AppNotificationEvent))
 	}
 	if _, err := harness.app.InvestigateFailure(investigateReport("frs/other", "ImagePullBackOff"), "frs", "other", 80, 24); err != nil {
 		t.Fatalf("the freed slot must admit a new investigation: %v", err)
@@ -383,8 +384,8 @@ func activityLeaseIDs(t *testing.T, tenant, environment string) []string {
 }
 
 func emittedNotificationContains(emits *capturedEmits, want string) bool {
-	for _, event := range emits.events(appNotificationEvent) {
-		payload, ok := event.(appNotificationPayload)
+	for _, event := range emits.events(uimodel.AppNotificationEvent) {
+		payload, ok := event.(uimodel.AppNotificationPayload)
 		if !ok {
 			continue
 		}

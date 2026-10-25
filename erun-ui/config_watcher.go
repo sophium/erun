@@ -47,7 +47,7 @@ func (a *App) startConfigWatcher() {
 		return
 	}
 
-	ctx, cancel := context.WithCancel(a.activityWatcherCtx())
+	ctx, cancel := context.WithCancel(a.context())
 	cw := &configWatcher{
 		watcher: watcher,
 		cancel:  cancel,

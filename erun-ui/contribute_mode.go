@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"strings"
@@ -9,6 +8,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -28,8 +28,8 @@ const contributeChangedEvent = "contribute:changed"
 // reservedContributeTenant owns ERun itself; contributing from it would be self-referential.
 const reservedContributeTenant = "erun"
 
-func (a *App) IsContributeEligible(selection uiSelection) bool {
-	selection = normalizeSelection(selection)
+func (a *App) IsContributeEligible(selection uimodel.Selection) bool {
+	selection = uimodel.NormalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" {
 		return false
 	}
@@ -50,7 +50,7 @@ func (a *App) IsContributeEligible(selection uiSelection) bool {
 	}
 }
 
-func (a *App) GetContributeMode(selection uiSelection) bool {
+func (a *App) GetContributeMode(selection uimodel.Selection) bool {
 	if a.contribute == nil {
 		return false
 	}
@@ -59,9 +59,9 @@ func (a *App) GetContributeMode(selection uiSelection) bool {
 
 // SetContributeMode toggles contribute mode, cloning ERun first when enabling.
 // The frontend manages the contribute tabs.
-func (a *App) SetContributeMode(selection uiSelection, on bool) (uiContributeState, error) {
-	selection = normalizeSelection(selection)
-	if err := errMissingTenantOrEnvironment("set contribute mode", selection.Tenant, selection.Environment); err != nil {
+func (a *App) SetContributeMode(selection uimodel.Selection, on bool) (uiContributeState, error) {
+	selection = uimodel.NormalizeSelection(selection)
+	if err := uimodel.ErrMissingTenantOrEnvironment("set contribute mode", selection.Tenant, selection.Environment); err != nil {
 		return uiContributeState{}, err
 	}
 	if on {
@@ -90,7 +90,7 @@ func (a *App) SetContributeMode(selection uiSelection, on bool) (uiContributeSta
 	return state, nil
 }
 
-func (a *App) runEnsureErunClone(selection uiSelection) error {
+func (a *App) runEnsureErunClone(selection uimodel.Selection) error {
 	result, err := resolve.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
@@ -98,10 +98,7 @@ func (a *App) runEnsureErunClone(selection uiSelection) error {
 	if err != nil {
 		return fmt.Errorf("resolve environment: %w", err)
 	}
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	mcpPort := config.MCPPortForResult(result)
 	if a.deps.canReachMCPEndpoint != nil && !a.deps.canReachMCPEndpoint(mcpPort) {
 		return wrapMCPUnreachableError(fmt.Errorf("mcp port %d is not reachable; open the environment first", mcpPort))
@@ -119,8 +116,8 @@ func (a *App) runEnsureErunClone(selection uiSelection) error {
 	return nil
 }
 
-func (a *App) resolveContributeAppPort(selection uiSelection) (int, error) {
-	if err := errMissingTenantOrEnvironment("resolve contribute app port", selection.Tenant, selection.Environment); err != nil {
+func (a *App) resolveContributeAppPort(selection uimodel.Selection) (int, error) {
+	if err := uimodel.ErrMissingTenantOrEnvironment("resolve contribute app port", selection.Tenant, selection.Environment); err != nil {
 		return 0, err
 	}
 	if !a.GetContributeMode(selection) {
@@ -141,8 +138,8 @@ func (a *App) resolveContributeAppPort(selection uiSelection) (int, error) {
 }
 
 // StartContributeApp runs the headless app in the contribute tab and returns its URL.
-func (a *App) StartContributeApp(selection uiSelection) (uiContributeAppLaunch, error) {
-	selection = normalizeSelection(selection)
+func (a *App) StartContributeApp(selection uimodel.Selection) (uiContributeAppLaunch, error) {
+	selection = uimodel.NormalizeSelection(selection)
 	port, err := a.resolveContributeAppPort(selection)
 	if err != nil {
 		return uiContributeAppLaunch{}, err
@@ -154,10 +151,7 @@ func (a *App) StartContributeApp(selection uiSelection) (uiContributeAppLaunch, 
 	if a.contributeApps == nil {
 		a.contributeApps = newContributeAppForwards()
 	}
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	forward, args, localPort, err := a.startContributeAppForward(ctx, selection)
 	if err != nil {
 		return uiContributeAppLaunch{}, err
@@ -180,8 +174,8 @@ func (a *App) StartContributeApp(selection uiSelection) (uiContributeAppLaunch, 
 	}, nil
 }
 
-func (a *App) stopContributeAppForward(selection uiSelection) {
-	selection = normalizeSelection(selection)
+func (a *App) stopContributeAppForward(selection uimodel.Selection) {
+	selection = uimodel.NormalizeSelection(selection)
 	if a.contributeApps != nil {
 		if forward := a.contributeApps.take(selection); forward != nil {
 			forward.stop()
@@ -196,7 +190,7 @@ func contributeAppLaunchCommand(port int) string {
 	return fmt.Sprintf("erun app --headless --port %d\n", port)
 }
 
-func (a *App) sendCommandToContributeERunSession(selection uiSelection, command string) {
+func (a *App) sendCommandToContributeERunSession(selection uimodel.Selection, command string) {
 	prefix := "contribute-erun\x00" + selectionKey(selection) + "\x00"
 	a.mu.Lock()
 	var target *managedTerminal

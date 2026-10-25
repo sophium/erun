@@ -9,6 +9,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/command/workspace"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestHostOpenCommandPerOS(t *testing.T) {
@@ -109,7 +110,7 @@ func TestResolveEnvironmentHostPathMapsPodWorktreeToMirror(t *testing.T) {
 	app := NewApp(erunUIDeps{store: hostWorkspaceStore(local)})
 	defer app.shutdown(context.Background())
 
-	resolution, err := app.ResolveEnvironmentHostPath(uiSelection{Tenant: "frs", Environment: "dev"}, "/home/erun/git/frs/erun-ui/app.go")
+	resolution, err := app.ResolveEnvironmentHostPath(uimodel.Selection{Tenant: "frs", Environment: "dev"}, "/home/erun/git/frs/erun-ui/app.go")
 	requireWorkspaceSyncNoError(t, err, "resolve pod path")
 	if resolution.Kind != "mirror" {
 		t.Fatalf("expected kind mirror, got %+v", resolution)
@@ -128,7 +129,7 @@ func TestResolveEnvironmentHostPathMapsOutputsToArtifactMirror(t *testing.T) {
 	app := NewApp(erunUIDeps{store: hostWorkspaceStore(local)})
 	defer app.shutdown(context.Background())
 
-	resolution, err := app.ResolveEnvironmentHostPath(uiSelection{Tenant: "frs", Environment: "dev"}, core.DefaultRuntimeOutputsDir+"/erun-app.exe")
+	resolution, err := app.ResolveEnvironmentHostPath(uimodel.Selection{Tenant: "frs", Environment: "dev"}, core.DefaultRuntimeOutputsDir+"/erun-app.exe")
 	requireWorkspaceSyncNoError(t, err, "resolve pod path")
 	if resolution.Kind != "artifact" {
 		t.Fatalf("expected kind artifact, got %+v", resolution)
@@ -144,7 +145,7 @@ func TestResolveEnvironmentHostPathNeverResolvesArbitraryPodPathToHost(t *testin
 	app := NewApp(erunUIDeps{store: hostWorkspaceStore(local)})
 	defer app.shutdown(context.Background())
 
-	resolution, err := app.ResolveEnvironmentHostPath(uiSelection{Tenant: "frs", Environment: "dev"}, "/etc/hosts")
+	resolution, err := app.ResolveEnvironmentHostPath(uimodel.Selection{Tenant: "frs", Environment: "dev"}, "/etc/hosts")
 	requireWorkspaceSyncNoError(t, err, "resolve pod path")
 	if resolution.Kind != "unresolved" {
 		t.Fatalf("expected /etc/hosts to stay unresolved, got %+v", resolution)
@@ -165,7 +166,7 @@ func TestResolveEnvironmentHostPathReportsNoWorkspaceWhenSyncDisabled(t *testing
 	app := NewApp(erunUIDeps{store: store})
 	defer app.shutdown(context.Background())
 
-	resolution, err := app.ResolveEnvironmentHostPath(uiSelection{Tenant: "frs", Environment: "dev"}, "/home/erun/git/frs/main.go")
+	resolution, err := app.ResolveEnvironmentHostPath(uimodel.Selection{Tenant: "frs", Environment: "dev"}, "/home/erun/git/frs/main.go")
 	requireWorkspaceSyncNoError(t, err, "resolve pod path")
 	if resolution.Kind != "unresolved" || resolution.Reason == "" {
 		t.Fatalf("expected an unresolved result with a reason, got %+v", resolution)
@@ -176,7 +177,7 @@ func TestResolveEnvironmentHostPathRequiresTenantAndEnvironment(t *testing.T) {
 	app := NewApp(erunUIDeps{store: stubUIStore{}})
 	defer app.shutdown(context.Background())
 
-	if _, err := app.ResolveEnvironmentHostPath(uiSelection{}, "/etc/hosts"); err == nil {
+	if _, err := app.ResolveEnvironmentHostPath(uimodel.Selection{}, "/etc/hosts"); err == nil {
 		t.Fatal("expected missing tenant/environment to error")
 	}
 }

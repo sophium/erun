@@ -2,11 +2,13 @@ package main
 
 import (
 	"testing"
+
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestCloseEnvironmentSessionsClosesEveryMatchingSession(t *testing.T) {
 	app := &App{sessions: make(map[string]*managedTerminal)}
-	target := uiSelection{Tenant: "erun", Environment: "local"}
+	target := uimodel.Selection{Tenant: "erun", Environment: "local"}
 	stub1 := newStubTerminalSession()
 	stub2 := newStubTerminalSession()
 	stub3 := newStubTerminalSession()
@@ -32,9 +34,9 @@ func TestCloseEnvironmentSessionsClosesEveryMatchingSession(t *testing.T) {
 
 func TestCloseEnvironmentSessionsLeavesOtherEnvsAlone(t *testing.T) {
 	app := &App{sessions: make(map[string]*managedTerminal)}
-	target := uiSelection{Tenant: "erun", Environment: "local"}
-	sameEnvDifferentTenant := uiSelection{Tenant: "petios", Environment: "local"}
-	sameTenantDifferentEnv := uiSelection{Tenant: "erun", Environment: "dev"}
+	target := uimodel.Selection{Tenant: "erun", Environment: "local"}
+	sameEnvDifferentTenant := uimodel.Selection{Tenant: "petios", Environment: "local"}
+	sameTenantDifferentEnv := uimodel.Selection{Tenant: "erun", Environment: "dev"}
 
 	targetStub := newStubTerminalSession()
 	otherStub := newStubTerminalSession()
@@ -61,7 +63,7 @@ func TestCloseEnvironmentSessionsLeavesOtherEnvsAlone(t *testing.T) {
 
 func TestCloseEnvironmentSessionsSkipsAlreadyClosed(t *testing.T) {
 	app := &App{sessions: make(map[string]*managedTerminal)}
-	target := uiSelection{Tenant: "erun", Environment: "local"}
+	target := uimodel.Selection{Tenant: "erun", Environment: "local"}
 	stub := newStubTerminalSession()
 	app.sessions["one"] = &managedTerminal{selection: target, session: stub, serial: 1, key: "one", closed: true}
 
@@ -81,10 +83,10 @@ func TestCloseEnvironmentSessionsSkipsAlreadyClosed(t *testing.T) {
 
 func TestCloseEnvironmentSessionsRejectsEmptyTarget(t *testing.T) {
 	app := &App{sessions: make(map[string]*managedTerminal)}
-	if _, err := app.CloseEnvironmentSessions(uiSelection{}); err == nil {
+	if _, err := app.CloseEnvironmentSessions(uimodel.Selection{}); err == nil {
 		t.Fatal("expected error when tenant and environment are both empty")
 	}
-	if _, err := app.CloseEnvironmentSessions(uiSelection{Tenant: "erun"}); err == nil {
+	if _, err := app.CloseEnvironmentSessions(uimodel.Selection{Tenant: "erun"}); err == nil {
 		t.Fatal("expected error when environment is empty")
 	}
 }
@@ -95,7 +97,7 @@ func TestCloseEnvironmentSessionsMarksClosedSoReconnectRefuses(t *testing.T) {
 		sessions: make(map[string]*managedTerminal),
 		busyEnvs: make(map[string]int),
 	}
-	target := uiSelection{Tenant: "erun", Environment: "local"}
+	target := uimodel.Selection{Tenant: "erun", Environment: "local"}
 	// A non-nil respawn means only the closed flag can make tryReconnect refuse.
 	ai := &managedTerminal{
 		selection:      target,

@@ -4,6 +4,8 @@ import (
 	"log"
 	"slices"
 	"strings"
+
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // wireOrchestratorMCP logs an unreachable edge only at spawn; the activity sweep,
@@ -22,7 +24,7 @@ func (a *App) recordOrchestratorEdgeOutage(orchestratorID, label string) {
 	if !ok {
 		return
 	}
-	key := selectionKey(uiSelection{Tenant: tenant, Environment: environment})
+	key := selectionKey(uimodel.Selection{Tenant: tenant, Environment: environment})
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.edgeOutages == nil {
@@ -38,8 +40,8 @@ func (a *App) recordOrchestratorEdgeOutage(orchestratorID, label string) {
 
 // noteOrchestratorEdgeAnswering logs the exit for an edge the sweep just saw
 // answer, and forgets it.
-func (a *App) noteOrchestratorEdgeAnswering(selection uiSelection) {
-	key := selectionKey(normalizeSelection(selection))
+func (a *App) noteOrchestratorEdgeAnswering(selection uimodel.Selection) {
+	key := selectionKey(uimodel.NormalizeSelection(selection))
 	a.mu.Lock()
 	episode, ok := a.edgeOutages[key]
 	delete(a.edgeOutages, key)

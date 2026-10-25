@@ -3,11 +3,13 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestActivityTraceLineHandlerFinalizesOnDeployedAndFailed(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
-	selection := uiSelection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
+	selection := uimodel.Selection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
 	app.activityQueue.start(activityQueueEntry{Command: "deploy", Tenant: "team", Environment: "dev", Version: "1.0.0"})
 	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
 	handler("==> Deployed team/dev 1.0.0 in 12s")
@@ -36,7 +38,7 @@ func TestActivityTraceLineHandlerFinalizesOnDeployedAndFailed(t *testing.T) {
 func TestActivityTraceLineHandlerFinalizesOnReleaseNamedFailure(t *testing.T) {
 	// Coupled to the CLI's failure-line wording.
 	app := newTestAppForActivityQueue(t)
-	selection := uiSelection{Tenant: "team", Environment: "dev"}
+	selection := uimodel.Selection{Tenant: "team", Environment: "dev"}
 	app.activityQueue.start(activityQueueEntry{Command: "deploy", Tenant: "team", Environment: "dev"})
 	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
 	handler("Error: UPGRADE FAILED: timeout")
@@ -59,7 +61,7 @@ func TestSessionReadyFailedMatchesReleaseNamedFailure(t *testing.T) {
 
 func TestActivityTraceLineHandlerLabelsComponentDeployByRelease(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
-	selection := uiSelection{Tenant: "erun", Environment: "local"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "local"}
 	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
 	handler("==> Deploying erun/local · erun-backend-postgres 18.3")
 	entry, ok := app.activityQueue.findActiveByCommand("deploy", "erun", "local")
@@ -79,7 +81,7 @@ func TestActivityTraceLineHandlerLabelsComponentDeployByRelease(t *testing.T) {
 
 func TestActivityTraceLineHandlerRuntimeDeployFallsBackToRuntimeRelease(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
-	selection := uiSelection{Tenant: "erun", Environment: "local"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "local"}
 	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
 	handler("==> Deploying erun/local 1.0.0")
 	entry, ok := app.activityQueue.findActiveByCommand("deploy", "erun", "local")
@@ -107,7 +109,7 @@ func TestActivityTraceLineHandlerFinalizesUsingTenantEnvFromLine(t *testing.T) {
 		Version:     "1.0.51-snapshot-20260508135009",
 		Source:      "trace",
 	})
-	emptySelection := uiSelection{}
+	emptySelection := uimodel.Selection{}
 	handler := newActivityTraceLineHandler(app, emptySelection, sessionKindLocal)
 	handler("==> Deployed erun/ux 1.0.51-snapshot-20260508135009 in 52s")
 	if _, ok := app.activityQueue.findActive("erun", "ux"); ok {
@@ -128,7 +130,7 @@ func TestActivityTraceLineHandlerFinalizesSkippingFromLine(t *testing.T) {
 		Environment: "ux",
 		Source:      "trace",
 	})
-	handler := newActivityTraceLineHandler(app, uiSelection{}, sessionKindLocal)
+	handler := newActivityTraceLineHandler(app, uimodel.Selection{}, sessionKindLocal)
 	handler("==> Skipping erun/ux 1.0.51 (identical deploy already in progress)")
 	all := app.activityQueue.list()
 	if len(all) != 1 || all[0].Status != activityQueueStatusSkipped {
@@ -139,7 +141,7 @@ func TestActivityTraceLineHandlerFinalizesSkippingFromLine(t *testing.T) {
 func TestActivityTraceLineHandlerStartsAndFinishesBuild(t *testing.T) {
 	// Build traces carry no tenant/env, so the handler keys off the selection.
 	app := newTestAppForActivityQueue(t)
-	selection := uiSelection{Tenant: "erun", Environment: "local"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "local"}
 	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
 
 	handler("==> Building")
@@ -163,7 +165,7 @@ func TestActivityTraceLineHandlerStartsAndFinishesBuild(t *testing.T) {
 
 func TestActivityTraceLineHandlerFinalizesBuildOnFailure(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
-	selection := uiSelection{Tenant: "erun", Environment: "local"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "local"}
 	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
 
 	handler("==> Building")
@@ -181,7 +183,7 @@ func TestActivityTraceLineHandlerFinalizesBuildOnFailure(t *testing.T) {
 // The handler must record Detail for subprocess callers with no PTY.
 func TestActivityTraceLineHandlerRecordsDetailWithoutAPTY(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
-	selection := uiSelection{Tenant: "erun", Environment: "local"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "local"}
 	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
 
 	handler("==> Building")
@@ -203,7 +205,7 @@ func TestActivityTraceLineHandlerRecordsDetailWithoutAPTY(t *testing.T) {
 // A bare deploy-failure line must finalize the deploy, never a concurrent build.
 func TestActivityTraceLineHandlerFinalizesCorrectCardWhenBuildAndDeployBothActive(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
-	selection := uiSelection{Tenant: "erun", Environment: "local"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "local"}
 	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
 
 	handler("==> Building")
@@ -239,7 +241,7 @@ func TestActivityTraceLineHandlerFinalizesCorrectCardWhenBuildAndDeployBothActiv
 func TestActivityTraceLineHandlerSkipsBuildWithoutSelection(t *testing.T) {
 	// An empty tenant/env entry would light up every sidebar row.
 	app := newTestAppForActivityQueue(t)
-	handler := newActivityTraceLineHandler(app, uiSelection{}, sessionKindLocal)
+	handler := newActivityTraceLineHandler(app, uimodel.Selection{}, sessionKindLocal)
 	handler("==> Building")
 	if len(app.activityQueue.list()) != 0 {
 		t.Fatalf("expected no entries registered without a selection, got %+v", app.activityQueue.list())
@@ -248,7 +250,7 @@ func TestActivityTraceLineHandlerSkipsBuildWithoutSelection(t *testing.T) {
 
 func TestActivityTraceLineHandlerStartsAndFinishesRelease(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
-	selection := uiSelection{Tenant: "erun", Environment: "local"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "local"}
 	handler := newActivityTraceLineHandler(app, selection, sessionKindOpen)
 
 	handler("==> Releasing 1.4.2")
@@ -272,7 +274,7 @@ func TestActivityTraceLineHandlerStartsAndFinishesRelease(t *testing.T) {
 
 func TestActivityTraceLineHandlerFinalizesReleaseOnFailure(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
-	selection := uiSelection{Tenant: "erun", Environment: "local"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "local"}
 	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
 
 	handler("==> Releasing 1.4.2")
@@ -289,7 +291,7 @@ func TestActivityTraceLineHandlerFinalizesReleaseOnFailure(t *testing.T) {
 
 func TestActivityTraceLineHandlerStartsAndFinishesPush(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
-	selection := uiSelection{Tenant: "erun", Environment: "local"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "local"}
 	handler := newActivityTraceLineHandler(app, selection, sessionKindOpen)
 
 	handler("==> Pushing")
@@ -309,7 +311,7 @@ func TestActivityTraceLineHandlerStartsAndFinishesPush(t *testing.T) {
 
 func TestActivityTraceLineHandlerFinalizesPushOnFailure(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
-	selection := uiSelection{Tenant: "erun", Environment: "local"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "local"}
 	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
 
 	handler("==> Pushing")
@@ -329,7 +331,7 @@ func TestActivityTraceLineHandlerRegistersForAllSessionKinds(t *testing.T) {
 	cases := []sessionKind{sessionKindLocal, sessionKindCommand, sessionKindOpen, sessionKindAI}
 	for _, kind := range cases {
 		app := newTestAppForActivityQueue(t)
-		selection := uiSelection{Tenant: "erun", Environment: "local", KubernetesContext: "orbstack"}
+		selection := uimodel.Selection{Tenant: "erun", Environment: "local", KubernetesContext: "orbstack"}
 		handler := newActivityTraceLineHandler(app, selection, kind)
 		handler("==> Deploying erun/local 1.0.51-snapshot-20260510080136")
 		entry, ok := app.activityQueue.findActiveByCommand("deploy", "erun", "local")
@@ -348,7 +350,7 @@ func TestActivityTraceLineHandlerRegistersForAllSessionKinds(t *testing.T) {
 // Output must be buffered before the failure line finalizes the entry.
 func TestFeedActivityTraceCapturesFailureDetail(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
-	selection := uiSelection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
+	selection := uimodel.Selection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
 	managed := &managedTerminal{selection: selection, kind: sessionKindLocal, key: "local\x00team\x00dev", serial: 1}
 	app.sessions[managed.key] = managed
 

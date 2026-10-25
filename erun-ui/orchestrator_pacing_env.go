@@ -6,6 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/command/orchestrator"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // Env-aware pacing: an orchestrator waiting on a linked environment's work is not stalled.
@@ -38,7 +39,7 @@ func (s orchestratorLinkedEnvBusyState) stuckDetail() string {
 func orchestratorLinkedEnvBusyStateFor(orchestratorID string, envs []config.OrchestratorEnvConfig, snapshot map[string]environmentActivityState) orchestratorLinkedEnvBusyState {
 	sawUnknown := false
 	for _, env := range envs {
-		key := selectionKey(uiSelection{Tenant: env.Tenant, Environment: env.Environment})
+		key := selectionKey(uimodel.Selection{Tenant: env.Tenant, Environment: env.Environment})
 		state, ok := snapshot[key]
 		if !ok || !state.observed {
 			// Unobserved and inconclusive are both no evidence either way.

@@ -13,28 +13,19 @@ import (
 )
 
 func (a *App) LoadRuntimeResourceStatus(input uiRuntimeResourceInput) (uiRuntimeResourceStatus, error) {
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	return a.deps.loadResourceStatus(ctx, normalizeRuntimeResourceInput(input))
 }
 
 // LoadClusterRegistry reports whether the context has an in-cluster erun-registry Service.
 func (a *App) LoadClusterRegistry(input uiRuntimeResourceInput) (uiClusterRegistryStatus, error) {
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	return a.deps.loadClusterRegistry(ctx, normalizeRuntimeResourceInput(input))
 }
 
 // LoadHostedRegistry reports whether erun's hosted container registry is reachable.
 func (a *App) LoadHostedRegistry() (uiHostedRegistryStatus, error) {
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	return a.deps.loadHostedRegistry(ctx), nil
 }
 

@@ -1,5 +1,7 @@
 package main
 
+import "github.com/sophium/erun/erun-ui/internal/uimodel"
+
 type uiCloseGate struct {
 	Blocked bool                 `json:"blocked"`
 	Running []activityQueueEntry `json:"running,omitempty"`
@@ -26,7 +28,7 @@ func (a *App) PrepareWindowClose() uiCloseGate {
 	gate := uiCloseGate{Running: a.runningActivityEntries()}
 	gate.Blocked = len(gate.Running) > 0
 	if gate.Blocked {
-		a.emit(appCloseGateEvent, gate)
+		a.emit(uimodel.AppCloseGateEvent, gate)
 	}
 	return gate
 }

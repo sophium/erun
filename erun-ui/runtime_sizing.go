@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // Both reads run `erun resize` in the pod, since the recommendation's usage
@@ -46,12 +48,12 @@ type uiRuntimeSizingRecommendation struct {
 }
 
 // LoadRuntimeSizing previews the standing recommendation via `erun resize --dry-run`; it writes nothing.
-func (a *App) LoadRuntimeSizing(selection uiSelection) (uiRuntimeSizingRecommendation, error) {
-	selection = normalizeSelection(selection)
-	if err := errMissingTenantOrEnvironment("load runtime sizing", selection.Tenant, selection.Environment); err != nil {
+func (a *App) LoadRuntimeSizing(selection uimodel.Selection) (uiRuntimeSizingRecommendation, error) {
+	selection = uimodel.NormalizeSelection(selection)
+	if err := uimodel.ErrMissingTenantOrEnvironment("load runtime sizing", selection.Tenant, selection.Environment); err != nil {
 		return uiRuntimeSizingRecommendation{}, err
 	}
-	ctx, cancel := context.WithTimeout(a.backgroundContext(), runtimeSizingTimeout)
+	ctx, cancel := context.WithTimeout(a.context(), runtimeSizingTimeout)
 	defer cancel()
 	output, err := a.execInRuntimePod(ctx, selection, resizeCommandScript(selection, true, false))
 	if err != nil {
@@ -66,12 +68,12 @@ func (a *App) LoadRuntimeSizing(selection uiSelection) (uiRuntimeSizingRecommend
 
 // ResizeRuntimeToRecommendation applies the standing recommendation. overrideLease
 // is only set by the follow-up to a lease-held refusal.
-func (a *App) ResizeRuntimeToRecommendation(selection uiSelection, overrideLease bool) (uiRuntimeSizingRecommendation, error) {
-	selection = normalizeSelection(selection)
-	if err := errMissingTenantOrEnvironment("resize runtime to recommendation", selection.Tenant, selection.Environment); err != nil {
+func (a *App) ResizeRuntimeToRecommendation(selection uimodel.Selection, overrideLease bool) (uiRuntimeSizingRecommendation, error) {
+	selection = uimodel.NormalizeSelection(selection)
+	if err := uimodel.ErrMissingTenantOrEnvironment("resize runtime to recommendation", selection.Tenant, selection.Environment); err != nil {
 		return uiRuntimeSizingRecommendation{}, err
 	}
-	ctx, cancel := context.WithTimeout(a.backgroundContext(), runtimeReclaimTimeout)
+	ctx, cancel := context.WithTimeout(a.context(), runtimeReclaimTimeout)
 	defer cancel()
 	output, err := a.execInRuntimePod(ctx, selection, resizeCommandScript(selection, true, overrideLease))
 	if err != nil {
@@ -104,7 +106,7 @@ func friendlyRuntimeResizeError(err error) string {
 }
 
 // stderr is merged so the parser sees trace lines, which --dry-run prints.
-func resizeCommandScript(selection uiSelection, dryRun, overrideLease bool) string {
+func resizeCommandScript(selection uimodel.Selection, dryRun, overrideLease bool) string {
 	args := []string{
 		"erun", "resize",
 		"--tenant", shellSingleQuote(selection.Tenant),
@@ -125,7 +127,7 @@ func shellSingleQuote(value string) string {
 }
 
 // Unrecognised lines are dropped; the caller's exit-code check gates success.
-func runtimeSizingFromOutput(selection uiSelection, output string) uiRuntimeSizingRecommendation {
+func runtimeSizingFromOutput(selection uimodel.Selection, output string) uiRuntimeSizingRecommendation {
 	result := uiRuntimeSizingRecommendation{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,

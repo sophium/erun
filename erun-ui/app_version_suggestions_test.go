@@ -9,6 +9,7 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/registry"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestLoadStateUsesTenantSpecificDeployableVersionSuggestions(t *testing.T) {
@@ -70,7 +71,7 @@ func TestLoadVersionSuggestionsFiltersOutMissingTenantImageTags(t *testing.T) {
 		resolveImageRegistry: missingTenantImageRegistry(t),
 	})
 
-	result, err := app.LoadVersionSuggestions(uiSelection{Tenant: " frs "})
+	result, err := app.LoadVersionSuggestions(uimodel.Selection{Tenant: " frs "})
 	if err != nil {
 		t.Fatalf("LoadVersionSuggestions failed: %v", err)
 	}
@@ -118,7 +119,7 @@ func TestLoadVersionSuggestionsUsesEnvPersistedRuntimeRegistry(t *testing.T) {
 		},
 	})
 
-	if _, err := app.LoadVersionSuggestions(uiSelection{Tenant: "team", Environment: "prod"}); err != nil {
+	if _, err := app.LoadVersionSuggestions(uimodel.Selection{Tenant: "team", Environment: "prod"}); err != nil {
 		t.Fatalf("LoadVersionSuggestions failed: %v", err)
 	}
 	if tenantImageNamespace != customRegistry {
@@ -150,7 +151,7 @@ func TestLoadVersionSuggestionsQueriesEachListedRegistry(t *testing.T) {
 		},
 	})
 
-	if _, err := app.LoadVersionSuggestions(uiSelection{Tenant: "team", Environment: "prod"}); err != nil {
+	if _, err := app.LoadVersionSuggestions(uimodel.Selection{Tenant: "team", Environment: "prod"}); err != nil {
 		t.Fatalf("LoadVersionSuggestions failed: %v", err)
 	}
 	for _, want := range []string{"ghcr.io/acme", "registry.internal/acme"} {
@@ -209,7 +210,7 @@ func TestLoadVersionSuggestionsDoesNotDuplicateDefaultRuntimeForErunTenant(t *te
 		},
 	})
 
-	result, err := app.LoadVersionSuggestions(uiSelection{Tenant: " erun "})
+	result, err := app.LoadVersionSuggestions(uimodel.Selection{Tenant: " erun "})
 	if err != nil {
 		t.Fatalf("LoadVersionSuggestions failed: %v", err)
 	}
@@ -249,7 +250,7 @@ func TestLoadVersionSuggestionsFallsBackToDefaultRuntimeTagsWhenTenantImageMissi
 		},
 	})
 
-	result, err := app.LoadVersionSuggestions(uiSelection{Tenant: " test "})
+	result, err := app.LoadVersionSuggestions(uimodel.Selection{Tenant: " test "})
 	if err != nil {
 		t.Fatalf("LoadVersionSuggestions failed: %v", err)
 	}
@@ -288,7 +289,7 @@ func TestLoadVersionSuggestionsForInitUsesAvailableRuntimeImageTags(t *testing.T
 		},
 	})
 
-	result, err := app.LoadVersionSuggestions(uiSelection{Tenant: " test "})
+	result, err := app.LoadVersionSuggestions(uimodel.Selection{Tenant: " test "})
 	if err != nil {
 		t.Fatalf("LoadVersionSuggestions failed: %v", err)
 	}
@@ -319,7 +320,7 @@ func TestLoadVersionSuggestionsSurfacesAuthNoticeForPrivateImage(t *testing.T) {
 		},
 	})
 
-	result, err := app.LoadVersionSuggestions(uiSelection{Tenant: "frs"})
+	result, err := app.LoadVersionSuggestions(uimodel.Selection{Tenant: "frs"})
 	if err != nil {
 		t.Fatalf("LoadVersionSuggestions failed: %v", err)
 	}
@@ -346,7 +347,7 @@ func TestLoadVersionSuggestionsMarksUnreachableRegistry(t *testing.T) {
 		},
 	})
 
-	result, err := app.LoadVersionSuggestions(uiSelection{Tenant: "frs"})
+	result, err := app.LoadVersionSuggestions(uimodel.Selection{Tenant: "frs"})
 	if err != nil {
 		t.Fatalf("LoadVersionSuggestions failed: %v", err)
 	}

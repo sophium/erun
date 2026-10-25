@@ -11,6 +11,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	activitypkg "github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // One probe feeds the AI tab's session state and the Runtime tab's memory
@@ -38,9 +39,9 @@ const (
 
 // LoadRuntimeActivity reports the pod's sessions and memory-holding processes; it
 // never reclaims and fails soft to an unavailable report.
-func (a *App) LoadRuntimeActivity(selection uiSelection) (uiRuntimeActivity, error) {
-	selection = normalizeSelection(selection)
-	if err := errMissingTenantOrEnvironment("load runtime activity", selection.Tenant, selection.Environment); err != nil {
+func (a *App) LoadRuntimeActivity(selection uimodel.Selection) (uiRuntimeActivity, error) {
+	selection = uimodel.NormalizeSelection(selection)
+	if err := uimodel.ErrMissingTenantOrEnvironment("load runtime activity", selection.Tenant, selection.Environment); err != nil {
 		return uiRuntimeActivity{}, err
 	}
 	report, err := a.probeRuntimeActivity(selection)
@@ -56,8 +57,8 @@ func (a *App) LoadRuntimeActivity(selection uiSelection) (uiRuntimeActivity, err
 
 // ReclaimRuntimeResources runs one named reclaim action in the pod.
 func (a *App) ReclaimRuntimeResources(input uiRuntimeReclaimInput) (uiRuntimeReclaimResult, error) {
-	selection := normalizeSelection(uiSelection{Tenant: input.Tenant, Environment: input.Environment})
-	if err := errMissingTenantOrEnvironment("reclaim runtime resources", selection.Tenant, selection.Environment); err != nil {
+	selection := uimodel.NormalizeSelection(uimodel.Selection{Tenant: input.Tenant, Environment: input.Environment})
+	if err := uimodel.ErrMissingTenantOrEnvironment("reclaim runtime resources", selection.Tenant, selection.Environment); err != nil {
 		return uiRuntimeReclaimResult{}, err
 	}
 	action := strings.TrimSpace(input.Action)
@@ -65,7 +66,7 @@ func (a *App) ReclaimRuntimeResources(input uiRuntimeReclaimInput) (uiRuntimeRec
 	if err != nil {
 		return uiRuntimeReclaimResult{}, err
 	}
-	ctx, cancel := context.WithTimeout(a.backgroundContext(), runtimeReclaimTimeout)
+	ctx, cancel := context.WithTimeout(a.context(), runtimeReclaimTimeout)
 	defer cancel()
 	if _, err := a.execInRuntimePod(ctx, selection, script); err != nil {
 		return uiRuntimeReclaimResult{}, fmt.Errorf("%s: %w", runtimeReclaimLabel(action), err)
@@ -76,8 +77,8 @@ func (a *App) ReclaimRuntimeResources(input uiRuntimeReclaimInput) (uiRuntimeRec
 	return uiRuntimeReclaimResult{Action: action, Message: notice}, nil
 }
 
-func (a *App) probeRuntimeActivity(selection uiSelection) (uiRuntimeActivity, error) {
-	ctx, cancel := context.WithTimeout(a.backgroundContext(), runtimeActivityTimeout)
+func (a *App) probeRuntimeActivity(selection uimodel.Selection) (uiRuntimeActivity, error) {
+	ctx, cancel := context.WithTimeout(a.context(), runtimeActivityTimeout)
 	defer cancel()
 	output, err := a.execInRuntimePod(ctx, selection,
 		activitypkg.RemoteAppSessionHeartbeatScript(selection.Tenant, selection.Environment)+"\n"+runtimeProcessSnapshotScript())
@@ -87,22 +88,15 @@ func (a *App) probeRuntimeActivity(selection uiSelection) (uiRuntimeActivity, er
 	return runtimeActivityFromProbe(selection, output), nil
 }
 
-func (a *App) backgroundContext() context.Context {
-	if a.ctx != nil {
-		return a.ctx
-	}
-	return context.Background()
-}
-
 // execInRuntimePod uses kubectl exec rather than the MCP edge so it works while the edge is down.
-func (a *App) execInRuntimePod(ctx context.Context, selection uiSelection, script string) (string, error) {
+func (a *App) execInRuntimePod(ctx context.Context, selection uimodel.Selection, script string) (string, error) {
 	if a.deps.execRuntimePod != nil {
 		return a.deps.execRuntimePod(ctx, selection, script)
 	}
 	return "", fmt.Errorf("runtime pod exec is unavailable")
 }
 
-func execInRuntimePodViaKubectl(ctx context.Context, selection uiSelection, store erunUIStore, script string) (string, error) {
+func execInRuntimePodViaKubectl(ctx context.Context, selection uimodel.Selection, store erunUIStore, script string) (string, error) {
 	if store == nil {
 		return "", fmt.Errorf("configuration store is unavailable")
 	}
@@ -130,7 +124,7 @@ func runtimeProcessSnapshotScript() string {
 		"printf '" + runtimeProcessSnapshotPrefix + "%s\\t%s\\t%s\\n' \"$rss\" \"$comm\" \"$args\"; done"
 }
 
-func runtimeActivityFromProbe(selection uiSelection, output string) uiRuntimeActivity {
+func runtimeActivityFromProbe(selection uimodel.Selection, output string) uiRuntimeActivity {
 	heartbeats := activitypkg.ParseRemoteAppSessionHeartbeats(output)
 	sessions := make([]uiRuntimeSession, 0, len(heartbeats))
 	for _, heartbeat := range heartbeats {

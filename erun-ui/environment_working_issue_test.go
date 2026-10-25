@@ -7,6 +7,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestParseIssueNumberFromBranch(t *testing.T) {
@@ -73,7 +74,7 @@ func TestEnvironmentWorkingIssueResolvesBranchAndTitle(t *testing.T) {
 		LocalRepoPath:     t.TempDir(),
 	}, run)
 
-	got, err := app.EnvironmentWorkingIssue(uiSelection{Tenant: "acme", Environment: "dev"})
+	got, err := app.EnvironmentWorkingIssue(uimodel.Selection{Tenant: "acme", Environment: "dev"})
 	if err != nil {
 		t.Fatalf("EnvironmentWorkingIssue: %v", err)
 	}
@@ -82,7 +83,7 @@ func TestEnvironmentWorkingIssueResolvesBranchAndTitle(t *testing.T) {
 		t.Fatalf("expected git + gh (2 calls), got %d: %v", len(calls), calls)
 	}
 
-	if _, err := app.EnvironmentWorkingIssue(uiSelection{Tenant: "acme", Environment: "dev"}); err != nil {
+	if _, err := app.EnvironmentWorkingIssue(uimodel.Selection{Tenant: "acme", Environment: "dev"}); err != nil {
 		t.Fatalf("second EnvironmentWorkingIssue: %v", err)
 	}
 	if len(calls) != 2 {
@@ -113,7 +114,7 @@ func TestEnvironmentWorkingIssueUnavailableForRemoteWorktree(t *testing.T) {
 		KubernetesContext: "ctx",
 	}, run)
 
-	got, err := app.EnvironmentWorkingIssue(uiSelection{Tenant: "acme", Environment: "dev"})
+	got, err := app.EnvironmentWorkingIssue(uimodel.Selection{Tenant: "acme", Environment: "dev"})
 	if err != nil {
 		t.Fatalf("EnvironmentWorkingIssue: %v", err)
 	}
@@ -165,7 +166,7 @@ func TestEnvironmentWorkingIssueRemoteNotReachable(t *testing.T) {
 		},
 	)
 
-	got, err := app.EnvironmentWorkingIssue(uiSelection{Tenant: "acme", Environment: "dev"})
+	got, err := app.EnvironmentWorkingIssue(uimodel.Selection{Tenant: "acme", Environment: "dev"})
 	if err != nil {
 		t.Fatalf("EnvironmentWorkingIssue: %v", err)
 	}
@@ -192,7 +193,7 @@ func TestEnvironmentWorkingIssueRemoteReadsPodBranch(t *testing.T) {
 		},
 	)
 
-	got, err := app.EnvironmentWorkingIssue(uiSelection{Tenant: "acme", Environment: "dev"})
+	got, err := app.EnvironmentWorkingIssue(uimodel.Selection{Tenant: "acme", Environment: "dev"})
 	if err != nil {
 		t.Fatalf("EnvironmentWorkingIssue: %v", err)
 	}
@@ -217,14 +218,14 @@ func TestEnvironmentWorkingIssueRemotePodErrorNotCached(t *testing.T) {
 		},
 	)
 
-	got, err := app.EnvironmentWorkingIssue(uiSelection{Tenant: "acme", Environment: "dev"})
+	got, err := app.EnvironmentWorkingIssue(uimodel.Selection{Tenant: "acme", Environment: "dev"})
 	if err != nil {
 		t.Fatalf("EnvironmentWorkingIssue: %v", err)
 	}
 	if got.Available || !strings.Contains(got.Reason, "not reachable right now") {
 		t.Fatalf("expected the not-reachable reason, got %+v", got)
 	}
-	if _, err := app.EnvironmentWorkingIssue(uiSelection{Tenant: "acme", Environment: "dev"}); err != nil {
+	if _, err := app.EnvironmentWorkingIssue(uimodel.Selection{Tenant: "acme", Environment: "dev"}); err != nil {
 		t.Fatalf("second EnvironmentWorkingIssue: %v", err)
 	}
 	if loads != 2 {
@@ -246,7 +247,7 @@ func TestEnvironmentWorkingIssueBranchWithoutIssue(t *testing.T) {
 		LocalRepoPath:     t.TempDir(),
 	}, run)
 
-	got, err := app.EnvironmentWorkingIssue(uiSelection{Tenant: "acme", Environment: "dev"})
+	got, err := app.EnvironmentWorkingIssue(uimodel.Selection{Tenant: "acme", Environment: "dev"})
 	if err != nil {
 		t.Fatalf("EnvironmentWorkingIssue: %v", err)
 	}

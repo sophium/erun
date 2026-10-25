@@ -6,12 +6,13 @@ import (
 	"testing"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestLoadTenantConfigRequiresATenant(t *testing.T) {
 	app := NewApp(erunUIDeps{store: stubUIStore{}})
 	_, err := app.LoadTenantConfig("   ")
-	if err == nil || !errors.Is(err, ErrTenantNotGiven) {
+	if err == nil || !errors.Is(err, uimodel.ErrTenantNotGiven) {
 		t.Fatalf("expected ErrTenantNotGiven, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "loading tenant settings") {
@@ -22,7 +23,7 @@ func TestLoadTenantConfigRequiresATenant(t *testing.T) {
 func TestSaveTenantConfigRequiresATenant(t *testing.T) {
 	app := NewApp(erunUIDeps{store: stubUIStore{}})
 	_, err := app.SaveTenantConfig(uiTenantConfig{Name: "  "})
-	if err == nil || !errors.Is(err, ErrTenantNotGiven) {
+	if err == nil || !errors.Is(err, uimodel.ErrTenantNotGiven) {
 		t.Fatalf("expected ErrTenantNotGiven, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "saving tenant settings") {

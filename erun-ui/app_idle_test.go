@@ -10,6 +10,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestMergeNewerActivityMarkersPrefersLocalTerminalActivity(t *testing.T) {
@@ -138,7 +139,7 @@ func TestStartCloudContextClearsPreviousIdleStop(t *testing.T) {
 			},
 		},
 	}
-	key := selectionKey(uiSelection{Tenant: "team-stop", Environment: "dev-stop"})
+	key := selectionKey(uimodel.Selection{Tenant: "team-stop", Environment: "dev-stop"})
 	app := NewApp(erunUIDeps{store: store})
 	defer app.shutdown(context.Background())
 
@@ -210,10 +211,10 @@ func TestLoadIdleStatusDoesNotStopWhileEnvironmentCommandRunning(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	if _, err := app.StartDeploySession(uiSelection{Tenant: "team-busy", Environment: "dev-busy", Version: "1.0.0"}, 80, 24); err != nil {
+	if _, err := app.StartDeploySession(uimodel.Selection{Tenant: "team-busy", Environment: "dev-busy", Version: "1.0.0"}, 80, 24); err != nil {
 		t.Fatalf("StartDeploySession failed: %v", err)
 	}
-	if _, err := app.LoadIdleStatus(uiSelection{Tenant: "team-busy", Environment: "dev-busy"}); err != nil {
+	if _, err := app.LoadIdleStatus(uimodel.Selection{Tenant: "team-busy", Environment: "dev-busy"}); err != nil {
 		t.Fatalf("LoadIdleStatus failed: %v", err)
 	}
 
@@ -360,12 +361,12 @@ func TestMaybeStopIdleClearsStaleIdleStopWhenContextIsRunningAgain(t *testing.T)
 	defer app.shutdown(context.Background())
 	app.setCloudContextStatusInCache("managed-cloud", cloud.CloudContextStatusRunning)
 
-	key := selectionKey(uiSelection{Tenant: "erun", Environment: "remote"})
+	key := selectionKey(uimodel.Selection{Tenant: "erun", Environment: "remote"})
 	app.mu.Lock()
 	app.idleStops[key] = struct{}{}
 	app.mu.Unlock()
 
-	if _, err := app.LoadIdleStatus(uiSelection{Tenant: "erun", Environment: "remote"}); err != nil {
+	if _, err := app.LoadIdleStatus(uimodel.Selection{Tenant: "erun", Environment: "remote"}); err != nil {
 		t.Fatalf("LoadIdleStatus returned an error: %v", err)
 	}
 

@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestTenantReviewCreateCapabilityAllowsWhenGranted(t *testing.T) {
@@ -46,7 +48,7 @@ func TestTenantReviewCreateCapabilityRequiresATenant(t *testing.T) {
 	defer server.Close()
 
 	_, err := tenantDashboardApp(t, server.URL).TenantReviewCreateCapability("")
-	if err == nil || !errors.Is(err, ErrTenantNotGiven) {
+	if err == nil || !errors.Is(err, uimodel.ErrTenantNotGiven) {
 		t.Fatalf("expected ErrTenantNotGiven, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "checking whether you can create a review") {

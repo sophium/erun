@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/command/podruntime"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func installedOrchestrateAgent(t *testing.T) string {
@@ -174,7 +175,7 @@ func TestOrchestratorAgentsRefreshFromBuildStampedCheckout(t *testing.T) {
 	if strings.TrimSpace(string(marker)) != want {
 		t.Fatalf("marker = %q, want the refreshed source sha %q", strings.TrimSpace(string(marker)), want)
 	}
-	if notes := emits.events(appNotificationEvent); len(notes) != 0 {
+	if notes := emits.events(uimodel.AppNotificationEvent); len(notes) != 0 {
 		t.Fatalf("a resolved source must report nothing, got %+v", notes)
 	}
 }
@@ -215,11 +216,11 @@ func TestOrchestratorAgentsReportUnresolvableSource(t *testing.T) {
 	if _, err := app.ensureOrchestratorWorkspace(); err != nil {
 		t.Fatalf("the orchestrator must still launch cleanly: %v", err)
 	}
-	notes := emits.events(appNotificationEvent)
+	notes := emits.events(uimodel.AppNotificationEvent)
 	if len(notes) != 1 {
 		t.Fatalf("expected exactly one report, got %+v", notes)
 	}
-	payload, ok := notes[0].(appNotificationPayload)
+	payload, ok := notes[0].(uimodel.AppNotificationPayload)
 	if !ok {
 		t.Fatalf("unexpected payload type: %T", notes[0])
 	}
@@ -239,7 +240,7 @@ func TestOrchestratorAgentsReportUnresolvableSource(t *testing.T) {
 	if _, err := app.ensureOrchestratorWorkspace(); err != nil {
 		t.Fatalf("second ensureOrchestratorWorkspace: %v", err)
 	}
-	if got := emits.events(appNotificationEvent); len(got) != 1 {
+	if got := emits.events(uimodel.AppNotificationEvent); len(got) != 1 {
 		t.Fatalf("expected the report said once, got %+v", got)
 	}
 }
@@ -267,7 +268,7 @@ func TestHostAgentsSourceOverrideWinsOverBuildStamp(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(home, ".claude", "agents", "erun-builder.md")); !os.IsNotExist(err) {
 		t.Fatalf("an empty override must install nothing, stat err = %v", err)
 	}
-	if notes := emits.events(appNotificationEvent); len(notes) != 0 {
+	if notes := emits.events(uimodel.AppNotificationEvent); len(notes) != 0 {
 		t.Fatalf("an honoured override is not a failure to report, got %+v", notes)
 	}
 }
@@ -301,7 +302,7 @@ func TestOrchestratorAgentsResolveFromCheckoutAroundExecutable(t *testing.T) {
 	if data, _ := os.ReadFile(installedOrchestrateAgent(t)); string(data) != "# from the checkout\n" {
 		t.Fatalf("expected the surrounding checkout's agent installed, got %q", data)
 	}
-	if notes := emits.events(appNotificationEvent); len(notes) != 0 {
+	if notes := emits.events(uimodel.AppNotificationEvent); len(notes) != 0 {
 		t.Fatalf("a resolved source must report nothing, got %+v", notes)
 	}
 }

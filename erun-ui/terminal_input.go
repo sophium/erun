@@ -12,6 +12,7 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func (a *App) SendSessionInput(sessionID int, data string) error {
@@ -57,8 +58,8 @@ func (a *App) isAwaitingPostRespawnInput(managed *managedTerminal) bool {
 	return managed.awaitingPostRespawnInput
 }
 
-func (a *App) recordTerminalActivity(selection uiSelection) {
-	selection = normalizeSelection(selection)
+func (a *App) recordTerminalActivity(selection uimodel.Selection) {
+	selection = uimodel.NormalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" || a.deps.recordActivity == nil {
 		return
 	}

@@ -9,11 +9,12 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // resolveActivityKubeContext prefers the selection's context, falling back to the
 // env config's so pollers never target kubectl's current-context.
-func (a *App) resolveActivityKubeContext(selection uiSelection, tenant, environment string) string {
+func (a *App) resolveActivityKubeContext(selection uimodel.Selection, tenant, environment string) string {
 	if ctx := strings.TrimSpace(selection.KubernetesContext); ctx != "" {
 		return ctx
 	}

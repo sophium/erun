@@ -11,6 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/workspace"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func hostWorkspaceStore(localPath string) stubUIStore {
@@ -44,7 +45,7 @@ func TestResolveHostWorkspaceRequiresSyncedMirror(t *testing.T) {
 	app := NewApp(erunUIDeps{store: store})
 	defer app.shutdown(context.Background())
 
-	if _, _, err := app.resolveHostWorkspace(uiSelection{Tenant: "frs", Environment: "dev"}); err == nil {
+	if _, _, err := app.resolveHostWorkspace(uimodel.Selection{Tenant: "frs", Environment: "dev"}); err == nil {
 		t.Fatal("expected a remote-agent env without workspace sync to have no host workspace")
 	}
 }
@@ -66,7 +67,7 @@ func TestRunHostArtifactLaunchesArtifactWithinOutputsDir(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	if err := app.RunHostArtifact(uiSelection{Tenant: "frs", Environment: "dev"}, "erun-app.exe"); err != nil {
+	if err := app.RunHostArtifact(uimodel.Selection{Tenant: "frs", Environment: "dev"}, "erun-app.exe"); err != nil {
 		t.Fatalf("RunHostArtifact failed: %v", err)
 	}
 	if launched != filepath.Join(outputs, "erun-app.exe") {
@@ -85,10 +86,10 @@ func TestRunHostArtifactRejectsMissingAndTraversal(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	if err := app.RunHostArtifact(uiSelection{Tenant: "frs", Environment: "dev"}, "../escape.exe"); err == nil {
+	if err := app.RunHostArtifact(uimodel.Selection{Tenant: "frs", Environment: "dev"}, "../escape.exe"); err == nil {
 		t.Fatal("expected a traversal path to be rejected")
 	}
-	if err := app.RunHostArtifact(uiSelection{Tenant: "frs", Environment: "dev"}, "missing.exe"); err == nil {
+	if err := app.RunHostArtifact(uimodel.Selection{Tenant: "frs", Environment: "dev"}, "missing.exe"); err == nil {
 		t.Fatal("expected a missing artifact to error")
 	}
 }
@@ -114,7 +115,7 @@ func TestHostWorkspacePathIsTheRepoPathDirectlyForAHostEnvironment(t *testing.T)
 	app := NewApp(erunUIDeps{store: store})
 	defer app.shutdown(context.Background())
 
-	_, path, err := app.resolveHostWorkspace(uiSelection{Tenant: "frs", Environment: "dev"})
+	_, path, err := app.resolveHostWorkspace(uimodel.Selection{Tenant: "frs", Environment: "dev"})
 	requireWorkspaceSyncNoError(t, err, "resolve host workspace for a host-type env")
 	if path != local {
 		t.Fatalf("expected host workspace path %q, got %q", local, path)
@@ -139,7 +140,7 @@ func TestLoadHostDiffReadsHostWorktreeWithoutMCP(t *testing.T) {
 	app := NewApp(erunUIDeps{store: hostWorkspaceStore(local)})
 	defer app.shutdown(context.Background())
 
-	diff, err := app.LoadHostDiff(uiSelection{Tenant: "frs", Environment: "dev"}, uiDiffOptions{})
+	diff, err := app.LoadHostDiff(uimodel.Selection{Tenant: "frs", Environment: "dev"}, uiDiffOptions{})
 	requireWorkspaceSyncNoError(t, err, "load host diff")
 	if diff.WorkingDirectory != local {
 		t.Fatalf("expected working dir %q, got %q", local, diff.WorkingDirectory)

@@ -43,7 +43,7 @@ func (a *App) reconcileHelmReleasesOnce() {
 	if len(contexts) == 0 {
 		return
 	}
-	ctx := a.activityWatcherCtx()
+	ctx := a.context()
 	for _, kubeContext := range contexts {
 		releases, err := listTenantDevopsHelmReleases(ctx, kubeContext)
 		if err != nil {

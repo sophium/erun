@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestEnvInfosJoinsActivityByTenantAndEnvironment(t *testing.T) {
@@ -13,7 +14,7 @@ func TestEnvInfosJoinsActivityByTenantAndEnvironment(t *testing.T) {
 		{Tenant: "erun", Environment: "local-ideas"},
 	}
 	activity := map[string]environmentActivityState{
-		selectionKey(uiSelection{Tenant: "petios", Environment: "rihards-review"}): {
+		selectionKey(uimodel.Selection{Tenant: "petios", Environment: "rihards-review"}): {
 			reachable: true, observed: true, busy: true, detail: "holding: gradle-build",
 		},
 	}
@@ -33,7 +34,7 @@ func TestEnvInfosJoinsActivityByTenantAndEnvironment(t *testing.T) {
 }
 
 func TestEnvInfosDistinguishesOutageFromIdleAndUnobserved(t *testing.T) {
-	key := selectionKey(uiSelection{Tenant: "frs", Environment: "dev"})
+	key := selectionKey(uimodel.Selection{Tenant: "frs", Environment: "dev"})
 	envs := []config.OrchestratorEnvConfig{{Tenant: "frs", Environment: "dev"}}
 
 	outage := envInfos(envs, map[string]environmentActivityState{key: {outage: true}}, nil)
@@ -59,7 +60,7 @@ func TestEnvInfosJoinsUsageByTenantAndEnvironment(t *testing.T) {
 	}
 	observedAt := time.Unix(1000, 0)
 	usage := map[string]environmentUsageReading{
-		selectionKey(uiSelection{Tenant: "petios", Environment: "rihards-review"}): {
+		selectionKey(uimodel.Selection{Tenant: "petios", Environment: "rihards-review"}): {
 			usage:      uiRuntimeUsage{Available: true, CPU: uiRuntimeCPUUsage{Available: true, Utilization: "12.0%"}},
 			observedAt: observedAt,
 		},

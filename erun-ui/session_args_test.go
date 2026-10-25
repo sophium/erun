@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func TestBuildOpenCommandQuotesExecutableAndArgs(t *testing.T) {
@@ -33,13 +35,13 @@ func TestBuildOpenArgsTrimsTenantAndEnvironment(t *testing.T) {
 }
 
 func TestBuildOpenIDEArgsAddsIDEFlag(t *testing.T) {
-	got := buildOpenIDEArgs(uiSelection{Tenant: " erun ", Environment: " remote "}, "vscode")
+	got := buildOpenIDEArgs(uimodel.Selection{Tenant: " erun ", Environment: " remote "}, "vscode")
 	want := []string{"open", "erun", "remote", "--vscode"}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("unexpected VS Code args: got %+v want %+v", got, want)
 	}
 
-	got = buildOpenIDEArgs(uiSelection{Tenant: "erun", Environment: "remote"}, "intellij")
+	got = buildOpenIDEArgs(uimodel.Selection{Tenant: "erun", Environment: "remote"}, "intellij")
 	want = []string{"open", "erun", "remote", "--intellij"}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("unexpected IntelliJ args: got %+v want %+v", got, want)
@@ -47,7 +49,7 @@ func TestBuildOpenIDEArgsAddsIDEFlag(t *testing.T) {
 }
 
 func TestBuildDoctorArgsTrimsTenantAndEnvironment(t *testing.T) {
-	got := buildDoctorArgs(uiSelection{Tenant: " erun ", Environment: " remote "})
+	got := buildDoctorArgs(uimodel.Selection{Tenant: " erun ", Environment: " remote "})
 	want := []string{"doctor", "erun", "remote"}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("unexpected doctor args: got %+v want %+v", got, want)
@@ -68,7 +70,7 @@ func TestBuildOpenNoShellArgsTrimsTenantAndEnvironment(t *testing.T) {
 }
 
 func TestBuildInitArgsTrimsTenantAndEnvironment(t *testing.T) {
-	got := buildInitArgs(uiSelection{Tenant: " erun ", Environment: " remote "})
+	got := buildInitArgs(uimodel.Selection{Tenant: " erun ", Environment: " remote "})
 	want := []string{"init", "erun", "remote", "--type=remote-agent", "--set-default-tenant=false", "--confirm-environment=true"}
 	if len(got) != len(want) {
 		t.Fatalf("unexpected args length: got %+v want %+v", got, want)
@@ -81,7 +83,7 @@ func TestBuildInitArgsTrimsTenantAndEnvironment(t *testing.T) {
 }
 
 func TestBuildInitArgsIncludesRuntimeVersion(t *testing.T) {
-	got := buildInitArgs(uiSelection{
+	got := buildInitArgs(uimodel.Selection{
 		Tenant:            " erun ",
 		Environment:       " remote ",
 		Version:           " 1.0.19 ",
@@ -105,7 +107,7 @@ func TestBuildInitArgsIncludesRuntimeVersion(t *testing.T) {
 }
 
 func TestBuildInitArgsClusterRegistryReplacesContainerRegistry(t *testing.T) {
-	got := buildInitArgs(uiSelection{
+	got := buildInitArgs(uimodel.Selection{
 		Tenant:            "erun",
 		Environment:       "remote",
 		KubernetesContext: "erun-k3s",
@@ -161,7 +163,7 @@ func TestResolveLocalShellCommandIgnoresPosixShellOnWindows(t *testing.T) {
 }
 
 func TestBuildInitArgsRespectsExplicitType(t *testing.T) {
-	got := buildInitArgs(uiSelection{
+	got := buildInitArgs(uimodel.Selection{
 		Tenant:        "erun",
 		Environment:   "local",
 		Type:          "local-agent",
@@ -179,7 +181,7 @@ func TestBuildInitArgsRespectsExplicitType(t *testing.T) {
 }
 
 func TestBuildInitArgsRuntimeTypeOmitsProjectRoot(t *testing.T) {
-	got := buildInitArgs(uiSelection{
+	got := buildInitArgs(uimodel.Selection{
 		Tenant:        "erun",
 		Environment:   "prod",
 		Type:          "runtime",
@@ -197,13 +199,13 @@ func TestBuildInitArgsRuntimeTypeOmitsProjectRoot(t *testing.T) {
 }
 
 func TestBuildDeployArgsRunsDeploy(t *testing.T) {
-	got := buildDeployArgs(uiSelection{Tenant: " erun ", Environment: " remote ", Version: " 1.0.19 "})
+	got := buildDeployArgs(uimodel.Selection{Tenant: " erun ", Environment: " remote ", Version: " 1.0.19 "})
 	want := []string{"deploy", "erun", "remote", "--version", "1.0.19"}
 	assertArgsEqual(t, got, want)
 }
 
 func TestBuildDeployArgsThreadsRuntimeImageOverride(t *testing.T) {
-	got := buildDeployArgs(uiSelection{
+	got := buildDeployArgs(uimodel.Selection{
 		Tenant:       "frs",
 		Environment:  "local",
 		Version:      "1.0.102",
@@ -214,7 +216,7 @@ func TestBuildDeployArgsThreadsRuntimeImageOverride(t *testing.T) {
 }
 
 func TestBuildDeployArgsOmitsOwnTenantImage(t *testing.T) {
-	got := buildDeployArgs(uiSelection{
+	got := buildDeployArgs(uimodel.Selection{
 		Tenant:       "frs",
 		Environment:  "local",
 		Version:      "1.0.102",

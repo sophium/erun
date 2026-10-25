@@ -55,10 +55,7 @@ func (a *App) DiffReviewStatus(input uiDiffReviewStatusInput) (uiDiffReviewStatu
 	if tenant == "" || sourceBranch == "" || targetBranch == "" {
 		return uiDiffReviewStatus{State: diffReviewStateUnavailable}, nil
 	}
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	requestCtx, cancel := context.WithTimeout(ctx, tenantDashboardTimeout)
 	defer cancel()
 

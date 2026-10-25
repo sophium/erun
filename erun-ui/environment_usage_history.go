@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // Persists the usage cache so a restart does not reset every environment to
@@ -64,7 +65,7 @@ func loadPersistedEnvironmentUsage(path string) map[string]environmentUsageReadi
 	}
 	out := make(map[string]environmentUsageReading, len(entries))
 	for _, entry := range entries {
-		selection := uiSelection{Tenant: entry.Tenant, Environment: entry.Environment}
+		selection := uimodel.Selection{Tenant: entry.Tenant, Environment: entry.Environment}
 		out[selectionKey(selection)] = environmentUsageReading{
 			usage:      entry.Usage,
 			observedAt: time.Unix(entry.ObservedAtUnix, 0),
@@ -74,7 +75,7 @@ func loadPersistedEnvironmentUsage(path string) map[string]environmentUsageReadi
 }
 
 // persistEnvironmentUsage logs write failures; the in-memory cache still serves.
-func (a *App) persistEnvironmentUsage(selection uiSelection, reading environmentUsageReading) {
+func (a *App) persistEnvironmentUsage(selection uimodel.Selection, reading environmentUsageReading) {
 	if err := writeEnvironmentUsageHistoryEntry(a.deps.environmentUsageHistoryPath, selection, reading); err != nil {
 		log.Printf("erun-app: persist environment usage history %s/%s: %v", selection.Tenant, selection.Environment, err)
 	}
@@ -84,7 +85,7 @@ var errEnvironmentUsageHistoryUnreadable = errors.New("environment usage history
 
 // writeEnvironmentUsageHistoryEntry upserts atomically and refuses to overwrite
 // an unreadable file, which would destroy other environments' entries.
-func writeEnvironmentUsageHistoryEntry(path string, selection uiSelection, reading environmentUsageReading) error {
+func writeEnvironmentUsageHistoryEntry(path string, selection uimodel.Selection, reading environmentUsageReading) error {
 	if path == "" || selection.Tenant == "" || selection.Environment == "" {
 		return nil
 	}

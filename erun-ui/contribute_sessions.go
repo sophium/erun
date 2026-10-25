@@ -8,6 +8,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 const (
@@ -16,30 +17,30 @@ const (
 )
 
 // StartContributeSession spawns a shell in the operator's erun clone running the locally-built CLI.
-func (a *App) StartContributeSession(selection uiSelection, slot, cols, rows int) (startSessionResult, error) {
-	selection = normalizeSelection(selection)
-	if err := errMissingTenantOrEnvironment("start contribute ERun session", selection.Tenant, selection.Environment); err != nil {
-		return startSessionResult{}, err
+func (a *App) StartContributeSession(selection uimodel.Selection, slot, cols, rows int) (uimodel.StartSessionResult, error) {
+	selection = uimodel.NormalizeSelection(selection)
+	if err := uimodel.ErrMissingTenantOrEnvironment("start contribute ERun session", selection.Tenant, selection.Environment); err != nil {
+		return uimodel.StartSessionResult{}, err
 	}
-	return a.enqueueGatedSession(selection, gatedSessionKindContributeERun, func(ctx context.Context) (startSessionResult, *managedTerminal, error) {
+	return a.enqueueGatedSession(selection, gatedSessionKindContributeERun, func(ctx context.Context) (uimodel.StartSessionResult, *managedTerminal, error) {
 		return a.runContributeSession(ctx, selection, slot, cols, rows, false)
 	})
 }
 
 // StartContributeAISession is StartContributeSession with the env's AI assistant.
-func (a *App) StartContributeAISession(selection uiSelection, slot, cols, rows int) (startSessionResult, error) {
-	selection = normalizeSelection(selection)
-	if err := errMissingTenantOrEnvironment("start contribute AI session", selection.Tenant, selection.Environment); err != nil {
-		return startSessionResult{}, err
+func (a *App) StartContributeAISession(selection uimodel.Selection, slot, cols, rows int) (uimodel.StartSessionResult, error) {
+	selection = uimodel.NormalizeSelection(selection)
+	if err := uimodel.ErrMissingTenantOrEnvironment("start contribute AI session", selection.Tenant, selection.Environment); err != nil {
+		return uimodel.StartSessionResult{}, err
 	}
-	return a.enqueueGatedSession(selection, gatedSessionKindContributeAI, func(ctx context.Context) (startSessionResult, *managedTerminal, error) {
+	return a.enqueueGatedSession(selection, gatedSessionKindContributeAI, func(ctx context.Context) (uimodel.StartSessionResult, *managedTerminal, error) {
 		return a.runContributeSession(ctx, selection, slot, cols, rows, true)
 	})
 }
 
-func (a *App) runContributeSession(ctx context.Context, selection uiSelection, slot, cols, rows int, withAI bool) (startSessionResult, *managedTerminal, error) {
+func (a *App) runContributeSession(ctx context.Context, selection uimodel.Selection, slot, cols, rows int, withAI bool) (uimodel.StartSessionResult, *managedTerminal, error) {
 	if !a.GetContributeMode(selection) {
-		return startSessionResult{}, nil, fmt.Errorf("contribute mode is not enabled for %s/%s", selection.Tenant, selection.Environment)
+		return uimodel.StartSessionResult{}, nil, fmt.Errorf("contribute mode is not enabled for %s/%s", selection.Tenant, selection.Environment)
 	}
 	if cols <= 0 {
 		cols = 120
@@ -54,7 +55,7 @@ func (a *App) runContributeSession(ctx context.Context, selection uiSelection, s
 		Environment: selection.Environment,
 	})
 	if err != nil {
-		return startSessionResult{}, nil, err
+		return uimodel.StartSessionResult{}, nil, err
 	}
 
 	kind := sessionKindContributeERun
@@ -81,7 +82,7 @@ func (a *App) runContributeSession(ctx context.Context, selection uiSelection, s
 	}
 	session, err := a.deps.startTerminal(params)
 	if err != nil {
-		return startSessionResult{}, nil, err
+		return uimodel.StartSessionResult{}, nil, err
 	}
 
 	a.mu.Lock()
@@ -120,7 +121,7 @@ func (a *App) runContributeSession(ctx context.Context, selection uiSelection, s
 	}
 	a.logSpawnedCommandToLocal(selection, string(kind), formatLocalCommandLog(formatLaunchCommand(params), tabName))
 	_ = ctx
-	return startSessionResult{
+	return uimodel.StartSessionResult{
 		SessionID: serial,
 		Selection: selection,
 		Slot:      slot,
@@ -128,16 +129,16 @@ func (a *App) runContributeSession(ctx context.Context, selection uiSelection, s
 	}, managed, nil
 }
 
-func (a *App) reuseExistingContributeSession(key string, slot int, kind sessionKind) (startSessionResult, *managedTerminal, bool) {
+func (a *App) reuseExistingContributeSession(key string, slot int, kind sessionKind) (uimodel.StartSessionResult, *managedTerminal, bool) {
 	a.mu.Lock()
 	existing := a.sessions[key]
 	if existing == nil || existing.closed || existing.session == nil {
 		a.mu.Unlock()
-		return startSessionResult{}, nil, false
+		return uimodel.StartSessionResult{}, nil, false
 	}
 	a.mu.Unlock()
 	existing.signalReady(nil)
-	return startSessionResult{
+	return uimodel.StartSessionResult{
 		SessionID: existing.serial,
 		Selection: existing.selection,
 		Slot:      slot,
@@ -145,7 +146,7 @@ func (a *App) reuseExistingContributeSession(key string, slot int, kind sessionK
 	}, existing, true
 }
 
-func contributeSessionKey(selection uiSelection, slot int, withAI bool) string {
+func contributeSessionKey(selection uimodel.Selection, slot int, withAI bool) string {
 	prefix := "contribute-erun"
 	if withAI {
 		prefix = "contribute-ai"
@@ -153,8 +154,8 @@ func contributeSessionKey(selection uiSelection, slot int, withAI bool) string {
 	return prefix + "\x00" + selectionKey(selection) + "\x00" + fmt.Sprintf("%d", slot)
 }
 
-func (a *App) closeContributeSessionsForSelection(selection uiSelection) {
-	selection = normalizeSelection(selection)
+func (a *App) closeContributeSessionsForSelection(selection uimodel.Selection) {
+	selection = uimodel.NormalizeSelection(selection)
 	prefixes := []string{
 		"contribute-erun\x00" + selectionKey(selection) + "\x00",
 		"contribute-ai\x00" + selectionKey(selection) + "\x00",

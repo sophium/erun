@@ -12,6 +12,7 @@ import (
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // classifyMCPUnreachable reports the locally observable kind of unreachability.
@@ -39,9 +40,9 @@ func (a *App) ensureMCPAvailable(ctx context.Context, result configpkg.OpenResul
 
 // ReconnectMCP runs `erun open --no-shell --reconnect` on an explicit click. It
 // never deploys or starts a stopped environment.
-func (a *App) ReconnectMCP(selection uiSelection) error {
-	selection = normalizeSelection(selection)
-	if err := errMissingTenantOrEnvironment("reconnect MCP", selection.Tenant, selection.Environment); err != nil {
+func (a *App) ReconnectMCP(selection uimodel.Selection) error {
+	selection = uimodel.NormalizeSelection(selection)
+	if err := uimodel.ErrMissingTenantOrEnvironment("reconnect MCP", selection.Tenant, selection.Environment); err != nil {
 		return err
 	}
 	result, err := resolve.ResolveOpen(a.deps.store, model.OpenParams{
@@ -51,15 +52,12 @@ func (a *App) ReconnectMCP(selection uiSelection) error {
 	if err != nil {
 		return err
 	}
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	if a.deps.reconnectMCP == nil {
 		return fmt.Errorf("reconnect is not configured")
 	}
 	emit := func(line string) {
-		a.emit(mcpReconnectLineEvent, line)
+		a.emit(uimodel.MCPReconnectLineEvent, line)
 	}
 	return a.deps.reconnectMCP(ctx, result, emit)
 }
@@ -82,7 +80,7 @@ func (a *App) reconnectRefused(managed *managedTerminal, exitReason string) bool
 	// `erun open` restarts the cloud context, so respawning would fight auto-stop.
 	if !a.shouldRespawnForCloudContext(managed) {
 		a.emitStoppedContextMarker(managed.serial)
-		a.emitEnvStatus(managed.selection, envStatusStopped)
+		a.emitEnvStatus(managed.selection, uimodel.EnvStatusStopped)
 		return true
 	}
 
@@ -90,14 +88,14 @@ func (a *App) reconnectRefused(managed *managedTerminal, exitReason string) bool
 	// and respawning would undo the operator's stop.
 	if a.runtimeStoppedForSelection(managed.selection) {
 		a.emitStoppedRuntimeMarker(managed.serial)
-		a.emitEnvStatus(managed.selection, envStatusRuntimeStopped)
+		a.emitEnvStatus(managed.selection, uimodel.EnvStatusRuntimeStopped)
 		return true
 	}
 
 	// Respawning after a failed deploy redeploys it from every tab at once.
 	if a.reconnectBlockedByDeployFailure(managed) {
 		a.emitDeployFailedMarker(managed.serial)
-		a.emitEnvStatus(managed.selection, envStatusFailed)
+		a.emitEnvStatus(managed.selection, uimodel.EnvStatusFailed)
 		return true
 	}
 
@@ -105,14 +103,14 @@ func (a *App) reconnectRefused(managed *managedTerminal, exitReason string) bool
 	// as a timeout.
 	if a.reconnectBlockedByActivityDeployFailure(managed) {
 		a.emitDeployFailedMarker(managed.serial)
-		a.emitEnvStatus(managed.selection, envStatusFailed)
+		a.emitEnvStatus(managed.selection, uimodel.EnvStatusFailed)
 		return true
 	}
 
 	// Cap fast-exit respawns so a crash-looping env stops with one retry affordance.
 	if a.trackExitForLoopGuard(managed) {
 		a.emitReconnectLoopMarker(managed.serial)
-		a.emitEnvStatus(managed.selection, envStatusFailed)
+		a.emitEnvStatus(managed.selection, uimodel.EnvStatusFailed)
 		return true
 	}
 
@@ -211,7 +209,7 @@ func (a *App) emitReconnectMarker(sessionID int, exitReason string) {
 		suffix = " " + reason
 	}
 	marker := "\r\n\x1b[2;33m── reconnecting" + suffix + " ──\x1b[0m\r\n"
-	a.emitEvent(terminalOutputEvent, terminalOutputPayload{
+	a.emitEvent(uimodel.TerminalOutputEvent, terminalOutputPayload{
 		SessionID: sessionID,
 		Data:      base64.StdEncoding.EncodeToString([]byte(marker)),
 	})
@@ -247,21 +245,21 @@ func (a *App) trackExitForLoopGuard(managed *managedTerminal) bool {
 }
 
 func (a *App) emitReconnectLoopMarker(sessionID int) {
-	a.emitEvent(terminalOutputEvent, terminalOutputPayload{
+	a.emitEvent(uimodel.TerminalOutputEvent, terminalOutputPayload{
 		SessionID: sessionID,
 		Data:      base64.StdEncoding.EncodeToString([]byte(reconnectLoopMarkerANSI)),
 	})
 }
 
 func (a *App) emitDeployFailedMarker(sessionID int) {
-	a.emitEvent(terminalOutputEvent, terminalOutputPayload{
+	a.emitEvent(uimodel.TerminalOutputEvent, terminalOutputPayload{
 		SessionID: sessionID,
 		Data:      base64.StdEncoding.EncodeToString([]byte(deployFailedMarkerANSI)),
 	})
 }
 
 func (a *App) emitTakenOverMarker(sessionID int) {
-	a.emitEvent(terminalOutputEvent, terminalOutputPayload{
+	a.emitEvent(uimodel.TerminalOutputEvent, terminalOutputPayload{
 		SessionID: sessionID,
 		Data:      base64.StdEncoding.EncodeToString([]byte(takenOverMarkerANSI)),
 	})
@@ -307,7 +305,7 @@ func (a *App) reconnectBlockedByActivityDeployFailure(managed *managedTerminal) 
 
 func (a *App) emitStoppedContextMarker(sessionID int) {
 	marker := "\r\n\x1b[2;33m── environment stopped — click the start button in the titlebar to resume ──\x1b[0m\r\n"
-	a.emitEvent(terminalOutputEvent, terminalOutputPayload{
+	a.emitEvent(uimodel.TerminalOutputEvent, terminalOutputPayload{
 		SessionID: sessionID,
 		Data:      base64.StdEncoding.EncodeToString([]byte(marker)),
 	})
@@ -317,7 +315,7 @@ func (a *App) emitStoppedContextMarker(sessionID int) {
 // cloud-context start button.
 func (a *App) emitStoppedRuntimeMarker(sessionID int) {
 	marker := "\r\n\x1b[2;33m── environment stopped — click it in the sidebar to start it again ──\x1b[0m\r\n"
-	a.emitEvent(terminalOutputEvent, terminalOutputPayload{
+	a.emitEvent(uimodel.TerminalOutputEvent, terminalOutputPayload{
 		SessionID: sessionID,
 		Data:      base64.StdEncoding.EncodeToString([]byte(marker)),
 	})
@@ -328,7 +326,7 @@ func (a *App) emitReconnectFailureMarker(sessionID int, err error) {
 		return
 	}
 	marker := "\r\n\x1b[31m── reconnect failed: " + err.Error() + " ──\x1b[0m\r\n"
-	a.emitEvent(terminalOutputEvent, terminalOutputPayload{
+	a.emitEvent(uimodel.TerminalOutputEvent, terminalOutputPayload{
 		SessionID: sessionID,
 		Data:      base64.StdEncoding.EncodeToString([]byte(marker)),
 	})

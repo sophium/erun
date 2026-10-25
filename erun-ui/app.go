@@ -16,32 +16,11 @@ import (
 	"github.com/sophium/erun/erun-common/command/workspace"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const (
-	terminalOutputEvent           = "terminal-output"
-	terminalExitEvent             = "terminal-exit"
-	appStatusEvent                = "app-status"
-	appNotificationEvent          = "app-notification"
-	appNotificationClearEvent     = "app-notification-clear"
-	mcpReconnectLineEvent         = "mcp-reconnect-line"
-	environmentInitializedEvent   = "environment-initialized"
-	environmentInitFailedEvent    = "environment-init-failed"
-	environmentDeployedEvent      = "environment-deployed"
-	environmentsChangedEvent      = "environments-changed"
-	hostedDefinitionUploadedEvent = "hosted-definition-uploaded"
-	doctorCompletedEvent          = "doctor-completed"
-	sshdInitCompletedEvent        = "sshd-init-completed"
-	aiActivityEvent               = "ai-activity"
-	orchestratorShellEvent        = "orchestrator-shell-activity"
-	envStatusEvent                = "env-status"
-	envActivityEvent              = "env-activity"
-	envUsageEvent                 = "env-usage"
-	envNodeEvent                  = "env-node"
-	appCloseGateEvent             = "app-close-gate"
-	appSessionEnvVar              = orchestrator.DesktopSessionEnvVar
-)
+const appSessionEnvVar = orchestrator.DesktopSessionEnvVar
 
 type erunUIStore interface {
 	seam.ListStore
@@ -104,8 +83,8 @@ type erunUIDeps struct {
 	runWorkingIssueCommand    workingIssueCommandRunner
 	loadPodBranch             func(context.Context, string, string) (string, error)
 	runPodRaw                 func(context.Context, string, string, []string) (string, error)
-	execRuntimePod            func(context.Context, uiSelection, string) (string, error)
-	loadRuntimeUsage          func(context.Context, uiSelection) (uiRuntimeUsage, error)
+	execRuntimePod            func(context.Context, uimodel.Selection, string) (string, error)
+	loadRuntimeUsage          func(context.Context, uimodel.Selection) (uiRuntimeUsage, error)
 	stopCloudContext          func(context.Context, string) (model.CloudContextStatus, error)
 	windowStatePath           string
 	windowMaximised           func(context.Context) bool
@@ -197,7 +176,7 @@ type App struct {
 
 	// emitMu guards emitFn: the notify loop and session streamers may emit while SetEmitter runs.
 	emitMu sync.RWMutex
-	emitFn func(name string, args ...any)
+	emitFn uimodel.Emitter
 
 	// restartControlMarkerMu keeps an adoption from republishing an endpoint after shutdown removed it.
 	restartControlMarkerMu       sync.Mutex
@@ -228,6 +207,16 @@ func (a *App) emit(name string, args ...any) {
 	wailsArgs := make([]interface{}, 0, len(args))
 	wailsArgs = append(wailsArgs, args...)
 	runtime.EventsEmit(a.ctx, name, wailsArgs...)
+}
+
+// context is the Wails context once startup has run, and context.Background()
+// before it. Services built in NewApp read it through this func, never a
+// captured value, because startup (or the headless path) sets a.ctx later.
+func (a *App) context() context.Context {
+	if a.ctx != nil {
+		return a.ctx
+	}
+	return context.Background()
 }
 
 func NewApp(deps erunUIDeps) *App {

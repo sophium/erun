@@ -12,11 +12,12 @@ import (
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/open/resolve"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
-func (a *App) LoadIdleStatus(selection uiSelection) (uiIdleStatus, error) {
-	selection = normalizeSelection(selection)
-	if err := errMissingTenantOrEnvironment("load idle status", selection.Tenant, selection.Environment); err != nil {
+func (a *App) LoadIdleStatus(selection uimodel.Selection) (uiIdleStatus, error) {
+	selection = uimodel.NormalizeSelection(selection)
+	if err := uimodel.ErrMissingTenantOrEnvironment("load idle status", selection.Tenant, selection.Environment); err != nil {
 		return uiIdleStatus{}, err
 	}
 	result, err := resolve.ResolveOpen(a.deps.store, model.OpenParams{
@@ -34,10 +35,7 @@ func (a *App) LoadIdleStatus(selection uiSelection) (uiIdleStatus, error) {
 		}
 		return status.ui, err
 	}
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	status, err := a.deps.loadIdleStatus(ctx, mcpEndpointForOpenResult(result), a.mcpBearer(result.Tenant, result.EnvConfig.Name))
 	if err != nil {
 		status, err := a.loadLocalIdleStatus(result)
@@ -113,13 +111,13 @@ func idleStatusToUI(status model.EnvironmentIdleStatus) uiIdleStatus {
 }
 
 // The JobID is only an id-shape match; verifyLeaseJobIDs confirms it.
-func environmentLeasesToUI(leases []model.EnvironmentActivityLease, now time.Time) []uiEnvironmentLease {
+func environmentLeasesToUI(leases []model.EnvironmentActivityLease, now time.Time) []uimodel.EnvironmentLease {
 	if len(leases) == 0 {
 		return nil
 	}
-	out := make([]uiEnvironmentLease, 0, len(leases))
+	out := make([]uimodel.EnvironmentLease, 0, len(leases))
 	for _, lease := range leases {
-		entry := uiEnvironmentLease{Name: strings.TrimSpace(lease.Name)}
+		entry := uimodel.EnvironmentLease{Name: strings.TrimSpace(lease.Name)}
 		if jobID, ok := jobspkg.EnvironmentJobIDFromLeaseID(lease.ID); ok {
 			entry.JobID = jobID
 		}
@@ -133,7 +131,7 @@ func environmentLeasesToUI(leases []model.EnvironmentActivityLease, now time.Tim
 
 // verifyLeaseJobIDs clears a candidate JobID no job record backs, so a
 // hand-taken "job-*" lease never offers "View jobs". Fails closed on error.
-func (a *App) verifyLeaseJobIDs(tenant, environment string, leases []uiEnvironmentLease) {
+func (a *App) verifyLeaseJobIDs(tenant, environment string, leases []uimodel.EnvironmentLease) {
 	var candidates []int
 	for i := range leases {
 		if leases[i].JobID != "" {
@@ -277,9 +275,9 @@ func (a *App) maybeStopIdleCloudEnvironment(result config.OpenResult, _ model.En
 }
 
 // CancelPendingIdleStop dismisses the env's pending auto-stop for every client.
-func (a *App) CancelPendingIdleStop(selection uiSelection) error {
-	selection = normalizeSelection(selection)
-	if err := errMissingTenantOrEnvironment("cancel pending idle stop", selection.Tenant, selection.Environment); err != nil {
+func (a *App) CancelPendingIdleStop(selection uimodel.Selection) error {
+	selection = uimodel.NormalizeSelection(selection)
+	if err := uimodel.ErrMissingTenantOrEnvironment("cancel pending idle stop", selection.Tenant, selection.Environment); err != nil {
 		return err
 	}
 	result, err := resolve.ResolveOpen(a.deps.store, model.OpenParams{
@@ -290,10 +288,7 @@ func (a *App) CancelPendingIdleStop(selection uiSelection) error {
 		return err
 	}
 	endpoint := mcpEndpointForOpenResult(result)
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	bearer := a.mcpBearer(selection.Tenant, selection.Environment)
 	if err := cancelStopPendingViaMCP(ctx, endpoint, bearer, selection.Tenant, selection.Environment); err != nil {
 		return err
@@ -328,9 +323,9 @@ func (a *App) recordManualStopForCloudContext(ctx context.Context, cloudContextN
 }
 
 // LoadStopHistory returns the in-pod stop history, newest first.
-func (a *App) LoadStopHistory(selection uiSelection) ([]uiLastStopEvent, error) {
-	selection = normalizeSelection(selection)
-	if err := errMissingTenantOrEnvironment("load stop history", selection.Tenant, selection.Environment); err != nil {
+func (a *App) LoadStopHistory(selection uimodel.Selection) ([]uiLastStopEvent, error) {
+	selection = uimodel.NormalizeSelection(selection)
+	if err := uimodel.ErrMissingTenantOrEnvironment("load stop history", selection.Tenant, selection.Environment); err != nil {
 		return nil, err
 	}
 	result, err := resolve.ResolveOpen(a.deps.store, model.OpenParams{
@@ -341,10 +336,7 @@ func (a *App) LoadStopHistory(selection uiSelection) ([]uiLastStopEvent, error) 
 		return nil, err
 	}
 	endpoint := mcpEndpointForOpenResult(result)
-	ctx := a.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := a.context()
 	bearer := a.mcpBearer(selection.Tenant, selection.Environment)
 	entries, err := loadStopHistoryViaMCP(ctx, endpoint, bearer, selection.Tenant, selection.Environment)
 	if err != nil {
@@ -427,7 +419,7 @@ func (a *App) selectionKeysForCloudContext(name string) []string {
 			if err != nil || !ok || strings.TrimSpace(cloudContext.Name) != name {
 				continue
 			}
-			cleared = append(cleared, selectionKey(uiSelection{Tenant: tenant.Name, Environment: env.Name}))
+			cleared = append(cleared, selectionKey(uimodel.Selection{Tenant: tenant.Name, Environment: env.Name}))
 		}
 	}
 	return cleared

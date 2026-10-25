@@ -31,7 +31,7 @@ func (a *App) WhipNow(targets []uiWhipTargetRef) (uiWhipReport, error) {
 		}
 	}
 
-	results, err := a.whipEnvironmentsNow(a.backgroundContext(), wantEnvironments)
+	results, err := a.whipEnvironmentsNow(a.context(), wantEnvironments)
 	if err != nil {
 		return uiWhipReport{}, err
 	}

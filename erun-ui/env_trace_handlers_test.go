@@ -10,6 +10,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // setTestHomeDir sets HOME and USERPROFILE, since Windows reads the latter.
@@ -58,7 +59,7 @@ func TestLoadEnvTraceHostFile(t *testing.T) {
 		Name: "dev", LocalRepoPath: t.TempDir(), Type: config.EnvironmentTypeLocalAgent, KubernetesContext: "ctx",
 	}, false, "", nil)
 
-	trace, err := app.LoadEnvTrace(uiSelection{Tenant: "acme", Environment: "dev"})
+	trace, err := app.LoadEnvTrace(uimodel.Selection{Tenant: "acme", Environment: "dev"})
 	if err != nil {
 		t.Fatalf("LoadEnvTrace: %v", err)
 	}
@@ -73,7 +74,7 @@ func TestLoadEnvTraceHostFileMissing(t *testing.T) {
 		Name: "dev", LocalRepoPath: t.TempDir(), Type: config.EnvironmentTypeLocalAgent, KubernetesContext: "ctx",
 	}, false, "", nil)
 
-	trace, err := app.LoadEnvTrace(uiSelection{Tenant: "acme", Environment: "dev"})
+	trace, err := app.LoadEnvTrace(uimodel.Selection{Tenant: "acme", Environment: "dev"})
 	if err != nil {
 		t.Fatalf("LoadEnvTrace: %v", err)
 	}
@@ -90,7 +91,7 @@ func TestLoadEnvTraceRemoteUnreachableKeepsHostTrace(t *testing.T) {
 		Name: "dev", LocalRepoPath: "/home/erun/git/acme", Type: config.EnvironmentTypeRemoteAgent, KubernetesContext: "ctx", LocalPortRangeStart: 17500,
 	}, false, "", nil)
 
-	trace, err := app.LoadEnvTrace(uiSelection{Tenant: "acme", Environment: "dev"})
+	trace, err := app.LoadEnvTrace(uimodel.Selection{Tenant: "acme", Environment: "dev"})
 	if err != nil {
 		t.Fatalf("LoadEnvTrace: %v", err)
 	}
@@ -114,7 +115,7 @@ func TestLoadEnvTraceRemoteMergesHostAndPod(t *testing.T) {
 		"2026-06-11T00:00:02Z deploy: resolved 1 spec(s)\n"+
 			"2026-06-11T00:00:05Z doctor: all checks passed\n", nil)
 
-	trace, err := app.LoadEnvTrace(uiSelection{Tenant: "acme", Environment: "dev"})
+	trace, err := app.LoadEnvTrace(uimodel.Selection{Tenant: "acme", Environment: "dev"})
 	if err != nil {
 		t.Fatalf("LoadEnvTrace: %v", err)
 	}
@@ -136,7 +137,7 @@ func TestLoadEnvTraceRemotePodOnly(t *testing.T) {
 		Name: "dev", LocalRepoPath: "/home/erun/git/acme", Type: config.EnvironmentTypeRemoteAgent, KubernetesContext: "ctx", LocalPortRangeStart: 17500,
 	}, true, "2026-06-11T00:00:00Z deploy: resolved 1 spec(s)\n", nil)
 
-	trace, err := app.LoadEnvTrace(uiSelection{Tenant: "acme", Environment: "dev"})
+	trace, err := app.LoadEnvTrace(uimodel.Selection{Tenant: "acme", Environment: "dev"})
 	if err != nil {
 		t.Fatalf("LoadEnvTrace: %v", err)
 	}
@@ -151,7 +152,7 @@ func TestLoadEnvTraceRemoteBothEmpty(t *testing.T) {
 		Name: "dev", LocalRepoPath: "/home/erun/git/acme", Type: config.EnvironmentTypeRemoteAgent, KubernetesContext: "ctx", LocalPortRangeStart: 17500,
 	}, true, "", nil)
 
-	trace, err := app.LoadEnvTrace(uiSelection{Tenant: "acme", Environment: "dev"})
+	trace, err := app.LoadEnvTrace(uimodel.Selection{Tenant: "acme", Environment: "dev"})
 	if err != nil {
 		t.Fatalf("LoadEnvTrace: %v", err)
 	}

@@ -6,6 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func newTestAppForActivityQueue(t *testing.T) *App {
@@ -19,11 +20,11 @@ func newTestAppForActivityQueue(t *testing.T) *App {
 
 func TestLockTerminalsForActivityLocksMatchingSessions(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
-	selection := uiSelection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
+	selection := uimodel.Selection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
 	envSession := &managedTerminal{selection: selection, key: "env\x00team\x00dev", serial: 1, kind: sessionKindOpen}
 	aiSession := &managedTerminal{selection: selection, key: "ai\x00team\x00dev", serial: 2, kind: sessionKindAI}
 	localSession := &managedTerminal{selection: selection, key: "local\x00team\x00dev", serial: 3, kind: sessionKindLocal}
-	otherSelection := uiSelection{Tenant: "other", Environment: "dev", Version: "1.0.0"}
+	otherSelection := uimodel.Selection{Tenant: "other", Environment: "dev", Version: "1.0.0"}
 	unrelated := &managedTerminal{selection: otherSelection, key: "env\x00other\x00dev", serial: 4, kind: sessionKindOpen}
 	app.sessions[envSession.key] = envSession
 	app.sessions[aiSession.key] = aiSession
@@ -58,7 +59,7 @@ func TestLockTerminalsForActivityClearsEnvNotifications(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	emits := newCapturedEmits()
 	app.SetEmitter(emits.fn())
-	selection := uiSelection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
+	selection := uimodel.Selection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
 	envSession := &managedTerminal{selection: selection, key: "env\x00team\x00dev", serial: 1, kind: sessionKindOpen}
 	app.sessions[envSession.key] = envSession
 
@@ -71,11 +72,11 @@ func TestLockTerminalsForActivityClearsEnvNotifications(t *testing.T) {
 	})
 	app.lockTerminalsForActivity(entry)
 
-	events := emits.events(appNotificationClearEvent)
+	events := emits.events(uimodel.AppNotificationClearEvent)
 	if len(events) != 1 {
 		t.Fatalf("clear emitted %d times, want exactly 1", len(events))
 	}
-	payload, ok := events[0].(appNotificationClearPayload)
+	payload, ok := events[0].(uimodel.AppNotificationClearPayload)
 	if !ok {
 		t.Fatalf("clear payload has unexpected type %T", events[0])
 	}
@@ -88,16 +89,16 @@ func TestDeployFailedTraceSurfacesToToolbar(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	emits := newCapturedEmits()
 	app.SetEmitter(emits.fn())
-	selection := uiSelection{Tenant: "frs", Environment: "local"}
+	selection := uimodel.Selection{Tenant: "frs", Environment: "local"}
 	onLine := newActivityTraceLineHandler(app, selection, sessionKindLocal)
 
 	onLine(`==> Deploy failed frs/local: values file not found for environment "local"`)
 
-	notes := emits.events(appNotificationEvent)
+	notes := emits.events(uimodel.AppNotificationEvent)
 	if len(notes) != 1 {
 		t.Fatalf("deploy failure emitted %d toolbar notifications, want 1", len(notes))
 	}
-	note, ok := notes[0].(appNotificationPayload)
+	note, ok := notes[0].(uimodel.AppNotificationPayload)
 	if !ok {
 		t.Fatalf("notification payload has unexpected type %T", notes[0])
 	}
@@ -109,7 +110,7 @@ func TestDeployFailedTraceSurfacesToToolbar(t *testing.T) {
 		!strings.Contains(note.Message, "values file not found") {
 		t.Fatalf("notification message = %q, want the failed target + reason", note.Message)
 	}
-	if got := len(emits.events(envStatusEvent)); got != 1 {
+	if got := len(emits.events(uimodel.EnvStatusEvent)); got != 1 {
 		t.Fatalf("failed sidebar status emitted %d times, want 1", got)
 	}
 }
@@ -119,7 +120,7 @@ func TestLockTerminalsForActivityWithoutMatchClearsNothing(t *testing.T) {
 	emits := newCapturedEmits()
 	app.SetEmitter(emits.fn())
 	other := &managedTerminal{
-		selection: uiSelection{Tenant: "other", Environment: "dev"},
+		selection: uimodel.Selection{Tenant: "other", Environment: "dev"},
 		key:       "env\x00other\x00dev", serial: 1, kind: sessionKindOpen,
 	}
 	app.sessions[other.key] = other
@@ -129,7 +130,7 @@ func TestLockTerminalsForActivityWithoutMatchClearsNothing(t *testing.T) {
 	})
 	app.lockTerminalsForActivity(entry)
 
-	if got := len(emits.events(appNotificationClearEvent)); got != 0 {
+	if got := len(emits.events(uimodel.AppNotificationClearEvent)); got != 0 {
 		t.Fatalf("clear emitted %d times with no matching session, want 0", got)
 	}
 }
@@ -139,7 +140,7 @@ func TestLockNewlyJoinedSessionIfDeployInFlightLocksImmediately(t *testing.T) {
 	emits := newCapturedEmits()
 	app.SetEmitter(emits.fn())
 
-	selection := uiSelection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
+	selection := uimodel.Selection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
 	entry, _ := app.activityQueue.start(activityQueueEntry{
 		Command: "deploy", Tenant: "team", Environment: "dev", Version: "1.0.0", Release: "team-devops",
 	})
@@ -164,7 +165,7 @@ func TestLockNewlyJoinedSessionIfDeployInFlightNoOpWithoutADeploy(t *testing.T) 
 	emits := newCapturedEmits()
 	app.SetEmitter(emits.fn())
 
-	selection := uiSelection{Tenant: "team", Environment: "dev"}
+	selection := uimodel.Selection{Tenant: "team", Environment: "dev"}
 	joinSession := &managedTerminal{selection: selection, key: "ai\x00team\x00dev", serial: 7, kind: sessionKindAI}
 	app.mu.Lock()
 	app.sessions[joinSession.key] = joinSession
@@ -183,7 +184,7 @@ func TestLockNewlyJoinedSessionIfDeployInFlightNoOpWithoutADeploy(t *testing.T) 
 // The overlay has no fallback, so every Locked=true event needs a Reason.
 func TestLockTerminalEventsAlwaysCarryReason(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
-	selection := uiSelection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
+	selection := uimodel.Selection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
 	envSession := &managedTerminal{selection: selection, key: "env\x00team\x00dev", serial: 1, kind: sessionKindOpen}
 	app.sessions[envSession.key] = envSession
 
@@ -233,7 +234,7 @@ func TestLockTerminalEventsAlwaysCarryReason(t *testing.T) {
 
 func TestUnlockTerminalsForActivityClearsMatchingLocks(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
-	selection := uiSelection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
+	selection := uimodel.Selection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
 	envSession := &managedTerminal{selection: selection, key: "env\x00team\x00dev", serial: 1, kind: sessionKindOpen}
 	app.sessions[envSession.key] = envSession
 	entry, _ := app.activityQueue.start(activityQueueEntry{Command: "deploy", Tenant: "team", Environment: "dev", Version: "1.0.0"})

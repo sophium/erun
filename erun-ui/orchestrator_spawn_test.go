@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/command/orchestrator"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 // A transient session is always fresh, never a resume.
@@ -239,12 +240,12 @@ func TestOrchestratorCleanExitDoesNotRespawn(t *testing.T) {
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if len(emits.events(terminalExitEvent)) > 0 {
+		if len(emits.events(uimodel.TerminalExitEvent)) > 0 {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if len(emits.events(terminalExitEvent)) == 0 {
+	if len(emits.events(uimodel.TerminalExitEvent)) == 0 {
 		t.Fatal("expected the clean exit to finalize the session")
 	}
 	mu.Lock()
