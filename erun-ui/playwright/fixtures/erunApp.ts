@@ -67,6 +67,9 @@ export const test = base.extend<{
       const app = new AppShell(page);
       await app.open();
       await use(app);
+      // A spec's route handler can still be awaiting a background request when the spec
+      // ends; drained here, it cannot throw into the closing context and fail a passed spec.
+      await page.unrouteAll({ behavior: 'ignoreErrors' });
     },
     { timeout: 60_000 },
   ],
