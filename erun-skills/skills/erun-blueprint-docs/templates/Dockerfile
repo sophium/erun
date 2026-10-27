@@ -1,7 +1,7 @@
 # Blueprint: substitute __MODULE__ with the docs module directory name.
 ARG ERUN_VERSION=1.0.0
 
-FROM node:20.18.1-alpine AS build
+FROM node:24.22.1-alpine AS build
 
 WORKDIR /src
 
@@ -25,7 +25,7 @@ FROM build AS test
 
 RUN yarn typecheck
 
-FROM node:20.18.1-alpine AS runtime
+FROM node:24.22.1-alpine AS runtime
 
 ARG WRANGLER_VERSION=3.87.0
 

@@ -32,7 +32,7 @@ erun/                                    # Git repo root. .git lives here.
 │   │   ├── erun-backend-postgres/        # Postgres image (pinned).
 │   │   │   └── VERSION                   # Per-image VERSION override.
 │   │   └── erun-dind/                    # Docker-in-Docker sidecar.
-│   │       └── VERSION                   # Pinned to docker version (28.1.1-1).
+│   │       └── VERSION                   # Pinned to docker version (28.1.1-6).
 │   └── k8s/
 │       ├── erun-devops/                  # Runtime pod chart (the env's own pod).
 │       │   ├── Chart.yaml

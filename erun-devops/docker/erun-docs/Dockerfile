@@ -1,7 +1,7 @@
 ARG ERUN_VERSION=1.0.0
 
 # `runtime` takes the site from `test`, so no image exists unless the check passed.
-FROM --platform=$BUILDPLATFORM node:20.18.1-alpine AS build
+FROM --platform=$BUILDPLATFORM node:24.22.1-alpine AS build
 
 WORKDIR /src/erun-docs
 
@@ -20,7 +20,7 @@ FROM build AS test
 
 RUN yarn typecheck
 
-FROM node:20.18.1-alpine AS runtime
+FROM node:24.22.1-alpine AS runtime
 
 ARG WRANGLER_VERSION=3.87.0
 

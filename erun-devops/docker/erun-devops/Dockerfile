@@ -127,7 +127,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # Target-arch Go for in-pod builds; not pinned to BUILDPLATFORM since it ships and runs nothing here.
 FROM golang:1.26.0 AS goroot
 
-FROM ghcr.io/sophium/erun-ubuntu:noble-20260217-1 AS runtime
+FROM ghcr.io/sophium/erun-ubuntu:noble-20261024.1-1 AS runtime
 
 ARG TARGETARCH
 ARG KUBECTL_VERSION=v1.33.1
@@ -139,10 +139,10 @@ ARG BUILDX_VERSION=v0.18.0
 ARG DIFFT_VERSION=0.68.0
 ARG GH_VERSION=2.74.2
 ARG RIPGREP_VERSION=15.1.0
-ARG NODE_VERSION=24.14.0
+ARG NODE_VERSION=24.22.1
 ARG YARN_VERSION=1.22.22
 ARG CODEX_VERSION=0.125.0
-ARG CLAUDE_CODE_VERSION=2.1.222
+ARG CLAUDE_CODE_VERSION=2.1.308
 ARG AWS_CLI_VERSION=2.32.16
 ARG ATLAS_VERSION
 ARG PLAYWRIGHT_VERSION

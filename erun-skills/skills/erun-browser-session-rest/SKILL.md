@@ -25,7 +25,8 @@ supply the host and the login URL; the SSO flow is whatever your browser does.
 
 ## Prerequisites
 
-- Node 18+ (native `fetch`/ESM) and Playwright with a browser:
+- Node 22.23.4+, 24.22.1+ or 26.12.1+ (native `fetch`/ESM; earlier releases decode
+  Brotli responses with a vulnerable decoder) and Playwright with a browser:
   `npx playwright install chromium` (one-time).
 - The two helpers ship beside this file: `save-session.mjs` (interactive login →
   saved session) and `request.mjs` (authenticated call, session rolled forward).

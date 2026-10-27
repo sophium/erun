@@ -7,7 +7,7 @@ environments:
     code2:
         docker:
             fingerprints:
-                erun-ubuntu: d23f28efcd9d0148
+                erun-ubuntu: 7177ba81fe7eb025
                 erun-zitadel: 099e1ae63c85cce7
                 erun-zitadel-login: 85aca40ec3227be5
     # Fingerprint pins resolve per exact environment key with no shared scope: keep every
@@ -15,19 +15,19 @@ environments:
     code1:
         docker:
             fingerprints:
-                erun-ubuntu: d23f28efcd9d0148
+                erun-ubuntu: 7177ba81fe7eb025
                 erun-zitadel: 099e1ae63c85cce7
                 erun-zitadel-login: 85aca40ec3227be5
     code3:
         docker:
             fingerprints:
-                erun-ubuntu: d23f28efcd9d0148
+                erun-ubuntu: 7177ba81fe7eb025
                 erun-zitadel: 099e1ae63c85cce7
                 erun-zitadel-login: 85aca40ec3227be5
     code4:
         docker:
             fingerprints:
-                erun-ubuntu: d23f28efcd9d0148
+                erun-ubuntu: 7177ba81fe7eb025
                 erun-zitadel: 099e1ae63c85cce7
                 erun-zitadel-login: 85aca40ec3227be5
     # local may be any contributor's machine (including arm64): `platforms: []` opts out of the amd64 default.
@@ -39,7 +39,7 @@ environments:
                 - deploy
         docker:
             fingerprints:
-                erun-ubuntu: d23f28efcd9d0148
+                erun-ubuntu: 7177ba81fe7eb025
                 erun-zitadel: 099e1ae63c85cce7
                 erun-zitadel-login: 85aca40ec3227be5
             platforms: []

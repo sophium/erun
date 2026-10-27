@@ -7,7 +7,8 @@ LABEL org.opencontainers.image.source=https://github.com/sophium/erun
 ENV DOCKER_TLS_CERTDIR=
 
 # iptables-nft fails on kernels whose nf_tables version mismatches Alpine's userspace.
-RUN apk add --no-cache iptables-legacy \
+# The brotli-libs floor carries the decoder fix the upstream image predates; apk fails without it.
+RUN apk add --no-cache iptables-legacy 'brotli-libs>=1.1.1-r0' \
     && ln -sf /usr/sbin/iptables-legacy /usr/sbin/iptables \
     && ln -sf /usr/sbin/ip6tables-legacy /usr/sbin/ip6tables \
     && ln -sf /usr/sbin/iptables-legacy-save /usr/sbin/iptables-save \

@@ -1,6 +1,6 @@
 # Run by `erun e2e` against a deployed console, never during a build.
 # The image tag must match the @playwright/test version in yarn.lock.
-FROM mcr.microsoft.com/playwright:v1.62.1-noble AS deps
+FROM mcr.microsoft.com/playwright:v1.64.1-noble AS deps
 
 ENV YARN_CACHE_FOLDER=/usr/local/share/.cache/yarn
 

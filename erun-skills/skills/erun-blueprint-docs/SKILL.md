@@ -91,7 +91,7 @@ This is the load-bearing part of the blueprint. It mirrors
   container image, then a Job pushes it to Cloudflare Pages. There is no
   in-cluster Service, Ingress, or Deployment. Cloudflare Pages owns CDN,
   TLS, the custom domain, and per-deploy preview URLs.
-- **`build` → `test` → `runtime` image.** `build` (`node:20-alpine`) runs
+- **`build` → `test` → `runtime` image.** `build` (`node:24-alpine`) runs
   `yarn install --frozen-lockfile` then `yarn build` to produce
   `/build`; `test` (`FROM build`) runs the site's own `yarn typecheck`;
   `runtime` installs a pinned `wrangler` and copies the built site from

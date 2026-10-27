@@ -4,7 +4,7 @@ ARG ERUN_VERSION=1.0.0
 # and --frozen-lockfile needs every workspace manifest.
 # Node 22: @testing-library/jest-dom@6 requires it. Debian, not alpine: Playwright
 # ships no Chromium for musl. Static assets, so built once on the build platform.
-FROM --platform=$BUILDPLATFORM node:22.14-bookworm AS build
+FROM --platform=$BUILDPLATFORM node:22.23.4-bookworm AS build
 
 # yarn classic otherwise caches under $HOME, outside the cache mount.
 ENV YARN_CACHE_FOLDER=/usr/local/share/.cache/yarn \
@@ -49,7 +49,7 @@ RUN cd /src/erun-kit && \
     yarn playwright test tests/landing-no-horizontal-scroll.spec.ts
 
 # Proxies /v1 so the console is same-origin with the API, which sets no CORS headers.
-FROM nginx:1.27.4-alpine3.21 AS runtime
+FROM nginx:1.27.4-alpine3.21-slim AS runtime
 
 COPY --from=test /src/erun-console/dist /usr/share/nginx/html
 COPY erun-devops/docker/erun-console/default.conf.template /etc/nginx/templates/default.conf.template
