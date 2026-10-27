@@ -42,7 +42,7 @@ import (
 //	  -e ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_USERNAME=login-client \
 //	  -e ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_NAME='Login Client' \
 //	  -e ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_PAT_EXPIRATIONDATE='2030-01-01T00:00:00Z' \
-//	  ghcr.io/zitadel/zitadel:v4.15.3 start-from-init --masterkey 'MasterkeyNeedsToHave32Characters' --tlsMode disabled
+//	  ghcr.io/zitadel/zitadel:v4.20.0 start-from-init --masterkey 'MasterkeyNeedsToHave32Characters' --tlsMode disabled
 //	# wait for http://localhost:18081/debug/healthz to return 200, then:
 //	docker run --rm -v erun-zitadel-e2e-bootstrap:/b alpine cat /b/admin-sa.pat > /tmp/admin-sa.pat
 //	ERUN_E2E_ZITADEL_BASE_URL=http://localhost:18081 \

@@ -24,6 +24,10 @@ const claudeCodeBrotliFixFloor = "2.1.308"
 // The first Playwright image built on a fixed Node (24.22.1).
 const playwrightImageBrotliFixFloor = "1.64.1"
 
+// The first Zitadel release whose login image runs a fixed Node (24.22.1); core
+// moves with it on the shared pin.
+const zitadelLoginBrotliFixFloor = "4.20.0"
+
 // Where the decoder comes from a distro package resolved at build time, the image's
 // own Dockerfile fails the build without the fix; each entry is that guard.
 var brotliDecoderPackageGuards = []struct {
@@ -37,13 +41,14 @@ var brotliDecoderPackageGuards = []struct {
 }
 
 var (
-	nodeImageTagPattern    = regexp.MustCompile(`(?im)^\s*FROM\s+(?:--platform=\S+\s+)?(?:\S+/)?node:(\S+)`)
-	nodeVersionArgPattern  = regexp.MustCompile(`(?im)^\s*ARG\s+NODE_VERSION=(\S+)`)
-	claudeCodeArgPattern   = regexp.MustCompile(`(?im)^\s*ARG\s+CLAUDE_CODE_VERSION=(\S+)`)
-	playwrightImagePattern = regexp.MustCompile(`(?im)^\s*FROM\s+(?:--platform=\S+\s+)?mcr\.microsoft\.com/playwright:(\S+)`)
-	leadingVersionPattern  = regexp.MustCompile(`^(\d+)(?:\.(\d+))?(?:\.(\d+))?`)
-	nodeTemplateDockerfile = filepath.Join("erun-skills", "skills", "*", "templates", "Dockerfile")
-	nodeE2EDockerfile      = filepath.Join("erun-devops", "e2e", "*", "Dockerfile")
+	nodeImageTagPattern      = regexp.MustCompile(`(?im)^\s*FROM\s+(?:--platform=\S+\s+)?(?:\S+/)?node:(\S+)`)
+	nodeVersionArgPattern    = regexp.MustCompile(`(?im)^\s*ARG\s+NODE_VERSION=(\S+)`)
+	claudeCodeArgPattern     = regexp.MustCompile(`(?im)^\s*ARG\s+CLAUDE_CODE_VERSION=(\S+)`)
+	playwrightImagePattern   = regexp.MustCompile(`(?im)^\s*FROM\s+(?:--platform=\S+\s+)?mcr\.microsoft\.com/playwright:(\S+)`)
+	zitadelVersionArgPattern = regexp.MustCompile(`(?im)^\s*ARG\s+ZITADEL_VERSION=(\S+)`)
+	leadingVersionPattern    = regexp.MustCompile(`^(\d+)(?:\.(\d+))?(?:\.(\d+))?`)
+	nodeTemplateDockerfile   = filepath.Join("erun-skills", "skills", "*", "templates", "Dockerfile")
+	nodeE2EDockerfile        = filepath.Join("erun-devops", "e2e", "*", "Dockerfile")
 )
 
 // Templates are scaffolded into tenant repositories, so a vulnerable pin there spreads.
@@ -224,5 +229,24 @@ func TestShippedImagesKeepTheirBrotliDecoderGuards(t *testing.T) {
 		if !strings.Contains(dockerfileWithoutComments(string(data)), entry.guard) {
 			t.Errorf("%s no longer carries its Brotli decoder guard %q: a rebuild could ship the vulnerable decoder with nothing failing", entry.dockerfile, entry.guard)
 		}
+	}
+}
+
+func TestZitadelLoginImageCarriesTheBrotliDecoderFix(t *testing.T) {
+	path := filepath.Join(erunRepoRoot(t), "erun-devops", "docker", "erun-zitadel-login", "Dockerfile")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	matches := zitadelVersionArgPattern.FindAllStringSubmatch(string(data), -1)
+	if len(matches) != 1 {
+		t.Fatalf("%s: want exactly one ARG ZITADEL_VERSION, found %d", path, len(matches))
+	}
+	pinned, ok := leadingVersion(matches[0][1])
+	if !ok {
+		t.Fatalf("%s: cannot read a Zitadel version from %q", path, matches[0][1])
+	}
+	if minimum, _ := leadingVersion(zitadelLoginBrotliFixFloor); versionBelow(pinned, minimum) {
+		t.Errorf("the login image pins Zitadel %s, below v%s: earlier login images run a Node whose Brotli decoder writes past its buffer on a malformed stream", matches[0][1], zitadelLoginBrotliFixFloor)
 	}
 }

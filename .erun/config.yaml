@@ -8,28 +8,28 @@ environments:
         docker:
             fingerprints:
                 erun-ubuntu: 541b8106277bc2a1
-                erun-zitadel: 099e1ae63c85cce7
-                erun-zitadel-login: 85aca40ec3227be5
+                erun-zitadel: a7ac2fc2b4d51968
+                erun-zitadel-login: 3ad10e8cb4c768a6
     # Fingerprint pins resolve per exact environment key with no shared scope: keep every
     # block equal to the current Dockerfile's fingerprint, or that environment rebuilds from source.
     code1:
         docker:
             fingerprints:
                 erun-ubuntu: 541b8106277bc2a1
-                erun-zitadel: 099e1ae63c85cce7
-                erun-zitadel-login: 85aca40ec3227be5
+                erun-zitadel: a7ac2fc2b4d51968
+                erun-zitadel-login: 3ad10e8cb4c768a6
     code3:
         docker:
             fingerprints:
                 erun-ubuntu: 541b8106277bc2a1
-                erun-zitadel: 099e1ae63c85cce7
-                erun-zitadel-login: 85aca40ec3227be5
+                erun-zitadel: a7ac2fc2b4d51968
+                erun-zitadel-login: 3ad10e8cb4c768a6
     code4:
         docker:
             fingerprints:
                 erun-ubuntu: 541b8106277bc2a1
-                erun-zitadel: 099e1ae63c85cce7
-                erun-zitadel-login: 85aca40ec3227be5
+                erun-zitadel: a7ac2fc2b4d51968
+                erun-zitadel-login: 3ad10e8cb4c768a6
     # local may be any contributor's machine (including arm64): `platforms: []` opts out of the amd64 default.
     local:
         containerregistries:
@@ -40,8 +40,8 @@ environments:
         docker:
             fingerprints:
                 erun-ubuntu: 541b8106277bc2a1
-                erun-zitadel: 099e1ae63c85cce7
-                erun-zitadel-login: 85aca40ec3227be5
+                erun-zitadel: a7ac2fc2b4d51968
+                erun-zitadel-login: 3ad10e8cb4c768a6
             platforms: []
         k8s:
             deployments:

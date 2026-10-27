@@ -139,17 +139,29 @@
 {{- if eq $adminPassword "" -}}
 {{- $adminPassword = printf "Er%s%s!" (randAlphaNum 24) (randNumeric 4) -}}
 {{- end -}}
+{{- /* Login V2 signs its session cookies with this key. Left unset, login derives
+       it from the login-client PAT, so rotating that PAT signs every user out;
+       it is generated and lookup-persisted the same way as the admin password. */ -}}
+{{- $loginSecretName := printf "%s-zitadel-login" $tenant -}}
+{{- $sessionCookieSecret := "" -}}
+{{- $existingLoginSecret := lookup "v1" "Secret" .Release.Namespace $loginSecretName -}}
+{{- if and $existingLoginSecret (hasKey $existingLoginSecret.data "session-cookie-secret") -}}
+{{- $sessionCookieSecret = (index $existingLoginSecret.data "session-cookie-secret" | b64dec) -}}
+{{- end -}}
+{{- if eq $sessionCookieSecret "" -}}
+{{- $sessionCookieSecret = randAlphaNum 48 -}}
+{{- end -}}
 {{- /* Both PATs need an expiration date, and it is not optional: the date is
        what makes core mint the tokens at all. Left unset, core still creates the
        two machine users and writes no token, so the login container waits on a
        file that never appears and the pod never goes Ready — verified against
-       v4.15.3. The default is therefore far enough out to be no time bomb;
+       v4.15.3 and v4.20.0. The default is therefore far enough out to be no time bomb;
        shortening it means rotating the login client's token by hand. */ -}}
 {{- $patExpiration := default "2100-01-01T00:00:00Z" $zitadel.patExpiration -}}
 {{- $imageOverrides := default dict .Values.imageOverrides -}}
 {{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
-{{- $zitadelImage := default (printf "%s/erun-zitadel:v4.15.3" $containerRegistry) (index $imageOverrides "erun-zitadel") -}}
-{{- $loginImage := default (printf "%s/erun-zitadel-login:v4.15.3" $containerRegistry) (index $imageOverrides "erun-zitadel-login") -}}
+{{- $zitadelImage := default (printf "%s/erun-zitadel:v4.20.0" $containerRegistry) (index $imageOverrides "erun-zitadel") -}}
+{{- $loginImage := default (printf "%s/erun-zitadel-login:v4.20.0" $containerRegistry) (index $imageOverrides "erun-zitadel-login") -}}
 {{- $postgresImage := default (printf "%s/erun-backend-postgres:18.3" $containerRegistry) (index $imageOverrides "erun-backend-postgres") -}}
 {{- /* OIDC application bootstrap: the console, an erun CLI/agent, and a mobile
        client each need a real OIDC client to authenticate against, and until
@@ -308,6 +320,16 @@ type: Opaque
 stringData:
   username: {{ $adminUsername | quote }}
   {{ $adminSecretKey }}: {{ $adminPassword | quote }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $loginSecretName }}
+  labels:
+    app: {{ $tenant }}-zitadel
+type: Opaque
+stringData:
+  session-cookie-secret: {{ $sessionCookieSecret | quote }}
 ---
 apiVersion: v1
 kind: Service
@@ -562,6 +584,14 @@ spec:
               value: {{ $loginBasePath | quote }}
             - name: ZITADEL_SERVICE_USER_TOKEN_FILE
               value: {{ printf "%s/login-client.pat" $bootstrapDir | quote }}
+            # Optional, so a deleted Secret falls back to the PAT-derived key rather
+            # than holding the login container in CreateContainerConfigError.
+            - name: ZITADEL_SESSION_COOKIE_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $loginSecretName }}
+                  key: session-cookie-secret
+                  optional: true
             # Restores the public origin that the issuer and redirect_uris expect.
             - name: CUSTOM_REQUEST_HEADERS
               value: {{ printf "Host:%s,X-Forwarded-Proto:%s" $externalDomain $scheme | quote }}
