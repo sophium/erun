@@ -98,20 +98,22 @@ func e2eCrossOrgListAndDeactivate(t *testing.T, ctx context.Context, client *Cli
 		t.Fatalf("CreateHumanUser(orgId=%s): %v", org.ID, err)
 	}
 
+	// The target org lists the user first, so the projection has caught up before the
+	// own-org read below can claim its absence.
+	_, listed, err := e2eListUsersUntilListed(t, ctx, client, org.ID, created.ID)
+	if err != nil {
+		t.Fatalf("ListUsers(orgId=%s): %v", org.ID, err)
+	}
+	if !listed {
+		t.Fatalf("ListUsers(orgId=%s) did not return the user created in it within %s: %+v", org.ID, e2eListUsersTimeout, created)
+	}
+
 	ownOrgUsers, err := client.ListUsers(ctx, "")
 	if err != nil {
 		t.Fatalf("ListUsers (own org): %v", err)
 	}
 	if containsUserID(ownOrgUsers, created.ID) {
 		t.Fatalf("the credential's own org listed a user created in a different org: %+v", created)
-	}
-
-	targetOrgUsers, err := client.ListUsers(ctx, org.ID)
-	if err != nil {
-		t.Fatalf("ListUsers(orgId=%s): %v", org.ID, err)
-	}
-	if !containsUserID(targetOrgUsers, created.ID) {
-		t.Fatalf("ListUsers(orgId=%s) did not return the user created in it: %+v", org.ID, created)
 	}
 
 	if err := client.DeactivateUser(ctx, "", created.ID); err == nil {
@@ -135,14 +137,31 @@ func e2eCreateAndListUser(t *testing.T, ctx context.Context, client *Client) Use
 		t.Fatal("CreateHumanUser returned no id")
 	}
 
-	users, err := client.ListUsers(ctx, "")
+	users, listed, err := e2eListUsersUntilListed(t, ctx, client, "", created.ID)
 	if err != nil {
 		t.Fatalf("ListUsers: %v", err)
 	}
-	if !containsUserID(users, created.ID) {
-		t.Fatalf("ListUsers did not return the just-created user %s: %+v", created.ID, users)
+	if !listed {
+		t.Fatalf("ListUsers did not return the just-created user %s within %s: %+v", created.ID, e2eListUsersTimeout, users)
 	}
 	return created
+}
+
+// Zitadel lists users from an eventually consistent projection, so a just-created
+// user can be missing from the first read on any v4 core.
+const e2eListUsersTimeout = 10 * time.Second
+
+func e2eListUsersUntilListed(t *testing.T, ctx context.Context, client *Client, orgID, userID string) ([]User, bool, error) {
+	t.Helper()
+	var (
+		users []User
+		err   error
+	)
+	listed := e2ePollUntil(t, e2eListUsersTimeout, func() bool {
+		users, err = client.ListUsers(ctx, orgID)
+		return err == nil && containsUserID(users, userID)
+	})
+	return users, listed, err
 }
 
 // Zitadel refuses to deactivate a USER_STATE_INITIAL user ("can only be deleted").
