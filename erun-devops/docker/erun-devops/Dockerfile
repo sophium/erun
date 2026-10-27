@@ -67,6 +67,7 @@ COPY erun-devops/docker/erun-ubuntu /src/erun-devops/docker/erun-ubuntu
 COPY erun-devops/docker/erun-zitadel /src/erun-devops/docker/erun-zitadel
 COPY erun-devops/docker/erun-zitadel-login /src/erun-devops/docker/erun-zitadel-login
 COPY erun-devops/docker/erun-devops/Dockerfile /src/erun-devops/docker/erun-devops/
+COPY erun-devops/e2e/console/Dockerfile /src/erun-devops/e2e/console/Dockerfile
 COPY erun-devops/linux /src/erun-devops/linux
 COPY erun-devops/k8s /src/erun-devops/k8s
 COPY erun-devops/terraform-erun /src/erun-devops/terraform-erun

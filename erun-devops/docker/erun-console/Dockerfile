@@ -51,6 +51,10 @@ RUN cd /src/erun-kit && \
 # Proxies /v1 so the console is same-origin with the API, which sets no CORS headers.
 FROM nginx:1.27.4-alpine3.21-slim AS runtime
 
+# -slim ships no brotli-libs, so no Brotli decoder; fail if a base bump brings it back.
+# The musl probe fails first if apk itself is gone, which would otherwise read as absent.
+RUN apk info -e musl >/dev/null && ! apk info -e brotli-libs >/dev/null
+
 COPY --from=test /src/erun-console/dist /usr/share/nginx/html
 COPY erun-devops/docker/erun-console/default.conf.template /etc/nginx/templates/default.conf.template
 
