@@ -28,17 +28,17 @@ func TestEnvironmentJobThatBackgroundsWorkIntoAFreshProcessGroupIsNotReportedAsS
 	const id = "job"
 	backgroundLog := filepath.Join(t.TempDir(), "background.log")
 	marker := filepath.Join(t.TempDir(), "background-marker")
+	t.Cleanup(func() { killProcessesMatching(marker) })
 
 	if err := RunEnvironmentJobSupervisor(model.EnvironmentJobSupervisorParams{
 		Tenant:      tenant,
 		Environment: environment,
 		ID:          id,
 		Name:        id,
-		Command:     []string{"bash", "-c", fmt.Sprintf("set -m; %s </dev/null >%s 2>&1 & exit 0", leftoverBackgroundCommand(marker, 5), backgroundLog)},
+		Command:     []string{"bash", "-c", fmt.Sprintf("set -m; %s </dev/null >%s 2>&1 & exit 0", leftoverBackgroundCommand(marker), backgroundLog)},
 	}); err != nil {
 		t.Fatalf("RunEnvironmentJobSupervisor: %v", err)
 	}
-	t.Cleanup(func() { killProcessesMatching(marker) })
 
 	job, err := LoadEnvironmentJob(tenant, environment, id, time.Now())
 	if err != nil {
@@ -67,17 +67,17 @@ func TestEnvironmentJobThatBackgroundsWorkIntoItsOwnSessionIsNotReportedAsSucces
 	const id = "job"
 	backgroundLog := filepath.Join(t.TempDir(), "background.log")
 	marker := filepath.Join(t.TempDir(), "background-marker")
+	t.Cleanup(func() { killProcessesMatching(marker) })
 
 	if err := RunEnvironmentJobSupervisor(model.EnvironmentJobSupervisorParams{
 		Tenant:      tenant,
 		Environment: environment,
 		ID:          id,
 		Name:        id,
-		Command:     []string{"bash", "-c", fmt.Sprintf("setsid %s </dev/null >%s 2>&1 & exit 0", leftoverBackgroundCommand(marker, 5), backgroundLog)},
+		Command:     []string{"bash", "-c", fmt.Sprintf("setsid %s </dev/null >%s 2>&1 & exit 0", leftoverBackgroundCommand(marker), backgroundLog)},
 	}); err != nil {
 		t.Fatalf("RunEnvironmentJobSupervisor: %v", err)
 	}
-	t.Cleanup(func() { killProcessesMatching(marker) })
 
 	job, err := LoadEnvironmentJob(tenant, environment, id, time.Now())
 	if err != nil {
@@ -126,7 +126,9 @@ func pidsMatching(path string) []int {
 }
 
 // leftoverBackgroundCommand uses `exec -a` so a single process carries the
-// marker and killing it orphans no child.
-func leftoverBackgroundCommand(marker string, seconds int) string {
-	return fmt.Sprintf("bash -c 'exec -a %s sleep %d'", marker, seconds)
+// marker and killing it orphans no child. It runs until the test's cleanup kills
+// it: a leftover that ends by itself can end before a loaded machine's scan runs,
+// and the job then rightly reads as a success.
+func leftoverBackgroundCommand(marker string) string {
+	return fmt.Sprintf("bash -c 'exec -a %s sleep 3600'", marker)
 }
