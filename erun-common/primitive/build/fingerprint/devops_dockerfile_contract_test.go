@@ -10,7 +10,12 @@ import (
 // Reads a sibling module, so its tests run uncached (go test -count=1).
 func devopsDockerfileRunsByStage(t *testing.T) map[string][]string {
 	t.Helper()
-	path := filepath.Join(repoRootForDockerignoreTest(t), "erun-devops", "docker", "erun-devops", "Dockerfile")
+	return dockerfileRunsByStage(t, filepath.Join(repoRootForDockerignoreTest(t), "erun-devops", "docker", "erun-devops", "Dockerfile"))
+}
+
+// dockerfileRunsByStage joins each RUN across its continuation lines, keyed by the stage it runs in.
+func dockerfileRunsByStage(t *testing.T, path string) map[string][]string {
+	t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
