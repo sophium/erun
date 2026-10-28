@@ -28,8 +28,7 @@ mkdir -p "$(dirname "$TARGET")"
 mkdir -p frontend/dist
 go tool wails generate module
 
-# Install from the root workspace lockfile: frontend's own yarn.lock is stale and
-# drops hoisted deps.
+# Install from the root workspace lockfile, the only one the frontend resolves against.
 (cd "$SCRIPT_DIR/.." && yarn install --frozen-lockfile --prefer-offline --network-timeout 600000)
 (cd "$SCRIPT_DIR/frontend" && yarn build)
 
