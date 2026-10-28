@@ -60,7 +60,7 @@ Ask once, then proceed. Do not invent these.
 │   ├── docusaurus.config.ts               # 3.x config: url/baseUrl, onBrokenLinks: throw
 │   ├── sidebars.ts                        # the doc tree
 │   ├── tsconfig.json
-│   ├── package.json                       # pinned @docusaurus/* 3.x, yarn
+│   ├── package.json                       # pinned @docusaurus/* 3.x + resolutions, yarn
 │   ├── docs/                              # MDX/markdown pages
 │   ├── src/css/custom.css
 │   └── static/img/
@@ -160,6 +160,10 @@ and create `docs/intro.md`. Either way, end on the canonical config:
 - `organizationName` / `projectName` and `editUrl` pointing at
   `https://github.com/<org>/<repo>/tree/main/<module-name>/`.
 - `docs.routeBasePath: '/'`, `blog: false` (docs-only site).
+- `package.json` with the exact pins and the `resolutions` of
+  `templates/package.json`. The resolutions force patched releases of
+  transitive packages that Docusaurus's own ranges hold on vulnerable lines;
+  the generator's `^` ranges carry neither.
 
 ### Step 3 — write the deploy plumbing
 
@@ -237,7 +241,10 @@ version pins and genuine gaps, never the project's own content pages.
   - **docs toolchain axis** — the `node` and `wrangler` tags in the
     `Dockerfile` and the `@docusaurus/*` 3.x pins in `package.json` are the
     site's own toolchain; bump them to current recommended versions,
-    independently of the erun release.
+    independently of the erun release. Carry the `package.json`
+    `resolutions` with them, dropping one only once its parent's own range
+    admits a fixed release, and check the refreshed `yarn.lock` for known
+    advisories.
   Then refresh derived state: `yarn install` to re-resolve `yarn.lock`,
   `yarn build` to re-prove the site (link checker included), and rebuild the
   image. The chart is a leaf (no `Chart.lock`) unless it later gains
