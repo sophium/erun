@@ -63,3 +63,25 @@ func TestPinnedNginxCarriesItsSecurityFixes(t *testing.T) {
 		t.Fatal("no nginx image pin was found in any Dockerfile; the pins moved somewhere this test does not read")
 	}
 }
+
+var consoleAPILocationPattern = regexp.MustCompile(`(?s)location \^~ /v1/ \{(.*?)\n    \}`)
+
+// nginx 1.29 started reusing upstream connections by default; the console keeps
+// the one-connection-per-request proxying it had before, so a POST never lands
+// on a connection an eapi pod is closing.
+func TestConsoleAPIProxyOpensAConnectionPerRequest(t *testing.T) {
+	path := filepath.Join(erunRepoRoot(t), "erun-devops", "docker", "erun-console", "default.conf.template")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	match := consoleAPILocationPattern.FindStringSubmatch(string(data))
+	if match == nil {
+		t.Fatalf("%s: no `location ^~ /v1/` block; the API proxy moved somewhere this test does not read", path)
+	}
+	for _, directive := range []string{"proxy_http_version 1.0;", "proxy_set_header Connection close;"} {
+		if !strings.Contains(dockerfileWithoutComments(match[1]), directive) {
+			t.Errorf("the console's /v1/ proxy lacks %q, so nginx reuses upstream connections to eapi", directive)
+		}
+	}
+}

@@ -49,6 +49,11 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # One upstream connection per request, as before nginx made reuse the
+        # default: a reused connection an eapi pod is closing fails a POST that
+        # nginx cannot retry, and a pinned connection skips the other replicas.
+        proxy_http_version 1.0;
+        proxy_set_header Connection close;
     }
 
     # Any request whose final path segment carries a file extension is a
