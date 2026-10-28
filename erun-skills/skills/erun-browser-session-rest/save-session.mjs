@@ -4,6 +4,16 @@
 import { chromium } from 'playwright';
 import { argv, env, exit, stdin, stdout } from 'node:process';
 import { createInterface } from 'node:readline';
+import { chmodSync, existsSync, writeFileSync } from 'node:fs';
+
+// storageState({ path }) creates the file under the process umask, which leaves
+// live session cookies readable by other local users.
+function writeSession(path, state) {
+  if (existsSync(path)) {
+    chmodSync(path, 0o600);
+  }
+  writeFileSync(path, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+}
 
 const args = argv.slice(2);
 let loginUrl = env.ERUN_REST_LOGIN_URL ?? '';
@@ -35,7 +45,7 @@ try {
       resolve();
     });
   });
-  await context.storageState({ path: sessionPath });
+  writeSession(sessionPath, await context.storageState());
   console.error(`Saved session to ${sessionPath}. Treat it as a secret (it holds live cookies).`);
 } finally {
   await browser.close();
