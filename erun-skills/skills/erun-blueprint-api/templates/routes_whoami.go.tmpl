@@ -6,19 +6,16 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
+
+	"__MODULE_PATH__/internal/model"
+	"__MODULE_PATH__/internal/security"
 )
 
 // WhoamiUserRepository is the minimal user-lookup surface that the
 // /v1/whoami route needs. The concrete implementation lives in
 // internal/repository.UserRepository.
 type WhoamiUserRepository interface {
-	GetByID(ctx context.Context, userID uuid.UUID) (WhoamiUser, error)
-}
-
-type WhoamiUser struct {
-	UserID   uuid.UUID `json:"user_id"`
-	TenantID uuid.UUID `json:"tenant_id"`
-	Username string    `json:"username"`
+	GetByID(ctx context.Context, userID uuid.UUID) (model.User, error)
 }
 
 func RegisterWhoamiRoute(register ProtectedRouteRegistrar, users WhoamiUserRepository) {
@@ -26,7 +23,7 @@ func RegisterWhoamiRoute(register ProtectedRouteRegistrar, users WhoamiUserRepos
 		// Auth middleware guarantees security context exists on
 		// protected routes. If it is missing here, that is an internal
 		// wiring error — surface it as 500, not 401.
-		sec, ok := r.Context().Value(securityContextKey{}).(SecurityContext)
+		sec, ok := security.FromContext(r.Context())
 		if !ok {
 			http.Error(w, "internal wiring error", http.StatusInternalServerError)
 			return
@@ -34,7 +31,7 @@ func RegisterWhoamiRoute(register ProtectedRouteRegistrar, users WhoamiUserRepos
 		if users == nil {
 			// Fall back to the resolved context if no user repository is
 			// wired (e.g. a minimal build without the user table).
-			writeJSON(w, WhoamiUser{UserID: sec.UserID, TenantID: sec.TenantID})
+			writeJSON(w, model.User{UserID: sec.UserID, TenantID: sec.TenantID})
 			return
 		}
 		user, err := users.GetByID(r.Context(), sec.UserID)
@@ -44,18 +41,6 @@ func RegisterWhoamiRoute(register ProtectedRouteRegistrar, users WhoamiUserRepos
 		}
 		writeJSON(w, user)
 	}))
-}
-
-// securityContextKey mirrors the repository-layer key so this package
-// can read the same value without an import cycle. The auth middleware
-// in the parent package sets this on outbound requests via WithSecurity.
-type securityContextKey struct{}
-
-// SecurityContext mirrors repository.SecurityContext for the same reason.
-type SecurityContext struct {
-	TenantID     uuid.UUID
-	UserID       uuid.UUID
-	IsOperations bool
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

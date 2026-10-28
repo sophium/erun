@@ -16,6 +16,7 @@ blueprint via the `erun-blueprint-api` skill. It expects an
 - `internal/repository/` — SQL via Bun. CRUD only (`Create`/`Get`/`List`/`Update`).
 - `internal/service/` — workflows. **Create files here only when a workflow has real logic beyond calling one repository method.**
 - `internal/routes/` — HTTP adaptation; one file per entity.
+- `internal/security/` — the request-scoped security context the auth middleware sets and every layer reads.
 - `server.go` — composition boundary; constructs repos, optional services, routes, middleware.
 
 Import direction: `routes` → (`services` or `repositories`) → `model`.
@@ -50,7 +51,7 @@ RLS policies on tenant-owned tables enforce isolation from there.
 2. Add `internal/repository/<entity>.go` — `Create`/`Get`/`List`/`Update`.
 3. Add `internal/routes/<entity>.go` — `Register<Entity>Routes`.
 4. Wire it in `server.go` `NewHandler` (construct repo, call register).
-5. `go build ./...` and `go test ./...`.
+5. `gofmt -w .`, `go build ./...`, `go vet ./...` and `go test ./...`.
 
 Reuse `model` structs as the entity language across layers; do not
 introduce DTOs.
@@ -70,9 +71,14 @@ the canonical route template. Routes do not hand-write routine audit.
 
 ```sh
 go mod tidy
+gofmt -w .
 go build ./...
+go vet ./...
 go test ./...
 ```
+
+Keep every `go.mod` pin at or above the release the erun-blueprint-api
+template pins; it is the floor past known advisories.
 
 For end-to-end checks, exercise against a local PostgreSQL with the
 matching `erun-backend-db`-shaped schema:

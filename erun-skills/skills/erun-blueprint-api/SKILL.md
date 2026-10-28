@@ -89,10 +89,12 @@ Ask once, then proceed.
     │   └── <user-supplied entities>.go
     ├── service/
     │   └── (add a file only when a workflow has real logic)
-    └── routes/
-        ├── protected.go                     # ProtectedRouteRegistrar type
-        ├── whoami.go                        # /v1/whoami
-        └── <user-supplied entities>.go
+    ├── routes/
+    │   ├── protected.go                     # ProtectedRouteRegistrar type
+    │   ├── whoami.go                        # /v1/whoami
+    │   └── <user-supplied entities>.go
+    └── security/
+        └── context.go                       # request-scoped security context every layer reads
 ```
 
 Reference files for the canonical blueprint ship alongside this
@@ -152,10 +154,10 @@ context from the authenticated context:
 
 ```go
 // Sketch — see templates/repository_tx.go.tmpl for the full version.
-func (tm *TxManager) WithTx(ctx context.Context, fn func(*bun.Tx) error) error {
-    sec, err := SecurityFromContext(ctx)
+func (tm *TxManager) WithTx(ctx context.Context, fn func(context.Context, bun.Tx) error) error {
+    sec, err := security.RequiredFromContext(ctx)
     if err != nil {
-        return fmt.Errorf("backend: missing security context: %w", err)
+        return err // internal wiring error, not a 401
     }
     return tm.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
         role := "erun_tenant"
@@ -165,18 +167,22 @@ func (tm *TxManager) WithTx(ctx context.Context, fn func(*bun.Tx) error) error {
         if _, err := tx.ExecContext(ctx, "SET LOCAL ROLE "+role); err != nil {
             return err
         }
-        if _, err := tx.ExecContext(ctx, "SELECT set_config('erun.tenant_id', ?, true)", sec.TenantID.String()); err != nil {
+        if _, err := tx.NewRaw("SELECT set_config('erun.tenant_id', ?, true)", sec.TenantID.String()).Exec(ctx); err != nil {
             return err
         }
         if sec.UserID != uuid.Nil {
-            if _, err := tx.ExecContext(ctx, "SELECT set_config('erun.user_id', ?, true)", sec.UserID.String()); err != nil {
+            if _, err := tx.NewRaw("SELECT set_config('erun.user_id', ?, true)", sec.UserID.String()).Exec(ctx); err != nil {
                 return err
             }
         }
-        return fn(&tx)
+        return fn(ctx, tx)
     })
 }
 ```
+
+The authentication middleware stores that security context
+(`internal/security`) before authorization and audit run, so they, the
+repositories, and the routes all read the one value it resolved.
 
 Use Bun `?` placeholders inside `set_config(...)`. Do not use `$1`
 PostgreSQL placeholders in Bun-managed queries.
@@ -239,7 +245,7 @@ initial entities. Ask before producing if anything is unclear.
 ### Step 2 — create directory tree
 
 ```sh
-mkdir -p "${target_dir}/${module}"/{cmd/${module},internal/model,internal/repository,internal/routes}
+mkdir -p "${target_dir}/${module}"/{cmd/${module},internal/model,internal/repository,internal/routes,internal/security}
 ```
 
 Skip `internal/service/` until a real service exists.
@@ -247,7 +253,10 @@ Skip `internal/service/` until a real service exists.
 ### Step 3 — write boilerplate
 
 Copy the reference files verbatim, substituting `__MODULE__` (e.g.
-`acme-api`) and `__MODULE_PATH__` (e.g. `github.com/acme/acme-api`):
+`acme-api`), `__MODULE_PATH__` (e.g. `github.com/acme/acme-api`), and
+`__PACKAGE__`, the root package's Go name: the module name lowercased with
+every character that is not a letter or digit removed (e.g. `acmeapi`),
+because a Go package name cannot contain `-`:
 
 - `templates/go.mod.tmpl` → `${module}/go.mod`
 - `templates/cmd_main.go.tmpl` → `${module}/cmd/${module}/main.go`
@@ -257,6 +266,7 @@ Copy the reference files verbatim, substituting `__MODULE__` (e.g.
 - `templates/identity_cache.go.tmpl` → `${module}/identity_cache.go`
 - `templates/audit.go.tmpl` → `${module}/audit.go`
 - `templates/api_path.go.tmpl` → `${module}/api_path.go`
+- `templates/security_context.go.tmpl` → `${module}/internal/security/context.go`
 - `templates/repository_tx.go.tmpl` → `${module}/internal/repository/tx.go`
 - `templates/repository_identity.go.tmpl` → `${module}/internal/repository/identity.go`
 - `templates/repository_user.go.tmpl` → `${module}/internal/repository/user.go`
@@ -300,9 +310,9 @@ something `erun deploy` can install. Apply the `erun-blueprint-service`
 skill against the module produced above to add the missing
 `<tenant>-devops/docker/<module>/Dockerfile` and
 `<tenant>-devops/k8s/<module>/` chart — that skill's Dockerfile is a Go
-skeleton already, so point its `dist` compile at `cmd/<module>` and
-`ERUN_API_PORT`'s default (`17033`, `server.go`) as the container port and
-health-check path (`GET /healthz`, already implemented). Do this before
+skeleton already, so point its `dist` compile at `cmd/<module>`, use
+`LISTEN_ADDR`'s default port (`8080`, `cmd/<module>/main.go`) as the container
+port, and `GET /healthz` (already implemented) as the health-check path. Do this before
 declaring the API "done": a scaffold that stops at `go build ./...` looks
 finished but has nothing `erun build`/`erun deploy` can find.
 
@@ -311,9 +321,18 @@ finished but has nothing `erun build`/`erun deploy` can find.
 ```sh
 cd "${target_dir}/${module}"
 go mod tidy
+gofmt -w .
 go build ./...
+go vet ./...
 go test ./...
 ```
+
+`gofmt -w .` realigns struct tags whose width depends on the substituted
+entity names. Where `govulncheck` is installed, `govulncheck ./...` should
+find no reachable vulnerability in the module's dependencies (standard-library
+findings depend on the Go toolchain running the scan);
+`golang.org/x/crypto/openpgp` (GO-2026-5932) has no fixed release and shows at
+module level only, because nothing imports it.
 
 Run a smoke test against a local PostgreSQL instance configured with
 the matching `erun-backend-db`-shaped schema. Confirm:
@@ -370,8 +389,14 @@ content.
 - Bump the `require` pins the service carries (`go-oidc`, `bun`, `uuid`,
   `oauth2`, …) and the `go` toolchain line to current, and adopt any
   structural change the blueprint has made since scaffold.
-- Refresh derived state: `go mod tidy`, then `go build ./...` and
-  `go test ./...` to confirm the bump is clean.
+- `templates/go.mod.tmpl` is the floor. It pins the releases
+  `erun-backend-api` builds with, past every advisory that has a fixed
+  release, including the indirect modules whose fixed release no direct
+  dependency requires yet (`go-jose`, `x/crypto`, OpenTelemetry). Never
+  leave or move a service's pin below the template's, and drop an indirect
+  pin only once a direct dependency requires that fixed release itself.
+- Refresh derived state: `go mod tidy`, then `go build ./...`,
+  `go vet ./...` and `go test ./...` to confirm the bump is clean.
 
 ### Clean up
 

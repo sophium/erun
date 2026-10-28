@@ -3,9 +3,8 @@ package repository
 import (
 	"context"
 	"errors"
-	"time"
 
-	"github.com/google/uuid"
+	"__MODULE_PATH__/internal/security"
 )
 
 // AuditEventRepository writes API/MCP/CLI audit rows. Each row carries
@@ -19,26 +18,21 @@ func NewAuditEventRepository(tx *TxManager) *AuditEventRepository {
 	return &AuditEventRepository{tx: tx}
 }
 
-type APIAuditEvent struct {
-	TenantID         uuid.UUID
-	ERunUserID       uuid.UUID
-	ExternalUserID   string
-	ExternalIssuerID string
-	APIMethod        string
-	APIPath          string // canonical route template
-	CreatedAt        time.Time
-}
-
-func (r *AuditEventRepository) WriteAPIEvent(ctx context.Context, e APIAuditEvent) error {
-	if e.APIPath == "" {
+// WriteAPIEvent records one successfully authorized API request. sec is
+// the request's security context; apiPath is the canonical route template.
+func (r *AuditEventRepository) WriteAPIEvent(ctx context.Context, sec security.Context, method, apiPath string) error {
+	if apiPath == "" {
 		return errors.New("audit: api_path is required (canonical route template, not concrete URL)")
 	}
 	// TODO: implement
 	//   INSERT INTO audit_events
 	//     (tenant_id, erun_user_id, external_user_id, external_issuer_id,
-	//      type, api_method, api_path, created_at)
-	//   VALUES (...)
-	// Use TxManager.WithTx so the row is written under the request's
-	// security context (erun_tenant / erun_operations role + erun.tenant_id).
+	//      type, api_method, api_path)
+	//   VALUES (sec.TenantID, sec.UserID, sec.ExternalSubject,
+	//           sec.ExternalIssuer, 'API', method, apiPath)
+	// created_at comes from the column default. Run it through
+	// r.tx.WithTx with Bun ? placeholders so the row is written under the
+	// request's security context (erun_tenant / erun_operations role +
+	// erun.tenant_id).
 	return nil
 }

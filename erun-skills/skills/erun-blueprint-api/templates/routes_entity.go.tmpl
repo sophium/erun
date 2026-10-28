@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"__MODULE_PATH__/internal/model"
+	"__MODULE_PATH__/internal/repository"
 )
 
 // __ENTITY__Repository is the route-layer view of the persistence
@@ -16,12 +17,8 @@ import (
 type __ENTITY__Repository interface {
 	Create(ctx context.Context, e model.__ENTITY__) (model.__ENTITY__, error)
 	Get(ctx context.Context, id uuid.UUID) (model.__ENTITY__, error)
-	List(ctx context.Context, filter __ENTITY__ListFilter) ([]model.__ENTITY__, error)
+	List(ctx context.Context, filter repository.__ENTITY__ListFilter) ([]model.__ENTITY__, error)
 	Update(ctx context.Context, e model.__ENTITY__) (model.__ENTITY__, error)
-}
-
-type __ENTITY__ListFilter struct {
-	NamePrefix string
 }
 
 // Register__ENTITY__Routes wires the entity through the protected
@@ -29,13 +26,14 @@ type __ENTITY__ListFilter struct {
 // authorization and audit middleware.
 //
 // Canonical paths (used as audit_events.api_path and role_permissions.api_path):
-//   GET    /v1/__ENTITY_TABLE__
-//   POST   /v1/__ENTITY_TABLE__
-//   GET    /v1/__ENTITY_TABLE__/{__ENTITY_KEY__}
-//   PATCH  /v1/__ENTITY_TABLE__/{__ENTITY_KEY__}
+//
+//	GET    /v1/__ENTITY_TABLE__
+//	POST   /v1/__ENTITY_TABLE__
+//	GET    /v1/__ENTITY_TABLE__/{__ENTITY_KEY__}
+//	PATCH  /v1/__ENTITY_TABLE__/{__ENTITY_KEY__}
 func Register__ENTITY__Routes(register ProtectedRouteRegistrar, repo __ENTITY__Repository) {
 	register("GET", "/v1/__ENTITY_TABLE__", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		filter := __ENTITY__ListFilter{NamePrefix: r.URL.Query().Get("name_prefix")}
+		filter := repository.__ENTITY__ListFilter{NamePrefix: r.URL.Query().Get("name_prefix")}
 		rows, err := repo.List(r.Context(), filter)
 		if err != nil {
 			http.Error(w, "list failed", http.StatusInternalServerError)

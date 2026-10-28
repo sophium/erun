@@ -15,9 +15,9 @@ import (
 type User struct {
 	bun.BaseModel `bun:"table:users,alias:u"`
 
-	UserID    uuid.UUID `bun:"user_id,pk" json:"user_id"`            // read-only; DB default uuidv7()
-	TenantID  uuid.UUID `bun:"tenant_id,notnull" json:"tenant_id"`   // read-only; DB default erun_current_tenant_id()
+	UserID    uuid.UUID `bun:"user_id,pk" json:"user_id"`          // read-only; DB default uuidv7()
+	TenantID  uuid.UUID `bun:"tenant_id,notnull" json:"tenant_id"` // read-only; DB default erun_current_tenant_id()
 	Username  string    `bun:"username,notnull" json:"username"`
-	CreatedAt time.Time `bun:"created_at,nullzero" json:"created_at"` // read-only; trigger-populated
-	UpdatedAt time.Time `bun:"updated_at,nullzero" json:"updated_at"` // read-only; trigger-populated
+	CreatedAt time.Time `bun:"created_at,nullzero" json:"created_at,omitzero"` // read-only; trigger-populated
+	UpdatedAt time.Time `bun:"updated_at,nullzero" json:"updated_at,omitzero"` // read-only; trigger-populated
 }

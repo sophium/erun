@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"errors"
 
-	"github.com/google/uuid"
+	"__MODULE_PATH__/internal/security"
 )
 
 // IdentityRepository owns the bootstrap path: given an authenticated
@@ -27,14 +27,6 @@ func NewIdentityRepository(db *sql.DB, dialect Dialect) *IdentityRepository {
 	return &IdentityRepository{db: db, dialect: dialect}
 }
 
-type ResolvedIdentity struct {
-	TenantID        uuid.UUID
-	UserID          uuid.UUID
-	IsOperations    bool
-	ExternalIssuer  string
-	ExternalSubject string
-}
-
 // Resolve returns the resolved identity for a verified (issuer, subject).
 // Behaviour:
 //   - If the database has any tenant row, look up tenant by issuer, then
@@ -45,7 +37,7 @@ type ResolvedIdentity struct {
 //
 // Implementation note: the bootstrap branch must run inside a single
 // transaction so partial bootstrap state cannot persist on failure.
-func (r *IdentityRepository) Resolve(ctx context.Context, issuer, subject, email string) (ResolvedIdentity, error) {
+func (r *IdentityRepository) Resolve(ctx context.Context, claims security.Claims) (security.Context, error) {
 	// TODO: implement
 	//   1. SELECT EXISTS (SELECT 1 FROM tenants).
 	//   2a. If exists: SELECT tenant by tenant_issuers.issuer; SELECT user by user_external_ids
@@ -54,7 +46,7 @@ func (r *IdentityRepository) Resolve(ctx context.Context, issuer, subject, email
 	//       INSERT INTO tenant_issuers (issuer, name); INSERT INTO users (username);
 	//       INSERT INTO user_external_ids (...); INSERT predefined roles; assign them; COMMIT.
 	//   3. Once tenant exists, do NOT bootstrap again — the existence check guards this.
-	return ResolvedIdentity{}, errors.New("identity: not implemented")
+	return security.Context{}, errors.New("identity: not implemented")
 }
 
 // Verify the implementation against:

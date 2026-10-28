@@ -1,22 +1,23 @@
-package __MODULE__
+package __PACKAGE__
 
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/google/uuid"
+
+	"__MODULE_PATH__/internal/security"
 )
 
-// Claims is the minimum surface of a verified OIDC bearer token that the
-// auth pipeline consumes. The TokenVerifier implementation populates it
-// from a verified token; downstream resolvers read it.
-type Claims struct {
-	Issuer  string
-	Subject string
-	Email   string
-}
+// Claims and Security are the internal/security types, so the middleware,
+// the repositories, and the routes share one security context.
+type (
+	Claims   = security.Claims
+	Security = security.Context
+)
 
 type TokenVerifier interface {
 	Verify(ctx context.Context, token string) (Claims, error)
@@ -31,8 +32,8 @@ func (f TokenVerifierFunc) Verify(ctx context.Context, token string) (Claims, er
 // IdentityResolver does the empty-database bootstrap path: given an
 // authenticated (issuer, subject), it either resolves the existing
 // tenant+user or creates the initial OPERATIONS tenant + first user with
-// ReadAll + WriteAll roles. Used only when both TenantResolver and
-// UserResolver are nil; once any tenant exists, the resolver must return
+// ReadAll + WriteAll roles. Used unless both TenantResolver and
+// UserResolver are set; once any tenant exists, the resolver must return
 // an error for unknown identities rather than implicitly creating users.
 type IdentityResolver interface {
 	Resolve(ctx context.Context, claims Claims) (Security, error)
@@ -58,32 +59,6 @@ type TenantInfo struct {
 
 type UserInfo struct {
 	UserID uuid.UUID
-}
-
-// Security is the request-scoped authenticated context that downstream
-// repository transaction wiring reads. Missing security context in a
-// protected route is an internal wiring error, not a 401.
-type Security struct {
-	TenantID         uuid.UUID
-	UserID           uuid.UUID
-	IsOperations     bool
-	ExternalIssuer   string
-	ExternalSubject  string
-	Claims           Claims
-}
-
-type securityContextKey struct{}
-
-func WithSecurity(ctx context.Context, sec Security) context.Context {
-	return context.WithValue(ctx, securityContextKey{}, sec)
-}
-
-func SecurityFromContext(ctx context.Context) (Security, error) {
-	v, ok := ctx.Value(securityContextKey{}).(Security)
-	if !ok {
-		return Security{}, errors.New("backend: missing security context")
-	}
-	return v, nil
 }
 
 type Authorizer interface {
@@ -135,7 +110,7 @@ func NewAuthMiddleware(options AuthMiddlewareOptions) (*AuthMiddleware, error) {
 // Wrap verifies the bearer token, resolves tenant + user, checks
 // permissions, writes the audit event, and only then calls the next
 // handler. Failures emit 401 (auth) or 403 (authz); successful flow
-// guarantees SecurityFromContext returns a populated Security.
+// guarantees security.FromContext returns a populated Security.
 func (a *AuthMiddleware) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
@@ -154,6 +129,9 @@ func (a *AuthMiddleware) Wrap(next http.Handler) http.Handler {
 			http.Error(w, "unauthorized identity", http.StatusUnauthorized)
 			return
 		}
+		// Authorization and audit read through TxManager.WithTx, which needs
+		// the security context, so it is set before either runs.
+		ctx = security.WithContext(ctx, sec)
 		apiPath := APIPathFromContext(ctx)
 		if a.authorize != nil && apiPath != "" {
 			allowed, err := a.authorize.IsAllowed(ctx, sec, r.Method, apiPath)
@@ -168,13 +146,12 @@ func (a *AuthMiddleware) Wrap(next http.Handler) http.Handler {
 		}
 		if a.audit != nil && apiPath != "" {
 			if err := a.audit.WriteAPIEvent(ctx, sec, r.Method, apiPath); err != nil {
-				// Log/report, but do not surface as a route 500 unless the
-				// endpoint is audit-durability-critical. Default policy is
-				// to continue.
-				_ = err
+				// Do not surface as a route 500 unless the endpoint is
+				// audit-durability-critical. Default policy is to continue.
+				slog.ErrorContext(ctx, "audit write failed", "method", r.Method, "api_path", apiPath, "err", err)
 			}
 		}
-		next.ServeHTTP(w, r.WithContext(WithSecurity(ctx, sec)))
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
