@@ -635,7 +635,7 @@ spec:
               mountPath: {{ $worktreeStagePath | quote }}
         {{- end }}
         {{- if $dindEnabled }}
-        - image: tonistiigi/binfmt:qemu-v10.0.4-56
+        - image: tonistiigi/binfmt:qemu-v10.2.3-68
           name: install-binfmt
           imagePullPolicy: IfNotPresent
           args:
