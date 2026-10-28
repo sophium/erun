@@ -126,6 +126,9 @@ func (a *AuthMiddleware) Wrap(next http.Handler) http.Handler {
 		}
 		sec, err := a.resolve(ctx, claims)
 		if err != nil {
+			// The 401 does not say why; this line tells an unknown identity
+			// apart from a resolver that is unimplemented or failing.
+			slog.WarnContext(ctx, "identity resolution failed", "issuer", claims.Issuer, "err", err)
 			http.Error(w, "unauthorized identity", http.StatusUnauthorized)
 			return
 		}
@@ -136,6 +139,7 @@ func (a *AuthMiddleware) Wrap(next http.Handler) http.Handler {
 		if a.authorize != nil && apiPath != "" {
 			allowed, err := a.authorize.IsAllowed(ctx, sec, r.Method, apiPath)
 			if err != nil {
+				slog.ErrorContext(ctx, "authorization failed", "method", r.Method, "api_path", apiPath, "err", err)
 				http.Error(w, "authorization error", http.StatusInternalServerError)
 				return
 			}

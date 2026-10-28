@@ -37,8 +37,20 @@ in parallel via the `erun-blueprint-rls-db` skill. The API expects:
   `erun.tenant_id`.
 - The bootstrap tables: `tenants`, `tenant_issuers`, `users`,
   `user_external_ids`.
-- An `audit_events` table for API/MCP/CLI audit (add via the db skill
-  if missing).
+- The tables Step 6's implementations read and write: `roles`,
+  `role_permissions` and `user_roles` for identity bootstrap and
+  authorization, and `audit_events` for API/MCP/CLI audit.
+
+`erun-blueprint-rls-db` produces only the four bootstrap tables. Add the
+other four through its Step 4 ("produce user-supplied tables") as
+tenant-owned tables, each with its `erun_tenant`/`erun_operations` RLS
+policies and a grant to both roles in `roles.sql`. Take their shape from
+the reference schema in the erun repository,
+`erun-backend/erun-backend-db/schema/tables/{roles,role_permissions,user_roles,audit_events}.sql`,
+with the matching `indexes/` and `rls/` files, rather than from that
+skill's generic table template: `user_roles` is keyed by
+`(tenant_id, user_id, role_id)`, and `audit_events` is append-only (no
+`updated_at`; its policies and grant allow only `SELECT` and `INSERT`).
 
 If the database side is not present, run `erun-blueprint-rls-db` first
 or confirm with the user that they have an equivalent.
@@ -318,9 +330,17 @@ they are implemented the service authenticates no one:
 
 | Stub | Until implemented | Reference in `erun-backend-api` |
 |---|---|---|
-| `IdentityRepository.Resolve` (`internal/repository/identity.go`) | Returns `identity: not implemented`; every bearer token gets 401 `unauthorized identity`. | `ResolveIdentity` in `erun-backend/erun-backend-api/internal/repository/identity.go`, its empty-database bootstrap in `identity_bootstrap.go` |
+| `IdentityRepository.Resolve` (`internal/repository/identity.go`) | Returns `identity: not implemented`, which the middleware logs as `identity resolution failed`; every bearer token gets 401 `unauthorized identity`. | `ResolveIdentity` in `erun-backend/erun-backend-api/internal/repository/identity.go`, its empty-database bootstrap in `identity_bootstrap.go` |
 | `PermissionAuthorizer.IsAllowed` (`internal/repository/permission_authorizer.go`) | Returns `false`; every protected route gets 403 `forbidden`. | `Authorize` in `erun-backend/erun-backend-api/internal/repository/permissions.go` |
 | `AuditEventRepository.WriteAPIEvent` (`internal/repository/audit_event.go`) | Writes no row and returns `audit: not implemented`; the middleware logs `audit write failed` for every authorized request and still serves it. | `LogAuditEvent` in `erun-backend/erun-backend-api/internal/repository/audit_events.go` |
+
+The tables these implementations use must exist first. `Resolve`'s
+empty-database bootstrap inserts the predefined roles into `roles`, their
+permission patterns into `role_permissions`, and assigns them in
+`user_roles`; `IsAllowed` reads `role_permissions` joined to `user_roles`;
+and `WriteAPIEvent` inserts into `audit_events`.
+`erun-blueprint-rls-db` does not produce any of them; add them as the
+Prerequisite describes, or Step 8 fails even after this step.
 
 The references live in the erun repository
 (`github.com/sophium/erun`). Implement each stub as its TODO comment
@@ -363,8 +383,9 @@ module level only, because nothing imports it.
 
 Once Step 6 has implemented the three stubs, run a smoke test against a
 local PostgreSQL instance configured with the matching
-`erun-backend-db`-shaped schema. Against the stubs, every request with a
-valid token gets 401 `unauthorized identity`. Confirm:
+`erun-backend-db`-shaped schema, including the Prerequisite's role and
+audit tables. Against the stubs, every request with a valid token gets
+401 `unauthorized identity`. Confirm:
 
 - `GET /healthz` returns 204 without a token.
 - `GET /v1/whoami` with no token returns 401.
@@ -450,8 +471,11 @@ content.
 | User-supplied route prefix doesn't start with `/v1/` | Surface the convention and ask the user to confirm or change. |
 | OIDC issuer list is empty | Stop. Ask for at least one issuer; no point producing an unauthenticated API. |
 | `go build` fails after generation | Surface the compiler output. Most common cause is module path mismatch — confirm `__MODULE_PATH__` substitution. |
-| The matching database doesn't have the bootstrap tables | Surface the missing tables and offer to run `erun-blueprint-rls-db` first. |
-| Every bearer token gets 401 `unauthorized identity`, every protected route gets 403 `forbidden`, or the log shows `audit write failed` with `audit: not implemented` | A repository stub is still unimplemented: the 401 is `IdentityRepository.Resolve`, the 403 `PermissionAuthorizer.IsAllowed`, the log line `AuditEventRepository.WriteAPIEvent`. Implement it as Step 6 describes. |
+| The matching database doesn't have the bootstrap tables, or lacks `roles`, `role_permissions`, `user_roles` or `audit_events` | Surface the missing tables. Offer to run `erun-blueprint-rls-db` first for the bootstrap tables, and add the other four through its Step 4 as the Prerequisite describes. |
+| Every bearer token gets 401 `unauthorized identity` | Read the log line `identity resolution failed` the middleware writes before each such 401. With `err` `identity: not implemented`, the `IdentityRepository.Resolve` stub is still in place: implement it as Step 6 describes. With any other error, an implemented `Resolve` failed: a PostgreSQL `relation ... does not exist` names a table to add as the Prerequisite describes (on an empty database, usually `roles`, `role_permissions` or `user_roles`, which the bootstrap writes), and an unknown issuer or subject on a non-empty database is the intended refusal. A failed resolution stays cached for the negative TTL (30 s in `cmd/<module>/main.go`), so retry after it. |
+| Every protected route gets 403 `forbidden` | The `PermissionAuthorizer.IsAllowed` stub is still in place: implement it as Step 6 describes. Once implemented, a 403 means no role the caller holds grants the route's method and canonical path. |
+| Protected routes get 500 `authorization error` | An implemented `IsAllowed` failed, and the log line `authorization failed` carries its error, usually a missing `role_permissions` or `user_roles` table. Add it as the Prerequisite describes. |
+| The log shows `audit write failed` | With `audit: not implemented`, the `AuditEventRepository.WriteAPIEvent` stub is still in place: implement it as Step 6 describes. With any other error, the implemented writer failed, usually because `audit_events` is missing; add it as the Prerequisite describes. The request is still served either way. |
 
 ## Important
 

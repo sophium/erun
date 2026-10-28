@@ -44,7 +44,8 @@ func (r *IdentityRepository) Resolve(ctx context.Context, claims security.Claims
 	//       (tenant_id, issuer, external_id). Return error on miss.
 	//   2b. If empty: BEGIN; INSERT INTO tenants (name, type) VALUES (..., 'OPERATIONS');
 	//       INSERT INTO tenant_issuers (issuer, name); INSERT INTO users (username);
-	//       INSERT INTO user_external_ids (...); INSERT predefined roles; assign them; COMMIT.
+	//       INSERT INTO user_external_ids (...); INSERT the predefined roles into roles and their
+	//       method/path patterns into role_permissions; assign them in user_roles; COMMIT.
 	//   3. Once tenant exists, do NOT bootstrap again — the existence check guards this.
 	return security.Context{}, errors.New("identity: not implemented")
 }

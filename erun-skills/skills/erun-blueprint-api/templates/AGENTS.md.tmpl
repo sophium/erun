@@ -83,10 +83,12 @@ template pins; it is the floor past known advisories.
 The scaffold ships `IdentityRepository.Resolve`,
 `PermissionAuthorizer.IsAllowed` and `AuditEventRepository.WriteAPIEvent`
 (`internal/repository/`) as TODO stubs that fail until implemented: the
-first refuses every token (401), the second denies every protected route
-(403), and the third writes no audit row and returns an error the
-middleware logs as `audit write failed` while still serving the request.
-The commands above pass against the stubs.
+first refuses every token (401, logged as `identity resolution failed`),
+the second denies every protected route (403), and the third writes no
+audit row and returns an error the middleware logs as `audit write failed`
+while still serving the request. The commands above pass against the
+stubs. Implementing them needs the `roles`, `role_permissions`,
+`user_roles` and `audit_events` tables in the database.
 
 For end-to-end checks, after implementing those three methods, exercise
 against a local PostgreSQL with the matching `erun-backend-db`-shaped
