@@ -34,5 +34,9 @@ func (r *AuditEventRepository) WriteAPIEvent(ctx context.Context, sec security.C
 	// r.tx.WithTx with Bun ? placeholders so the row is written under the
 	// request's security context (erun_tenant / erun_operations role +
 	// erun.tenant_id).
-	return nil
+	//
+	// Until then the stub fails, so the middleware logs "audit write
+	// failed" on every authorized request rather than dropping audit
+	// silently.
+	return errors.New("audit: not implemented")
 }

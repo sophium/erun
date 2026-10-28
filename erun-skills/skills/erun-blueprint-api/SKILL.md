@@ -57,7 +57,8 @@ or confirm with the user that they have an equivalent.
 5. **Initial domain entities** — list of tenant-owned entities (e.g.
    `invoices`, `customers`). For each: route prefix (e.g.
    `/v1/invoices`), minimal columns. Empty list is fine — the produced
-   module still has a working whoami endpoint.
+   module still has the `/v1/whoami` route, which answers once Step 6
+   has implemented the identity, permission and audit repository stubs.
 
 Ask once, then proceed.
 
@@ -82,10 +83,10 @@ Ask once, then proceed.
     │   └── <user-supplied entities>.go
     ├── repository/
     │   ├── tx.go                            # TxManager — security context wiring
-    │   ├── identity.go                      # IdentityRepository — issuer/subject resolution + bootstrap
+    │   ├── identity.go                      # IdentityRepository — issuer/subject resolution + bootstrap (stub until Step 6)
     │   ├── user.go                          # UserRepository — non-bootstrap user CRUD
-    │   ├── audit_event.go                   # AuditEventRepository
-    │   ├── permission_authorizer.go         # role_permissions matcher
+    │   ├── audit_event.go                   # AuditEventRepository (stub until Step 6)
+    │   ├── permission_authorizer.go         # role_permissions matcher (stub until Step 6)
     │   └── <user-supplied entities>.go
     ├── service/
     │   └── (add a file only when a workflow has real logic)
@@ -101,7 +102,7 @@ Reference files for the canonical blueprint ship alongside this
 `SKILL.md` under `templates/`. Substitute placeholders, then expand for
 the user's domain entities.
 
-This tree is the service's source only. Step 6 below composes
+This tree is the service's source only. Step 7 below composes
 `erun-blueprint-service` to add the missing
 `<tenant>-devops/docker/<module>/Dockerfile` and
 `<tenant>-devops/k8s/<module>/` chart — without them `erun build`/
@@ -277,6 +278,10 @@ because a Go package name cannot contain `-`:
 - `templates/model_user.go.tmpl` → `${module}/internal/model/user.go`
 - `templates/AGENTS.md.tmpl` → `${module}/AGENTS.md`
 
+Three of these — `internal/repository/identity.go`,
+`permission_authorizer.go` and `audit_event.go` — are stubs that fail
+until Step 6 implements them.
+
 ### Step 4 — produce user-supplied entities
 
 For each entity `E` the user supplied (e.g. `invoice`, plural
@@ -303,7 +308,29 @@ Edit the produced `server.go` `NewHandler` to construct the entity
 repository and register its routes — follow the pattern of
 `RegisterWhoamiRoute` already present.
 
-### Step 6 — deploy artifacts
+### Step 6 — implement the repository stubs
+
+Three repository methods ship as TODO stubs. Each fails rather than
+pretending to work: identity and authorization fail closed, audit fails
+loudly. `cmd/<module>/main.go` passes a `DB` and no resolver, authorizer
+or audit logger of its own, so `server.go` wires all three, and until
+they are implemented the service authenticates no one:
+
+| Stub | Until implemented | Reference in `erun-backend-api` |
+|---|---|---|
+| `IdentityRepository.Resolve` (`internal/repository/identity.go`) | Returns `identity: not implemented`; every bearer token gets 401 `unauthorized identity`. | `ResolveIdentity` in `erun-backend/erun-backend-api/internal/repository/identity.go`, its empty-database bootstrap in `identity_bootstrap.go` |
+| `PermissionAuthorizer.IsAllowed` (`internal/repository/permission_authorizer.go`) | Returns `false`; every protected route gets 403 `forbidden`. | `Authorize` in `erun-backend/erun-backend-api/internal/repository/permissions.go` |
+| `AuditEventRepository.WriteAPIEvent` (`internal/repository/audit_event.go`) | Writes no row and returns `audit: not implemented`; the middleware logs `audit write failed` for every authorized request and still serves it. | `LogAuditEvent` in `erun-backend/erun-backend-api/internal/repository/audit_events.go` |
+
+The references live in the erun repository
+(`github.com/sophium/erun`). Implement each stub as its TODO comment
+sketches, against the `erun-backend-db`-shaped schema, and keep the
+blueprint's method signatures: the references have different ones.
+`go build`, `go vet` and `go test` all pass against the stubs, so a green
+build does not show this step was done. Step 8's smoke checks do; run
+them only after this step.
+
+### Step 7 — deploy artifacts
 
 This skill produces the service's source only; it stops one step short of
 something `erun deploy` can install. Apply the `erun-blueprint-service`
@@ -316,7 +343,7 @@ port, and `GET /healthz` (already implemented) as the health-check path. Do this
 declaring the API "done": a scaffold that stops at `go build ./...` looks
 finished but has nothing `erun build`/`erun deploy` can find.
 
-### Step 7 — validate
+### Step 8 — validate
 
 ```sh
 cd "${target_dir}/${module}"
@@ -334,8 +361,10 @@ findings depend on the Go toolchain running the scan);
 `golang.org/x/crypto/openpgp` (GO-2026-5932) has no fixed release and shows at
 module level only, because nothing imports it.
 
-Run a smoke test against a local PostgreSQL instance configured with
-the matching `erun-backend-db`-shaped schema. Confirm:
+Once Step 6 has implemented the three stubs, run a smoke test against a
+local PostgreSQL instance configured with the matching
+`erun-backend-db`-shaped schema. Against the stubs, every request with a
+valid token gets 401 `unauthorized identity`. Confirm:
 
 - `GET /healthz` returns 204 without a token.
 - `GET /v1/whoami` with no token returns 401.
@@ -372,11 +401,16 @@ content.
 - Fill each gap with the blueprint's shape from `templates/`. Never
   clobber the project's own domain entities, handlers, or business
   logic — restore the missing plumbing around them.
+- A repository restored from `repository_identity.go.tmpl`,
+  `repository_permission_authorizer.go.tmpl` or
+  `repository_audit_event.go.tmpl` arrives as a stub, and a service may
+  still carry one it never implemented. Implement either as Step 6
+  describes.
 - Add missing scaffolding files (`.gitignore` entries, module
   metadata) without rewriting project content.
 - A module with source but no `<tenant>-devops/docker/<module>/Dockerfile` or
   `<tenant>-devops/k8s/<module>/` chart is a gap too — apply
-  `erun-blueprint-service` (Step 6) to close it during the same maintenance
+  `erun-blueprint-service` (Step 7) to close it during the same maintenance
   pass rather than leaving the service undeployable.
 
 ### Upgrade (refresh to the current blueprint)
@@ -417,13 +451,14 @@ content.
 | OIDC issuer list is empty | Stop. Ask for at least one issuer; no point producing an unauthenticated API. |
 | `go build` fails after generation | Surface the compiler output. Most common cause is module path mismatch — confirm `__MODULE_PATH__` substitution. |
 | The matching database doesn't have the bootstrap tables | Surface the missing tables and offer to run `erun-blueprint-rls-db` first. |
+| Every bearer token gets 401 `unauthorized identity`, every protected route gets 403 `forbidden`, or the log shows `audit write failed` with `audit: not implemented` | A repository stub is still unimplemented: the 401 is `IdentityRepository.Resolve`, the 403 `PermissionAuthorizer.IsAllowed`, the log line `AuditEventRepository.WriteAPIEvent`. Implement it as Step 6 describes. |
 
 ## Important
 
 - Give the repo root agent guidance. If the repository root has no
   `AGENTS.md`/`CLAUDE.md`, also apply the `erun-blueprint-agents` skill so any
   agent — or human — landing in the repo gets erun-environment orientation.
-- This skill's own output is not deployable by itself. Always follow Step 6
+- This skill's own output is not deployable by itself. Always follow Step 7
   and apply `erun-blueprint-service` for the Dockerfile and chart, or
   confirm with the user that equivalent deploy artifacts already exist.
 - Do not let CLI/MCP modules import this API directly. Shared
