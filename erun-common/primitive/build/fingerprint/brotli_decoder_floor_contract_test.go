@@ -36,7 +36,7 @@ var brotliDecoderPackageGuards = []struct {
 }{
 	{filepath.Join("erun-devops", "docker", "erun-ubuntu", "Dockerfile"), `dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libbrotli1)" ge 1.1.0-2ubuntu0.1`},
 	{filepath.Join("erun-devops", "docker", "erun-powerdns", "Dockerfile"), `dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libbrotli1)" ge 1.1.0-2+deb13u1`},
-	{filepath.Join("erun-devops", "docker", "erun-dind", "Dockerfile"), `'brotli-libs>=1.1.1-r0'`},
+	{filepath.Join("erun-devops", "docker", "erun-dind", "Dockerfile"), `'brotli-libs>=1.2.1-r0'`},
 	{filepath.Join("erun-devops", "docker", "erun-console", "Dockerfile"), `RUN apk info -e musl >/dev/null && ! apk info -e brotli-libs >/dev/null`},
 }
 

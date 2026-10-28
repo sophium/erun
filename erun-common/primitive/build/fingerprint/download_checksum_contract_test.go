@@ -15,13 +15,6 @@ var checksumVerifiedDockerfiles = []string{
 	filepath.Join("erun-devops", "docker", "erun-backend-db", "Dockerfile"),
 }
 
-// URL prefixes of downloads still installed without a pinned checksum. An entry goes when
-// its download gains one; an entry that no longer names an unverified download fails.
-var downloadsPendingChecksums = []string{
-	"https://download.docker.com/linux/static/stable/",
-	"https://github.com/docker/buildx/releases/download/",
-}
-
 var (
 	shellCommandSeparator  = regexp.MustCompile(`\s*(?:&&|\|\||;)\s*`)
 	checksumArgDefault     = regexp.MustCompile(`(?m)^\s*ARG\s+(\w+)_SHA256_(AMD64|ARM64)=(\S*)`)
@@ -130,42 +123,19 @@ func verifiedBeforeUse(download dockerfileDownload) bool {
 	return false
 }
 
-func pendingChecksumPrefix(url string) (string, bool) {
-	for _, prefix := range downloadsPendingChecksums {
-		if strings.HasPrefix(url, prefix) {
-			return prefix, true
-		}
-	}
-	return "", false
-}
-
 func TestDockerfileDownloadsAreChecksumVerifiedBeforeUse(t *testing.T) {
 	root := erunRepoRoot(t)
-	pendingSeen := map[string]bool{}
 	checked := 0
 	for _, rel := range checksumVerifiedDockerfiles {
 		for _, download := range dockerfileDownloads(t, filepath.Join(root, rel)) {
 			checked++
-			verified := verifiedBeforeUse(download)
-			if prefix, pending := pendingChecksumPrefix(download.url); pending {
-				pendingSeen[prefix] = true
-				if verified {
-					t.Errorf("%s (stage %s) now verifies %s: remove %q from downloadsPendingChecksums so a regression fails again", rel, download.stage, download.url, prefix)
-				}
-				continue
-			}
-			if !verified {
+			if !verifiedBeforeUse(download) {
 				t.Errorf("%s (stage %s) uses %s before checking it: download it to a file, then `echo \"${<tool>_sha256}  <file>\" | sha256sum -c -` before anything unpacks, installs or runs that file", rel, download.stage, download.url)
 			}
 		}
 	}
 	if checked == 0 {
 		t.Fatal("no curl or wget download was found; the downloads moved somewhere this test does not read")
-	}
-	for _, prefix := range downloadsPendingChecksums {
-		if !pendingSeen[prefix] {
-			t.Errorf("downloadsPendingChecksums lists %q, which no longer names a download: remove it", prefix)
-		}
 	}
 }
 

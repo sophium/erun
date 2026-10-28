@@ -1,4 +1,7 @@
 {
+  "features": {
+    "containerd-snapshotter": false
+  },
   "builder": {
     "gc": {
       "enabled": true,

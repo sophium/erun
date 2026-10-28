@@ -7,7 +7,7 @@
 {{- $signingKeySecretName := required "erun-oci-registry: registry.signingKeySecretName is required — create a Secret out of band holding erun-backend-api's registry-signing public key (key \"public.pem\", PEM-encoded) and name it here; the chart never generates or fetches one" (default "" $registry.signingKeySecretName) -}}
 {{- $imageOverrides := default dict .Values.imageOverrides -}}
 {{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
-{{- $registryImage := default (printf "%s/erun-oci-registry:v2.1.20" $containerRegistry) (index $imageOverrides "erun-oci-registry") -}}
+{{- $registryImage := default (printf "%s/erun-oci-registry:v2.1.22" $containerRegistry) (index $imageOverrides "erun-oci-registry") -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:

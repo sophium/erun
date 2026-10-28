@@ -8,7 +8,7 @@
 {{- $postgresReset := default false $postgres.reset -}}
 {{- $imageOverrides := default dict .Values.imageOverrides -}}
 {{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
-{{- $postgresImage := default (printf "%s/erun-backend-postgres:18.3" $containerRegistry) (index $imageOverrides "erun-backend-postgres") -}}
+{{- $postgresImage := default (printf "%s/erun-backend-postgres:18.6" $containerRegistry) (index $imageOverrides "erun-backend-postgres") -}}
 {{- if $postgresReset }}
 # A hook Job so the reset runs once per deploy, never on a pod restart; it
 # wipes over the network so it never contends for the data PVC.

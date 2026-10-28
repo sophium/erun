@@ -160,8 +160,12 @@ ARG TERRAFORM_SHA256_ARM64
 ARG K9S_VERSION=v0.51.0
 ARG K9S_SHA256_AMD64=c3752ad51a5a4015a113819c4eeb6e55a4d0e4b8e652494797532f6fc8161dd7
 ARG K9S_SHA256_ARM64=3ee05c82e5f9198928a4e86133608ba6a2c10a2244d6a7789e820f78319d640c
-ARG DOCKER_VERSION=28.1.1
-ARG BUILDX_VERSION=v0.18.0
+ARG DOCKER_VERSION=29.9.2
+ARG DOCKER_SHA256_AMD64=9ac225999fd5e863f7694c728ef23d480616b1e5639328fa309befd4243d69eb
+ARG DOCKER_SHA256_ARM64=873b3e0207857c3b2f28392fb922f3ea6efe37620c16d4d4aaf2fef409c90b73
+ARG BUILDX_VERSION=v0.38.1
+ARG BUILDX_SHA256_AMD64=e25d5cd675092bb5d1d03632fdc46cdf3fede7b514dc5f023a105e00d3ce5ad4
+ARG BUILDX_SHA256_ARM64=3b83b3731916ba433feccaaa689fe5bcdc81c641d92c8e6c2ea865dfa141c97a
 ARG DIFFT_VERSION=0.70.0
 ARG DIFFT_SHA256_AMD64=2997d2bbe620534edbd79b0049f00ce84eef3fedb15c7822456d58e38d8b05c9
 ARG DIFFT_SHA256_ARM64=e729684907d67d1a1727a08f443877e19e40eeb2efebcd95c1b8f7fee4284e8e
@@ -199,11 +203,13 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         amd64) arch=amd64; docker_arch=x86_64; node_arch=x64; aws_arch=x86_64; rg_triple=x86_64-unknown-linux-musl; \
             kubectl_sha256="${KUBECTL_SHA256_AMD64}"; atlas_sha256="${ATLAS_SHA256_AMD64}"; helm_sha256="${HELM_SHA256_AMD64}"; \
             terraform_sha256="${TERRAFORM_SHA256_AMD64}"; k9s_sha256="${K9S_SHA256_AMD64}"; difft_sha256="${DIFFT_SHA256_AMD64}"; \
-            rg_sha256="${RIPGREP_SHA256_AMD64}"; gh_sha256="${GH_SHA256_AMD64}"; node_sha256="${NODE_SHA256_AMD64}"; aws_sha256="${AWS_CLI_SHA256_AMD64}" ;; \
+            rg_sha256="${RIPGREP_SHA256_AMD64}"; gh_sha256="${GH_SHA256_AMD64}"; node_sha256="${NODE_SHA256_AMD64}"; aws_sha256="${AWS_CLI_SHA256_AMD64}"; \
+            docker_sha256="${DOCKER_SHA256_AMD64}"; buildx_sha256="${BUILDX_SHA256_AMD64}" ;; \
         arm64) arch=arm64; docker_arch=aarch64; node_arch=arm64; aws_arch=aarch64; rg_triple=aarch64-unknown-linux-gnu; \
             kubectl_sha256="${KUBECTL_SHA256_ARM64}"; atlas_sha256="${ATLAS_SHA256_ARM64}"; helm_sha256="${HELM_SHA256_ARM64}"; \
             terraform_sha256="${TERRAFORM_SHA256_ARM64}"; k9s_sha256="${K9S_SHA256_ARM64}"; difft_sha256="${DIFFT_SHA256_ARM64}"; \
-            rg_sha256="${RIPGREP_SHA256_ARM64}"; gh_sha256="${GH_SHA256_ARM64}"; node_sha256="${NODE_SHA256_ARM64}"; aws_sha256="${AWS_CLI_SHA256_ARM64}" ;; \
+            rg_sha256="${RIPGREP_SHA256_ARM64}"; gh_sha256="${GH_SHA256_ARM64}"; node_sha256="${NODE_SHA256_ARM64}"; aws_sha256="${AWS_CLI_SHA256_ARM64}"; \
+            docker_sha256="${DOCKER_SHA256_ARM64}"; buildx_sha256="${BUILDX_SHA256_ARM64}" ;; \
         *) echo "unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
     esac && \
     curl -fsSL -o /tmp/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${arch}/kubectl" && \
@@ -237,9 +243,11 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     tar -xzf /tmp/gh.tar.gz -C /tmp && \
     install -m 0755 "/tmp/gh_${GH_VERSION}_linux_${arch}/bin/gh" /usr/local/bin/gh && \
     curl -fsSL -o /tmp/docker.tgz "https://download.docker.com/linux/static/stable/${docker_arch}/docker-${DOCKER_VERSION}.tgz" && \
+    echo "${docker_sha256}  /tmp/docker.tgz" | sha256sum -c - && \
     tar -xzf /tmp/docker.tgz -C /tmp && \
     install -m 0755 /tmp/docker/docker /usr/local/bin/docker && \
     curl -fsSL -o /tmp/docker-buildx "https://github.com/docker/buildx/releases/download/${BUILDX_VERSION}/buildx-${BUILDX_VERSION}.linux-${arch}" && \
+    echo "${buildx_sha256}  /tmp/docker-buildx" | sha256sum -c - && \
     install -D -m 0755 /tmp/docker-buildx /usr/local/lib/docker/cli-plugins/docker-buildx && \
     curl -fsSL -o /tmp/node.tar.gz "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${node_arch}.tar.gz" && \
     echo "${node_sha256}  /tmp/node.tar.gz" | sha256sum -c - && \
