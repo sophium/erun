@@ -35,7 +35,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     go build -trimpath -ldflags "-s -w" -o /out/__COMPONENT__ .
 
 # Depends on the stages above only through the final COPY, so it builds in parallel.
-FROM alpine:3.20 AS runtime
+FROM alpine:3.24 AS runtime
 
 RUN apk add --no-cache ca-certificates && \
     addgroup -S erun && \

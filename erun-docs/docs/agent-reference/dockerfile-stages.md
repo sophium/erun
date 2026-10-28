@@ -56,7 +56,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -trimpath -ldflags "-s -w" -o /out/app ./cmd/app
 
-FROM alpine:3.20 AS runtime
+FROM alpine:3.24 AS runtime
 COPY --from=dist --chmod=0755 /out/app /usr/local/bin/app
 ENTRYPOINT ["app"]
 ```

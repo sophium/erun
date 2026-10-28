@@ -94,7 +94,8 @@ This is the load-bearing part of the blueprint. It mirrors
 - **`build` → `test` → `runtime` image.** `build` (`node:24-alpine`) runs
   `yarn install --frozen-lockfile` then `yarn build` to produce
   `/build`; `test` (`FROM build`) runs the site's own `yarn typecheck`;
-  `runtime` installs a pinned `wrangler` and copies the built site from
+  `runtime` installs a pinned `wrangler`, removes the base image's bundled
+  `npm` (nothing at runtime uses it), and copies the built site from
   `test` to `$SITE_DIR=/site`. Copying from `test`, never `build`, is what
   makes BuildKit run the checks, and `erun build` refuses a `test` stage
   nothing uses (see `erun-docs/docs/agent-reference/dockerfile-stages.md`). The entrypoint ensures the Direct-Upload

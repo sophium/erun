@@ -1,7 +1,7 @@
 ARG ERUN_VERSION=1.0.0
 
 # `runtime` takes the migrations from `test`, so no image exists unless the check passed.
-FROM --platform=$BUILDPLATFORM alpine:3.20 AS build
+FROM --platform=$BUILDPLATFORM alpine:3.24 AS build
 
 ARG BUILDARCH
 ARG ATLAS_VERSION=v1.2.0
@@ -17,7 +17,7 @@ FROM build AS test
 RUN atlas migrate validate --dir file:///opt/erun-backend-db/migrations/default
 
 # Not pinned to BUILDPLATFORM: the runtime image runs this atlas; downloading costs no emulation.
-FROM alpine:3.20 AS atlas-fetcher
+FROM alpine:3.24 AS atlas-fetcher
 
 ARG TARGETARCH
 ARG ATLAS_VERSION=v1.2.0
@@ -31,7 +31,7 @@ RUN apk add --no-cache ca-certificates curl && \
     curl -fsSL -o /atlas "https://release.ariga.io/atlas/atlas-linux-${atlas_arch}-${ATLAS_VERSION}" && \
     chmod 0755 /atlas
 
-FROM alpine:3.20 AS runtime
+FROM alpine:3.24 AS runtime
 
 RUN apk add --no-cache ca-certificates postgresql16-client && \
     addgroup -S erun && \

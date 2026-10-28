@@ -49,7 +49,7 @@ RUN cd /src/erun-kit && \
     yarn playwright test tests/landing-no-horizontal-scroll.spec.ts
 
 # Proxies /v1 so the console is same-origin with the API, which sets no CORS headers.
-FROM nginx:1.27.4-alpine3.21-slim AS runtime
+FROM nginx:1.30.6-alpine3.24-slim AS runtime
 
 # -slim ships no brotli-libs, so no Brotli decoder; fail if a base bump brings it back.
 # The musl probe fails first if apk itself is gone, which would otherwise read as absent.
