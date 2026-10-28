@@ -1364,7 +1364,7 @@ The half-landed-failure shape mirrors `POST /v1/identity/users` exactly: a failu
 
 | Status | Condition | Recovery |
 |---|---|---|
-| `400` | `token`/`username`/`password` empty, the body is not valid JSON or is larger than the [1 MiB request body limit](#request-body-limit), or `email` was supplied and does not match the invite's pinned email (case-insensitive). | Send all three required fields; match the pinned email exactly or omit it. |
+| `400` | `token`/`username`/`password` empty, the body is not valid JSON or its JSON object does not end within the [1 MiB request body limit](#request-body-limit), or `email` was supplied and does not match the invite's pinned email (case-insensitive). | Send all three required fields; match the pinned email exactly or omit it. |
 | `404` | `token` does not name any invite that ever existed (or it was revoked — revocation deletes the row). | Ask whoever invited you for a new link. |
 | `410` | The invite exists but has expired, or has already been consumed (single-use). | Ask whoever invited you for a new link. |
 | `409` `USERNAME_TAKEN` | The chosen login name is already held by another user **in the invite's organization** — see [A taken login name](/agent-reference/identity-administration#username-taken). | Pick a different login name. This token is spent by the time the identity is created, so the same link cannot be reused — ask whoever invited you for a new one. |
@@ -1517,13 +1517,13 @@ Only the **spelling** is judged, not the version or existence: a well-formed id 
 
 #### Request body size {#request-body-limit}
 
-The API reads at most **1 MiB (1,048,576 bytes)** of any request body, on every route, including the unauthenticated [`POST /v1/invites/accept`](#invites-accept) and the [DNS-01 broker](#dns01-broker). Every body the API takes is a small JSON object, so no request an erun client sends comes near the limit, and the hosted console's `/v1` proxy already refuses a larger body itself (`413`, before it reaches the API).
+The API never reads more than **1 MiB (1,048,576 bytes)** of any request body, on every route, including the unauthenticated [`POST /v1/invites/accept`](#invites-accept) and the [DNS-01 broker](#dns01-broker). Every body the API takes is a small JSON object, so no request an erun client sends comes near the limit, and the hosted console's `/v1` proxy already refuses a larger body itself (`413`, before it reaches the API).
 
-A body over the limit is refused before the route acts on it. The route stops reading at the limit, changes nothing, and answers with its ordinary invalid-body response; the server closes the connection after that response. A protected route checks the bearer token before it reads any body, so an unauthenticated caller gets `401` there whatever the body's size, and an authorized one is audited as for any other refused body.
+The limit bounds what a route reads, not the length the client declares. A route that takes a JSON body decodes one JSON value and stops there. If that value has not ended within the first 1 MiB, the route stops reading at the limit, changes nothing, and answers with its ordinary invalid-body response; the server closes the connection after that response. Bytes after a complete JSON value are ignored, however many there are, and a body-less route reads none of its body, so a body sent to it is ignored too. In both cases the request is handled as if those extra bytes were not there. A protected route checks the bearer token before it reads any body, so an unauthenticated caller gets `401` there whatever the body's size, and an authorized one is audited as for any other refused body.
 
 | Status | `code` | Example `message` | Condition | Recovery |
 |---|---|---|---|---|
-| `400` | `INVALID_BODY` on the routes that report a decode reason; `BAD_REQUEST` on the rest | `http: request body too large` (`INVALID_BODY`), `invalid request body` (`BAD_REQUEST`) | The request body is longer than 1 MiB. The DNS-01 broker answers the same condition with a plain-text `400 invalid request body`. | Send the body the route documents. A body this large is not one any route accepts, so retrying it unchanged fails the same way. |
+| `400` | `INVALID_BODY` on the routes that report a decode reason; `BAD_REQUEST` on the rest | `http: request body too large` (`INVALID_BODY`), `invalid request body` (`BAD_REQUEST`) | The route's JSON value does not end within the first 1 MiB of the body. The DNS-01 broker answers the same condition with a plain-text `400 invalid request body`. | Send the body the route documents. A JSON value this large is not one any route accepts, so retrying it unchanged fails the same way. |
 
 #### Structured error codes `(Planned.)`
 

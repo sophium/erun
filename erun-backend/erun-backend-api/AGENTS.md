@@ -81,10 +81,14 @@ Module-specific guidance for `erun-backend-api`. Follow the repository root and 
   migrated PostgreSQL (`internal/testpg`). Registering a
   route directly on the mux instead of through the registrar bypasses it.
 - Keep request structs local unless a real shared transport contract owns them.
-- **Unauthenticated input is read with bounded work.** `NewHandler` caps every
-  request body at `maxRequestBodyBytes` (1 MiB, the console proxy's own limit)
-  because public routes such as `POST /v1/invites/accept` decode theirs before
-  anything is trusted; no route takes more than a small JSON object. A route that
+- **Unauthenticated input is read with bounded work.** `NewHandler` caps what
+  any route reads of a request body at `maxRequestBodyBytes` (1 MiB, the console
+  proxy's own limit) because public routes such as `POST /v1/invites/accept`
+  decode theirs before anything is trusted; no route takes more than a small
+  JSON object. The cap bounds reading, not the declared length: a JSON value
+  that does not end within it gets the route's invalid-body 400 and the
+  connection closes, while bytes after a complete value, and any body sent to a
+  route that takes none, are ignored rather than refused. A route that
   ever needs a larger or streamed body is a design change with its own bound and
   docs, not a raised constant. Header parsing that runs before verification stops
   at what it reads (`security.BearerToken` stops at a third field), never
