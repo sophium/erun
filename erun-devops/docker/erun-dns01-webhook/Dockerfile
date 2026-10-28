@@ -1,7 +1,7 @@
 ARG ERUN_VERSION=1.0.0
 
 # `dist` builds FROM `test`, so no image exists unless the tests passed.
-FROM --platform=$BUILDPLATFORM golang:1.26.0 AS build
+FROM --platform=$BUILDPLATFORM golang:1.26.10 AS build
 
 WORKDIR /src/erun-devops/dns01-webhook
 

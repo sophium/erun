@@ -1,7 +1,7 @@
 # `runtime` ships through `test`, so no image exists unless tests pass. Swap the
 # Go toolchain for another and keep the chain.
 # COPY sources are relative to the repo root: erun always builds with it as context.
-FROM --platform=$BUILDPLATFORM golang:1.26.0 AS build
+FROM --platform=$BUILDPLATFORM golang:1.26.10 AS build
 
 WORKDIR /src
 

@@ -8,7 +8,7 @@ ARG ATLAS_VERSION=v1.2.0
 ARG PLAYWRIGHT_VERSION=1.63.0
 
 # Pinned to BUILDPLATFORM so the suites run natively once, not per arch under emulation.
-FROM --platform=$BUILDPLATFORM golang:1.26.0 AS cli-build
+FROM --platform=$BUILDPLATFORM golang:1.26.10 AS cli-build
 
 # erun-mcp's attach tests run a real `dtach -A` session.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -126,7 +126,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     go build -ldflags "-X github.com/sophium/erun/erun-mcp/tools/shared/buildinfo.buildVersion=${ERUN_VERSION} -X github.com/sophium/erun/erun-mcp/tools/shared/buildinfo.buildCommit=${ERUN_COMMIT} -X github.com/sophium/erun/erun-mcp/tools/shared/buildinfo.buildDate=${ERUN_DATE}" -o /out/emcp ../erun-mcp/cmd/emcp
 
 # Target-arch Go for in-pod builds; not pinned to BUILDPLATFORM since it ships and runs nothing here.
-FROM golang:1.26.0 AS goroot
+FROM golang:1.26.10 AS goroot
 
 FROM ghcr.io/sophium/erun-ubuntu:noble-20261024.1-1 AS runtime
 

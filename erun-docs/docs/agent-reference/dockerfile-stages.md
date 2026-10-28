@@ -34,7 +34,7 @@ flowchart LR
 A minimal Go component:
 
 ```dockerfile
-FROM --platform=$BUILDPLATFORM golang:1.26.0 AS build
+FROM --platform=$BUILDPLATFORM golang:1.26.10 AS build
 WORKDIR /src
 COPY app/go.mod app/go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
