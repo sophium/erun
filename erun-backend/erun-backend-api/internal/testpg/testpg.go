@@ -25,8 +25,8 @@ import (
 )
 
 const (
-	postgresImage = "postgres:18.3"
-	atlasImage    = "arigaio/atlas:1.2.0-alpine"
+	postgresImage = "postgres:18.6"
+	atlasImage    = "arigaio/atlas:1.3.5-alpine"
 	user          = "erun"
 	password      = "testpass"
 	database      = "erun"
