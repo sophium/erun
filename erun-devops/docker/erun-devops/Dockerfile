@@ -2,7 +2,7 @@
 
 # ATLAS_VERSION is shared so the suites run against the atlas the image ships.
 # Downloads are pinned by version and by a per-arch SHA-256 their RUN checks before use;
-# download_checksum_contract_test.go names any still waiting for a checksum.
+# download_checksum_contract_test.go fails any download that is not.
 ARG HELM_VERSION=v4.3.1
 ARG HELM_SHA256_AMD64=0403a88ae20913d11b10a2467b50087721fea7581736da6b9d3992f5357fe54b
 ARG HELM_SHA256_ARM64=8cf8f66ecbc252ac8f7f06cca68aba88508ddfde3a6a34feb1678ad1694b4f88
