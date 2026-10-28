@@ -15,7 +15,7 @@ run "plaintext_redirects_to_https_and_hsts_is_served_by_default" {
 
   assert {
     condition = toset([for s in helm_release.traefik[0].set : s.value]) == toset([
-      "--entryPoints.web.http.redirections.entryPoint.to=websecure",
+      "--entryPoints.web.http.redirections.entryPoint.to=:443",
       "--entryPoints.web.http.redirections.entryPoint.scheme=https",
       "--entryPoints.web.http.redirections.entryPoint.permanent=true",
       "--entryPoints.websecure.http.middlewares=${local.hsts_middleware_ref}",
@@ -44,6 +44,23 @@ run "plaintext_redirects_to_https_and_hsts_is_served_by_default" {
       strcontains(v, "stsSeconds") && strcontains(v, "forceSTSHeader")
     ])
     error_message = "the HSTS Middleware must set stsSeconds and force the header on https responses"
+  }
+}
+
+# Traefik resolves a named redirect target to that entrypoint's listen port, and
+# the chart listens on :8443 behind a Service that publishes 443, so naming
+# websecure sends every plaintext visitor to https://<host>:8443/.
+run "the_plaintext_redirect_lands_on_the_public_https_port" {
+  command = plan
+
+  assert {
+    condition     = [for s in helm_release.traefik[0].set : s.value if strcontains(s.value, "redirections.entryPoint.to=")] == ["--entryPoints.web.http.redirections.entryPoint.to=:443"]
+    error_message = "the plaintext redirect must target the published port :443, which Traefik leaves out of the Location; a named entrypoint (websecure) resolves to its :8443 listen port, which nothing outside the pod reaches"
+  }
+
+  assert {
+    condition     = contains(output.edge_transport_policy.traefik_additional_arguments, "--entryPoints.web.http.redirections.entryPoint.to=:443")
+    error_message = "a bring-your-own controller is handed the same redirect target, since the upstream Traefik chart (which k3s also bundles) listens on :8443 behind 443 there too"
   }
 }
 
@@ -166,7 +183,7 @@ run "the_policy_is_exposed_for_a_controller_this_module_does_not_install" {
 
   assert {
     condition = toset(output.edge_transport_policy.traefik_additional_arguments) == toset([
-      "--entryPoints.web.http.redirections.entryPoint.to=websecure",
+      "--entryPoints.web.http.redirections.entryPoint.to=:443",
       "--entryPoints.web.http.redirections.entryPoint.scheme=https",
       "--entryPoints.web.http.redirections.entryPoint.permanent=true",
       "--entryPoints.websecure.http.middlewares=${local.hsts_middleware_ref}",
@@ -269,7 +286,7 @@ run "the_blanket_redirect_carries_no_exemption_until_opted_in" {
   }
 
   assert {
-    condition     = length([for s in helm_release.traefik[0].set : s.value if strcontains(s.value, "redirections.entryPoint.to=websecure")]) == 1
+    condition     = length([for s in helm_release.traefik[0].set : s.value if strcontains(s.value, "redirections.entryPoint.to=")]) == 1
     error_message = "the default must stay the entrypoint-wide redirect that already covers /.well-known/acme-challenge/"
   }
 }

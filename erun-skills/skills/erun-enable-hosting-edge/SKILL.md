@@ -24,6 +24,13 @@ for the services zone. It's idempotent — re-running reconciles.
    command -v terraform >/dev/null && command -v kubectl >/dev/null || { echo "terraform + kubectl required"; exit 1; }
    kubectl cluster-info >/dev/null || { echo "kubectl is not pointed at a reachable cluster"; exit 1; }
    ```
+   The module's Traefik chart needs **Kubernetes 1.30 or later**; on an older
+   cluster the apply is refused (`chart requires kubeVersion: >=1.30.0-0`), so
+   check before applying and upgrade the cluster (k3s) first if it is older:
+   ```sh
+   minor=$(kubectl get --raw /version | sed -n 's/.*"minor": *"\([0-9]*\).*/\1/p')
+   [ "${minor:-0}" -ge 30 ] || { echo "Kubernetes 1.${minor} is older than the 1.30 the edge's Traefik chart needs; upgrade the cluster first."; exit 1; }
+   ```
    In a deployed env the apply runs as the pod's ServiceAccount, which needs
    cluster-scoped rights (create namespaces + CRDs). Confirm this env is a
    **platform account** — its SA bound to `cluster-admin`:
@@ -317,10 +324,15 @@ not that the entrypoint serves it or that a redirect answers before an
 application does.
 
 ```sh
-# http answers a permanent redirect, and https carries HSTS.
-curl -sSI "http://<base-domain>" | head -1     # HTTP/1.1 301 Moved Permanently
+# http answers a permanent redirect to the same host on https's own port, and
+# https carries HSTS.
+curl -sSI "http://<base-domain>" | grep -i -E '^(HTTP|location)'   # 301, Location: https://<base-domain>/
 curl -sSI "https://<base-domain>" | grep -i strict-transport-security
 ```
+
+A `Location` that names a port (`https://<base-domain>:8443/`) is the redirect
+pointing at Traefik's in-pod listen port instead of the published 443: every
+plaintext visitor is sent somewhere nothing answers.
 
 When `install_coredns_forward` is set, confirm the cluster can actually resolve the
 base domain before trusting issuance to it — this is exactly the check that catches
@@ -374,6 +386,22 @@ re-running *is* the maintenance path, not an error.
   one version, then re-run the **Apply** flow above: `terraform init` fetches the new ref
   and `terraform apply` rolls it out. One erun version across the pin; bump it after
   `erun upgrade`.
+- **Upgrade Traefik's CRDs first.** Helm installs a chart's CRDs only where they are
+  absent and never upgrades them, so a new ref that moves the Traefik chart (an edge
+  first applied on chart 33.x moving to 42.x, say) leaves the cluster on the old
+  CRDs. The module's own `Middleware` and `IngressRoute` objects need no newer field,
+  so the apply still succeeds; Traefik's own upgrade procedure still applies the new
+  chart's CRDs before the upgrade, so do the same between `terraform init` and
+  `terraform apply` whenever the module installs Traefik (skip it with
+  `install_ingress_controller=false`, where the CRDs belong to the controller already
+  there):
+  ```sh
+  chart=$(sed -n 's/.*var\.traefik_chart_version == null ? "\([^"]*\)".*/\1/p' \
+    .terraform/modules/edge/erun-devops/terraform-erun/modules/terraform-erun-cluster-edge/main.tf)
+  helm show crds traefik --repo https://traefik.github.io/charts --version "$chart" \
+    | kubectl apply --server-side --force-conflicts -f -
+  ```
+  Pass the same version you set with `-var traefik_chart_version=...`, if you set one.
 - **Repair.** The apply already reconciles cert-manager, Traefik, and the namespaced
   DNS-01 `Issuer`, so healing drift is the same re-apply — no separate repair path,
   no new scaffold artifacts. Preview with `terraform plan` first and apply only the version
