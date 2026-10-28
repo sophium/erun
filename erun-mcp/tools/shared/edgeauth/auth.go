@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gorilla/websocket"
 	"github.com/sophium/erun/erun-common/infra/mcpauth"
 	"github.com/sophium/erun/erun-mcp/tools/shared/callerid"
 )
@@ -144,10 +143,12 @@ func bearerToken(req *http.Request) string {
 const AttachAuthSubprotocol = "erun.bearer.v1"
 
 // attachSubprotocolBearerToken returns the token from a [scheme, token] offer, or ""
-// so a malformed offer gets the ordinary missing-token 401.
+// so a malformed offer gets the ordinary missing-token 401. It reads the offers as
+// the upgrader does, but the header is unauthenticated and can be as large as the
+// server admits, so it stops splitting after the two entries it reads.
 func attachSubprotocolBearerToken(req *http.Request) string {
-	protocols := websocket.Subprotocols(req)
-	if len(protocols) != 2 || protocols[0] != AttachAuthSubprotocol {
+	protocols := strings.SplitN(strings.TrimSpace(req.Header.Get("Sec-Websocket-Protocol")), ",", 3)
+	if len(protocols) != 2 || strings.TrimSpace(protocols[0]) != AttachAuthSubprotocol {
 		return ""
 	}
 	return strings.TrimSpace(protocols[1])
