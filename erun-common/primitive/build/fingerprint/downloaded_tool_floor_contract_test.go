@@ -17,7 +17,7 @@ var downloadedToolSecurityFloors = []struct {
 }{
 	{"KUBECTL_VERSION", "1.36.6", "the Go 1.24 standard library, x/net, x/text, spdystream and Kubernetes advisories of the end-of-life 1.33 line"},
 	{"HELM_VERSION", "4.3.1", "the Go 1.26.4 standard library, x/crypto, x/net, x/text and oras-go advisories"},
-	{"TERRAFORM_VERSION", "1.16.7", "the Go 1.24 standard library, x/crypto, x/net, grpc, go-getter and OpenTelemetry advisories"},
+	{"TERRAFORM_VERSION", "1.17.1", "the Go standard library, x/crypto, x/net, grpc, go-getter, OpenTelemetry and go-jose advisories"},
 	{"K9S_VERSION", "0.51.0", "the Go 1.24 standard library, x/crypto, x/net, grpc, go-git, containerd and docker module advisories"},
 	{"DIFFT_VERSION", "0.70.0", "RUSTSEC-2026-0204 in its locked crossbeam-epoch"},
 	{"GH_VERSION", "2.102.1", "the Go 1.24 standard library, x/crypto, x/net, grpc, sigstore and gh's own advisories"},
