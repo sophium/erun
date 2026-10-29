@@ -25,7 +25,9 @@ var (
 	hostingEdgeKubernetesBackend = regexp.MustCompile(`(?s)\bbackend\s+"kubernetes"\s*\{\n(.*?)\n\s*\}`)
 	hostingEdgeModuleResource    = regexp.MustCompile(`(?m)^resource "([a-z0-9_]+)" "([a-z0-9_]+)" \{\n((?:.*\n)*?)\}\n`)
 	hostingEdgeCounted           = regexp.MustCompile(`(?m)^  count\s*=`)
-	hostingEdgeAdoptedType       = regexp.MustCompile(`\.type == "([a-z0-9_]+)"`)
+	hostingEdgeStatelessTable    = regexp.MustCompile(`(?s)\{("[^{}]*)\} as \$stateless\b`)
+	hostingEdgeStatelessEntry    = regexp.MustCompile(`"([a-z0-9_.]+)(\[0\])?": "([^"]+)"`)
+	hostingEdgePresenceCase      = regexp.MustCompile(`(?m)^\s*([a-z0-9_]+)\)\s+found=\$\(`)
 	hostingEdgeGateExemptions    = regexp.MustCompile(`\.type \| IN\(([^)]*)\)`)
 	hostingEdgeQuoted            = regexp.MustCompile(`"([^"]*)"`)
 	hostingEdgePlanAddress       = regexp.MustCompile(`\.address == "([a-z0-9_.]+)(\[0\])?"`)
@@ -152,39 +154,95 @@ func TestHostingEdgeSkillHandsTerraformTheKubeconfigKubectlUses(t *testing.T) {
 	}
 }
 
-// hostingEdgeFlowTypes returns the resource types the flow's adoption imports and those its gate exempts.
-func hostingEdgeFlowTypes(flow string) (adopted, exempt map[string]bool) {
-	adopted, exempt = map[string]bool{}, map[string]bool{}
-	for _, match := range hostingEdgeAdoptedType.FindAllStringSubmatch(flow, -1) {
-		adopted[match[1]] = true
-	}
-	if match := hostingEdgeGateExemptions.FindStringSubmatch(flow); match != nil {
-		for _, name := range hostingEdgeQuoted.FindAllStringSubmatch(match[1], -1) {
-			exempt[name[1]] = true
-		}
-	}
-	return adopted, exempt
+// hostingEdgeStatelessShape is what the skill created before it kept state: its root passed the
+// module cloudflare_api_token, services_zone and acme_email and nothing else, so only these
+// objects, under the module's default names, can belong to an edge it applied then.
+var hostingEdgeStatelessShape = map[string]string{
+	"kubernetes_namespace.cert_manager":         "cert-manager",
+	"helm_release.cert_manager[0]":              "cert-manager/cert-manager",
+	"helm_release.traefik[0]":                   "traefik/traefik",
+	"kubernetes_secret.cloudflare_api_token[0]": "cert-manager/erun-cloudflare-cloudflare-token",
+	"helm_release.issuer":                       "cert-manager/erun-cloudflare-issuer",
 }
 
-func TestHostingEdgeSkillAdoptsEveryObjectTheModuleCreates(t *testing.T) {
+// hostingEdgeAdoptionTable returns the address -> import id table the flow adopts from.
+func hostingEdgeAdoptionTable(t *testing.T, flow string) map[string]string {
+	t.Helper()
+	match := hostingEdgeStatelessTable.FindStringSubmatch(flow)
+	if match == nil {
+		t.Fatal("the Apply flow adopts from no `$stateless` table: it imports whatever same-named object the cluster holds, an operator's own included, instead of only what the stateless skill could have created")
+	}
+	table := map[string]string{}
+	for _, entry := range hostingEdgeStatelessEntry.FindAllStringSubmatch(match[1], -1) {
+		table[entry[1]+entry[2]] = entry[3]
+	}
+	return table
+}
+
+// hostingEdgeCheckAdopted reports an adopted address the module does not declare as adopted, or
+// whose presence the flow never checks, and returns its resource type.
+func hostingEdgeCheckAdopted(t *testing.T, address string, resources, handled map[string]bool) string {
+	t.Helper()
+	base := strings.TrimSuffix(address, "[0]")
+	if counted, declared := resources[base]; !declared {
+		t.Errorf("adoption imports %s, which the module does not declare", address)
+	} else if counted != strings.HasSuffix(address, "[0]") {
+		t.Errorf("adoption addresses %s, but the module declares it with count=%t", address, counted)
+	}
+	kind, _, _ := strings.Cut(base, ".")
+	if !handled[kind] {
+		t.Errorf("adoption imports a %s but never checks the cluster holds one before importing it", kind)
+	}
+	return kind
+}
+
+func TestHostingEdgeSkillAdoptsOnlyWhatTheStatelessSkillCreated(t *testing.T) {
 	_, flow := hostingEdgeApplyBlocks(t)
-	adopted, exempt := hostingEdgeFlowTypes(flow)
-	declared := map[string]bool{}
-	for address := range hostingEdgeModuleResources(t) {
-		kind, _, _ := strings.Cut(address, ".")
-		declared[kind] = true
-		if !adopted[kind] && !exempt[kind] {
-			t.Errorf("the module declares %s, which the Apply flow neither imports when adopting an edge nor exempts from its in-place gate: an edge applied before its state was kept would plan to create it again", address)
+	table := hostingEdgeAdoptionTable(t, flow)
+	for address, id := range hostingEdgeStatelessShape {
+		if table[address] != id {
+			t.Errorf("adoption imports %s as %q, want %q: the stateless skill created it under the module's default names", address, table[address], id)
 		}
 	}
-	for kind := range exempt {
-		if !declared[kind] {
+	resources, handled := hostingEdgeModuleResources(t), map[string]bool{}
+	for _, match := range hostingEdgePresenceCase.FindAllStringSubmatch(flow, -1) {
+		handled[match[1]] = true
+	}
+	adopted := map[string]bool{}
+	for address := range table {
+		if _, ok := hostingEdgeStatelessShape[address]; !ok {
+			t.Errorf("adoption imports %s, which the stateless skill never created: a same-named object there is someone else's", address)
+		}
+		adopted[hostingEdgeCheckAdopted(t, address, resources, handled)] = true
+	}
+	for kind := range hostingEdgeGateExempt(flow) {
+		if !hostingEdgeModuleDeclaresType(resources, kind) {
 			t.Errorf("the in-place gate exempts %s, which the module no longer declares", kind)
 		}
 		if adopted[kind] {
 			t.Errorf("%s is both imported and exempted from the gate; an importable object's create means adoption is incomplete", kind)
 		}
 	}
+}
+
+func hostingEdgeModuleDeclaresType(resources map[string]bool, kind string) bool {
+	for address := range resources {
+		if strings.HasPrefix(address, kind+".") {
+			return true
+		}
+	}
+	return false
+}
+
+// hostingEdgeGateExempt returns the resource types the flow's gate exempts from its create check.
+func hostingEdgeGateExempt(flow string) map[string]bool {
+	exempt := map[string]bool{}
+	if match := hostingEdgeGateExemptions.FindStringSubmatch(flow); match != nil {
+		for _, name := range hostingEdgeQuoted.FindAllStringSubmatch(match[1], -1) {
+			exempt[name[1]] = true
+		}
+	}
+	return exempt
 }
 
 func TestHostingEdgeSkillReadsTheModuleAddressesFromThePlan(t *testing.T) {
@@ -212,10 +270,15 @@ func TestHostingEdgeSkillAdoptsAndGatesBeforeItAppliesOnce(t *testing.T) {
 	at := 0
 	for _, step := range []struct{ marker, why string }{
 		{`terraform plan -input=false -out=edge.tfplan "$@" || exit 1`, "plan with the edge's inputs"},
-		{`helm status "${release#*/}" -n "${release%%/*}"`, "detect an existing edge by its issuer release"},
-		{`terraform import -input=false "$@" "$address" "$id" </dev/null`, "import what the cluster holds and the state does not"},
-		{`if [ -n "$adopted" ]; then`, "plan again after adopting"},
-		{`index("delete")`, "refuse a create or destroy on an existing edge"},
+		{`held=$(terraform state list) || exit 1`, "read what the kept state holds, failing closed"},
+		{`grep -qx 'helm_release.issuer'`, "take an issuer release the kept state holds as the edge, before probing any release by name"},
+		{`helm list -q -n "${id%%/*}" --filter "^${id#*/}\$") || exit 1`, "only then look for an issuer release deployed without kept state"},
+		{`"$HOME"/.erun/terraform/*/*/terraform.tfstate`, "refuse an edge a tenant tree's state owns, before importing anything"},
+		{`sort_by(.[0] == "helm_release.issuer")`, "import the issuer release last, so an interrupted adoption resumes"},
+		{`[ "${EDGE_ADOPT:-}" = confirmed ]`, "wait for the operator's confirmation before importing"},
+		{`terraform import -input=false "$@" "$address" "$id" </dev/null || exit 1`, "import what the cluster holds and the state does not, stopping on a failed import"},
+		{`terraform plan -input=false -out=edge.tfplan "$@" || exit 1`, "plan again after adopting"},
+		{`index("delete")`, "refuse a destroy on any run, and a create on an existing edge"},
 		{`helm show crds traefik`, "upgrade Traefik's CRDs before the chart"},
 		{hostingEdgeAppliedPlan, "apply exactly the plan that was checked"},
 	} {

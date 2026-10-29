@@ -19,10 +19,14 @@ re-running reconciles the edge that is there instead of creating it again.
    ```sh
    [ -n "${CLOUDFLARE_API_TOKEN:-}" ] || { echo "No CLOUDFLARE_API_TOKEN — attach a Cloudflare alias: erun cloud init cloudflare, then erun cloud set <tenant>/<env> --alias <name>@cloudflare, then redeploy."; exit 1; }
    ```
-2. **`terraform` and `kubectl` are available**, and `kubectl` targets the cluster
-   you mean to expose (in a deployed env this is the in-cluster service account):
+2. **`terraform`, `kubectl`, `helm` and `jq` are available** — the flow reads its
+   plan with `jq` and finds an existing edge with `helm` — and `kubectl` targets
+   the cluster you mean to expose (in a deployed env this is the in-cluster
+   service account):
    ```sh
-   command -v terraform >/dev/null && command -v kubectl >/dev/null || { echo "terraform + kubectl required"; exit 1; }
+   for tool in terraform kubectl helm jq; do
+     command -v "$tool" >/dev/null || { echo "$tool is required"; exit 1; }
+   done
    kubectl cluster-info >/dev/null || { echo "kubectl is not pointed at a reachable cluster"; exit 1; }
    ```
    The module's Traefik chart needs **Kubernetes 1.30 or later**; on an older
@@ -65,6 +69,15 @@ against that state, which is what lets a re-run reconcile the edge rather than
 create it again. The state carries what the module writes into Secrets (the
 Cloudflare token, the TSIG key), so it is as sensitive as `kube-system`'s own.
 
+**The blocks run in one shell session.** The setup block below changes into the
+scratch root, exports what Terraform reads, and sets the edge's inputs as the
+shell's positional parameters (`set -- -var ...`); a mode block further down
+replaces those inputs; the plan-and-apply block uses all of it. Run setup, then
+the mode block if any, then plan-and-apply in the same shell — as one command, or
+saved together as one file and run with `sh` — never as separate commands: a
+fresh shell has none of that state, and the plan-and-apply block stops on its
+first line rather than plan without it.
+
 ```sh
 # Pin to the running erun version; off-pod, fall back to main.
 version=$(erun version --no-registry 2>/dev/null | head -n1 | awk '{print $2}')
@@ -103,26 +116,50 @@ terraform init -input=false
 set -- -var "services_zone=<services-zone>" -var "acme_email=<acme-email>"
 ```
 
-Then plan and apply. On a cluster with no edge yet that is all it does. On one
-whose edge already exists — its issuer release is deployed — three steps run
-between the plan and the apply:
+Then plan and apply. On a cluster with no edge yet that is all it does. The edge
+already exists when its kept state holds the issuer release or — for an edge
+applied before its state was kept — when that release is deployed under the
+names this run gives it or the module's defaults (`erun-cloudflare-issuer` in
+`cert-manager`). On an existing edge these steps run between the plan and the
+apply:
 
-- **Adopt what the state does not hold, once.** Until this skill kept state every
-  run started from none, so an edge it applied then has no state to match:
-  planned from nothing it creates everything again and fails (`namespaces
-  "cert-manager" already exists`, `cannot re-use a name that is still in use`).
-  Each object the plan would create that the cluster already holds is imported,
-  then the plan is made again. An adoption that was interrupted resumes where it
-  stopped. An edge applied from a tenant tree (`erun terraform apply`) already has
-  state on that environment's home volume: maintain it there, not with this flow.
-- **Reconcile in place only.** That plan must add nothing and destroy nothing. A
-  create is an object adoption did not import, or a feature being turned on; a
-  delete or a replacement is a flag the edge was applied with missing from the
-  inputs, or a change of what the edge is. Either stops the run: show the
-  operator the plan (`terraform show edge.tfplan`) and apply it only on their
-  say-so. The two server-side-apply patches (`kubernetes_config_map_v1_data`,
-  `kubernetes_annotations`) are the exception for a create: they cannot be
-  imported, and creating one patches the object that is already there.
+- **Never adopt an edge a tenant tree owns.** An edge applied with `erun terraform
+  apply` from a `terraform-<tenant>/<env>` tree is owned by that tree's local
+  state, `~/.erun/terraform/<tenant>/<env>/terraform.tfstate` on that environment's
+  home volume, and two states must never own one edge. Before adopting, the flow
+  reads every such state on this home volume and stops if one holds the issuer
+  release (`Not adopting: <state> already holds <release>. Maintain this edge with
+  erun terraform apply from that tenant tree.`). Another environment's home volume
+  cannot be seen from here, so adoption also waits for the operator: the flow
+  lists what it would import (`Adopting this edge imports:`) and stops (`Not
+  adopting yet: ...`). Set `EDGE_ADOPT=confirmed` and re-run only once the operator
+  confirms this skill applied the edge and no tenant tree did.
+- **Adopt once, and only what this skill could have created.** Until this skill
+  kept state every run started from none, so an edge it applied then has no state
+  to match: planned from nothing it creates everything again and fails
+  (`namespaces "cert-manager" already exists`, `cannot re-use a name that is
+  still in use`). Adoption runs only while the kept state lacks the issuer
+  release. It imports only what that stateless skill could have created — its
+  root passed the module nothing but `cloudflare_api_token`, `services_zone` and
+  `acme_email` — so only these objects, under these names, each one the plan
+  would create and the cluster holds: the `cert-manager` namespace, the
+  `cert-manager` and `traefik` releases, the `erun-cloudflare-cloudflare-token`
+  Secret, and the `erun-cloudflare-issuer` release. The issuer release is imported
+  last, so an adoption that was interrupted resumes on the next run and a finished
+  one never runs again; then the plan is made again. Nothing else is ever
+  imported: an object under other names, or one only a non-default input declares
+  (`coredns-custom`, say), is left to the gate, so an operator's own object of the
+  same name is never adopted.
+- **Reconcile in place only.** No run's plan may destroy anything, and on an
+  existing edge it may add nothing. A create there is an object adoption did not
+  import, or a feature being turned on; a delete or a replacement — possible only
+  once the state holds the edge, so checked on every run — is a flag the edge was
+  applied with missing from the inputs, or a change of what the edge is. Either
+  stops the run: show the operator the plan (`terraform show edge.tfplan`) and
+  apply it only on their say-so. The two server-side-apply patches
+  (`kubernetes_config_map_v1_data`, `kubernetes_annotations`) are the exception
+  for a create: they cannot be imported, and creating one patches the object that
+  is already there.
 - **Upgrade Traefik's CRDs first.** Helm installs a chart's CRDs only where they
   are absent and never upgrades them, so a plan that moves the Traefik chart (an
   edge first applied on chart 33.x moving to 42.x, say) would leave the cluster on
@@ -133,43 +170,87 @@ between the plan and the apply:
   included). Without `helm_release.traefik` in the plan — `install_ingress_controller=false`
   — it is skipped: the CRDs belong to the controller already there.
 
+**Every check fails closed.** Each `terraform`, `jq`, `helm` and `kubectl` call
+the flow's decisions rest on stops the run when it fails, so a broken tool, an
+unreadable state or an unreachable cluster never reads as "no edge" and skips
+the gate.
+
 ```sh
+# Needs the setup block directory, exports and inputs: run it in that same shell.
+[ -f erun-edge.tf ] && [ "$#" -gt 0 ] || { echo "Run this in the shell that ran the setup block, with the edge inputs set (set -- -var ...)." >&2; exit 1; }
+
 terraform plan -input=false -out=edge.tfplan "$@" || exit 1
-terraform show -json edge.tfplan > edge.json
-release=$(jq -r '.resource_changes[] | select(.address == "helm_release.issuer") | .change.after | "\(.namespace)/\(.name)"' edge.json)
-if helm status "${release#*/}" -n "${release%%/*}" >/dev/null 2>&1; then
-  # Adopt: import each object the plan would create that the cluster already holds.
-  jq -r '.resource_changes[] | select(.change.actions == ["create"]) | .change.after as $a
-    | if .type == "helm_release" then [.address, "release", "\($a.namespace)/\($a.name)"]
-      elif .type == "kubernetes_namespace" then [.address, "namespace", $a.metadata[0].name]
-      elif .type == "kubernetes_secret" then [.address, "secret", "\($a.metadata[0].namespace)/\($a.metadata[0].name)"]
-      elif .type == "kubernetes_config_map" then [.address, "configmap", "\($a.metadata[0].namespace)/\($a.metadata[0].name)"]
-      else empty end | @tsv' edge.json > adopt.tsv
-  adopted=
-  while IFS="$(printf '\t')" read -r address kind id; do
-    case $kind in
-      release)   helm status "${id#*/}" -n "${id%%/*}" ;;
-      namespace) kubectl get namespace "$id" ;;
-      *)         kubectl get "$kind" "${id#*/}" -n "${id%%/*}" ;;
-    esac >/dev/null 2>&1 || continue
-    terraform import -input=false "$@" "$address" "$id" </dev/null && adopted=1
+terraform show -json edge.tfplan > edge.json || exit 1
+
+# The edge exists when its kept state holds the issuer release or, applied before
+# its state was kept, when that release is deployed under the names of this run or the defaults.
+held=$(terraform state list) || exit 1
+edge= deployed=
+if printf '%s\n' "$held" | grep -qx 'helm_release.issuer'; then
+  edge=kept
+else
+  release=$(jq -r '.resource_changes[] | select(.address == "helm_release.issuer") | .change.after | "\(.namespace)/\(.name)"' edge.json) || exit 1
+  for id in "$release" cert-manager/erun-cloudflare-issuer; do
+    found=$(helm list -q -n "${id%%/*}" --filter "^${id#*/}\$") || exit 1
+    [ -n "$deployed" ] || [ -z "$found" ] || deployed=$id
+  done
+  edge=$deployed
+fi
+
+if [ -n "$deployed" ]; then
+  # A tenant tree state (erun terraform apply) that holds this release owns the edge.
+  for st in "$HOME"/.erun/terraform/*/*/terraform.tfstate; do
+    [ -e "$st" ] || continue
+    owned=$(jq --arg id "$deployed" 'any(.resources[]? | select(.mode == "managed" and .type == "helm_release")
+      | .instances[]?.attributes; "\(.namespace)/\(.name)" == $id)' "$st") || exit 1
+    [ "$owned" = false ] || { echo "Not adopting: $st already holds $deployed. Maintain this edge with erun terraform apply from that tenant tree." >&2; exit 1; }
+  done
+
+  # Adopt once, and only what the stateless skill could have created (its root passed
+  # cloudflare_api_token, services_zone and acme_email alone), the issuer release last.
+  jq -r '{"kubernetes_namespace.cert_manager": "cert-manager",
+      "helm_release.cert_manager[0]": "cert-manager/cert-manager",
+      "helm_release.traefik[0]": "traefik/traefik",
+      "kubernetes_secret.cloudflare_api_token[0]": "cert-manager/erun-cloudflare-cloudflare-token",
+      "helm_release.issuer": "cert-manager/erun-cloudflare-issuer"} as $stateless
+    | [.resource_changes[] | select(.change.actions == ["create"]) | .change.after as $a
+      | (if .type == "kubernetes_namespace" then $a.metadata[0].name
+         elif .type == "kubernetes_secret" then "\($a.metadata[0].namespace)/\($a.metadata[0].name)"
+         else "\($a.namespace)/\($a.name)" end) as $id
+      | select($stateless[.address] == $id) | [.address, .type, $id]]
+    | sort_by(.[0] == "helm_release.issuer") | .[] | @tsv' edge.json > adopt.tsv || exit 1
+  : > import.tsv
+  while IFS="$(printf '\t')" read -r address type id; do
+    case $type in
+      helm_release)         found=$(helm list -q -n "${id%%/*}" --filter "^${id#*/}\$") || exit 1 ;;
+      kubernetes_namespace) found=$(kubectl get namespace "$id" --ignore-not-found -o name) || exit 1 ;;
+      kubernetes_secret)    found=$(kubectl get secret "${id#*/}" -n "${id%%/*}" --ignore-not-found -o name) || exit 1 ;;
+    esac
+    [ -z "$found" ] || printf '%s\t%s\n' "$address" "$id" >> import.tsv
   done < adopt.tsv
-  if [ -n "$adopted" ]; then
+  if [ -s import.tsv ]; then
+    echo "Adopting this edge imports:" >&2; cat import.tsv >&2
+    [ "${EDGE_ADOPT:-}" = confirmed ] || { echo "Not adopting yet: once the operator confirms this skill applied the edge and no tenant tree did, re-run with EDGE_ADOPT=confirmed." >&2; exit 1; }
+    while IFS="$(printf '\t')" read -r address id; do
+      terraform import -input=false "$@" "$address" "$id" </dev/null || exit 1
+    done < import.tsv
     terraform plan -input=false -out=edge.tfplan "$@" || exit 1
-    terraform show -json edge.tfplan > edge.json
+    terraform show -json edge.tfplan > edge.json || exit 1
   fi
+fi
 
-  # Reconcile in place only.
-  unsafe=$(jq -r '.resource_changes[] | select((.change.actions | index("delete")) or ((.change.actions | index("create"))
-      and (.type | IN("kubernetes_config_map_v1_data", "kubernetes_annotations") | not))) | .address' edge.json)
-  [ -z "$unsafe" ] || { echo "Not applying: on an existing edge this plan creates or destroys: $unsafe" >&2; exit 1; }
+# Reconcile in place only: no run destroys, and on an existing edge none creates
+# but the two server-side-apply patches.
+unsafe=$(jq -r --arg edge "$edge" '.resource_changes[] | select((.change.actions | index("delete")) or ($edge != ""
+    and (.change.actions | index("create")) and (.type | IN("kubernetes_config_map_v1_data", "kubernetes_annotations") | not)))
+  | .address' edge.json) || exit 1
+[ -z "$unsafe" ] || { echo "Not applying: on an existing edge this plan creates or destroys: $unsafe" >&2; exit 1; }
 
-  # Traefik's CRDs for the chart this plan installs.
-  chart=$(jq -r '.resource_changes[] | select(.address == "helm_release.traefik[0]") | .change.after.version // empty' edge.json)
-  if [ -n "$chart" ]; then
-    helm show crds traefik --repo https://traefik.github.io/charts --version "$chart" \
-      | kubectl apply --server-side --force-conflicts -f -
-  fi
+# Traefik CRDs for the chart this plan installs, on an existing edge.
+chart=$(jq -r '.resource_changes[] | select(.address == "helm_release.traefik[0]") | .change.after.version // empty' edge.json) || exit 1
+if [ -n "$edge" ] && [ -n "$chart" ]; then
+  helm show crds traefik --repo https://traefik.github.io/charts --version "$chart" > traefik-crds.yaml || exit 1
+  kubectl apply --server-side --force-conflicts -f traefik-crds.yaml || exit 1
 fi
 terraform apply -input=false edge.tfplan
 ```
@@ -312,7 +393,8 @@ set -- -var "services_zone=<services-zone>" -var "acme_email=<acme-email>" \
   -var per_env_certificate_enabled=true -var "env_label=<tenant>-<env>"
 ```
 
-Then plan and apply with that input set exactly as **Apply** does.
+Then run the plan-and-apply block with that input set, in the same shell, exactly
+as **Apply** does.
 `cloudflare_api_token` is not needed in this mode. On an edge already running the
 Cloudflare solver this switch creates one Secret and destroys another, so the
 plan stops for the operator's say-so, as a change of what the edge is.
@@ -361,8 +443,8 @@ cleaned up.
 
 To route the platform's own wildcard through the broker too, apply in full broker
 mode instead. Per env (tenant), mint the env's DNS-01 token from the backend and
-land it as the Secret the Issuer's webhook solver reads, then plan and apply with
-this input set:
+land it as the Secret the Issuer's webhook solver reads, then run the
+plan-and-apply block, in the same shell, with this input set:
 
 ```sh
 # Mint the per-env DNS-01 token (caller must hold a token for <tenant>/<env>).
@@ -462,16 +544,22 @@ drift. Besides the edge itself its one durable artifact is the edge's state, kep
 in the cluster (see **Apply**), and every run plans against it. So re-running the
 **Apply** flow *is* the maintenance path, not an error.
 
-- **Detect.** The edge exists when its issuer release is deployed (`helm status
-  erun-cloudflare-issuer -n cert-manager` for the module's default names); the
-  **Apply** flow checks exactly that and then adopts and reconciles in place, so do
-  not stop. An edge applied with `erun terraform apply` from a tenant's
-  `terraform-<tenant>/<env>` tree keeps its state there, on that environment's home
-  volume: maintain it with `erun terraform apply`, never adopt it here, or two
-  states own one release.
+- **Detect.** The edge exists when its kept state holds the issuer release or,
+  for one applied before its state was kept, when that release is deployed
+  (`helm list -n cert-manager --filter '^erun-cloudflare-issuer$'` for the
+  module's default names); the **Apply** flow checks exactly that and then adopts
+  and reconciles in place, so do not stop. An edge applied with `erun terraform
+  apply` from a tenant's `terraform-<tenant>/<env>` tree keeps its state there,
+  at `~/.erun/terraform/<tenant>/<env>/terraform.tfstate` on that environment's
+  home volume: maintain it with `erun terraform apply`, never with this skill.
+  The **Apply** flow refuses to adopt an edge such a state on this home volume
+  holds, and adopts any other only on the operator's confirmation, so two states
+  never own one release.
 - **Adopt once.** An edge this skill applied before it kept state has none. The
-  first re-run imports it and from then on plans against the kept state; if that
-  run is interrupted, the next one imports what is still missing.
+  first re-run the operator confirms imports the objects that skill created, the
+  issuer release last, and from then on plans against the kept state and never
+  imports again; if that run is interrupted, the next one imports what is still
+  missing.
 - **Upgrade.** Re-pin the module to the env's erun version, then re-run the
   **Apply** flow: recompute `ref` from the running `erun version` (the pin moves with
   `erun upgrade`, or an explicit target) so `terraform init -from-module` fetches
