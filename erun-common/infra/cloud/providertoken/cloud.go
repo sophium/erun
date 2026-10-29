@@ -61,7 +61,7 @@ func CloudProviderTokenStatus(provider model.CloudProviderConfig, deps cloud.Clo
 
 func issuerFromJWT(token string) (string, error) {
 	token = strings.TrimSpace(token)
-	parts := strings.Split(token, ".")
+	parts := strings.SplitN(token, ".", 4)
 	if len(parts) != 3 {
 		return "", fmt.Errorf("cloud provider bearer token is not a JWT")
 	}

@@ -1,4 +1,4 @@
-package __MODULE__
+package __PACKAGE__
 
 import (
 	"context"
@@ -48,6 +48,16 @@ func (v *MultiIssuerVerifier) Verify(ctx context.Context, rawToken string) (Clai
 		SkipClientIDCheck:          true,
 		SkipIssuerCheck:            true,
 		SkipExpiryCheck:            true,
+		// go-oidc parses even an unchecked token against an algorithm list,
+		// and an empty list means RS256 only. Accept every algorithm it
+		// supports here; the issuer's own verifier enforces what the issuer
+		// advertises.
+		SupportedSigningAlgs: []string{
+			oidc.RS256, oidc.RS384, oidc.RS512,
+			oidc.ES256, oidc.ES384, oidc.ES512,
+			oidc.PS256, oidc.PS384, oidc.PS512,
+			oidc.EdDSA,
+		},
 	}).Verify(ctx, rawToken)
 	if err != nil {
 		return Claims{}, fmt.Errorf("oidc: peek failed: %w", err)

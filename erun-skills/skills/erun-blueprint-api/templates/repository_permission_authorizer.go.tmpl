@@ -2,7 +2,8 @@ package repository
 
 import (
 	"context"
-	"database/sql"
+
+	"__MODULE_PATH__/internal/security"
 )
 
 // PermissionAuthorizer matches the request's (method, apiPath) against
@@ -11,33 +12,32 @@ import (
 // not the concrete URL.
 //
 // Two permission shapes are supported:
-//   - exact: WHERE api_method = $1 AND api_path = $2
-//   - regex: WHERE api_method_pattern ~ $1 AND api_path_pattern ~ $2
+//   - exact: rp.api_method = ? AND rp.api_path = ?
+//   - regex: ? ~ rp.api_method_pattern AND ? ~ rp.api_path_pattern
 //
 // Predefined roles (ReadAll, WriteAll) use the regex shape with broad
 // patterns. Custom roles typically use the exact shape.
 type PermissionAuthorizer struct {
-	db      *sql.DB
-	dialect Dialect
+	tx *TxManager
 }
 
-func NewPermissionAuthorizerForDialect(db *sql.DB, dialect Dialect) *PermissionAuthorizer {
-	return &PermissionAuthorizer{db: db, dialect: dialect}
+func NewPermissionAuthorizer(tx *TxManager) *PermissionAuthorizer {
+	return &PermissionAuthorizer{tx: tx}
 }
 
 // IsAllowed returns true when the user has any role granting the given
-// (method, apiPath). Reads under the request's security context so RLS
-// scopes results to the user's tenant.
-func (a *PermissionAuthorizer) IsAllowed(ctx context.Context, userID, tenantID string, method, apiPath string) (bool, error) {
-	// TODO: implement
+// (method, apiPath). It reads through TxManager.WithTx, under the request's
+// security context, so RLS scopes results to the user's tenant.
+func (a *PermissionAuthorizer) IsAllowed(ctx context.Context, sec security.Context, method, apiPath string) (bool, error) {
+	// TODO: implement with a.tx.WithTx and Bun ? placeholders:
 	//   SELECT EXISTS (
 	//     SELECT 1 FROM role_permissions rp
 	//     JOIN user_roles ur ON ur.role_id = rp.role_id AND ur.tenant_id = rp.tenant_id
-	//     WHERE ur.user_id = $1
-	//       AND ur.tenant_id = $2
+	//     WHERE ur.user_id = ?            -- sec.UserID
+	//       AND ur.tenant_id = ?          -- sec.TenantID
 	//       AND (
-	//         (rp.api_method = $3 AND rp.api_path = $4)
-	//         OR ($3 ~ rp.api_method_pattern AND $4 ~ rp.api_path_pattern)
+	//         (rp.api_method = ? AND rp.api_path = ?)
+	//         OR (? ~ rp.api_method_pattern AND ? ~ rp.api_path_pattern)
 	//       )
 	//   )
 	return false, nil

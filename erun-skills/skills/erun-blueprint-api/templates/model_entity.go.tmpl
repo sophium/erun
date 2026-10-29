@@ -8,9 +8,10 @@ import (
 )
 
 // __ENTITY__ template. Substitute:
-//   __ENTITY__       PascalCase singular (Invoice)
-//   __ENTITY_TABLE__ plural snake_case   (invoices)
-//   __ENTITY_KEY__   <singular>_id       (invoice_id)
+//
+//	__ENTITY__       PascalCase singular (Invoice)
+//	__ENTITY_TABLE__ plural snake_case   (invoices)
+//	__ENTITY_KEY__   <singular>_id       (invoice_id)
 //
 // Read-only fields (__ENTITY__ID, TenantID, CreatedAt, UpdatedAt) are
 // populated by DB defaults / triggers. Repository write column lists

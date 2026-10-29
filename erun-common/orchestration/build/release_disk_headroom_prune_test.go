@@ -38,7 +38,7 @@ func TestDiskHeadroomPruneBoundStillReportsAVerdict(t *testing.T) {
 	logs := &strings.Builder{}
 	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, logs, logs)}
 	policy := buildDiskHeadroomPolicy
-	policy.Limits = diskHeadroomShortLimits()
+	policy.Limits = diskHeadroomHangingPruneLimits()
 
 	err := awaitHeadroomPreflight(t, ctx, policy)
 	if err != nil {
@@ -53,6 +53,34 @@ func TestDiskHeadroomPruneBoundStillReportsAVerdict(t *testing.T) {
 	}
 	if !strings.Contains(message, "below the") {
 		t.Fatalf("expected the shortfall to still be reported against the disk that is actually free, got %q", message)
+	}
+}
+
+// A reply slower than the prune's bound is still a reply, so only the call that never
+// returns may time out however loaded the machine running the check is.
+func TestDiskHeadroomSlowRepliesDoNotReadAsAStoppedDaemon(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("ERUN_DOCKER_BIN", writeExecutableScript(t, `case "$1" in
+  info) sleep 1; echo "`+root+`" ;;
+  system) echo "Build Cache|40GB" ;;
+  buildx) exec sleep 3600 ;;
+esac`))
+	setDiskHeadroomOneGiBFree(t, root)
+
+	logs := &strings.Builder{}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, logs, logs)}
+	policy := buildDiskHeadroomPolicy
+	policy.Limits = diskHeadroomHangingPruneLimits()
+
+	if err := awaitHeadroomPreflight(t, ctx, policy); err != nil {
+		t.Fatalf("a build must still proceed when its prune does not finish, got %v", err)
+	}
+	message := logs.String()
+	if strings.Contains(message, "skipping the headroom check") {
+		t.Fatalf("a reply that arrived a second late was read as a daemon that stopped answering, so the check skipped itself: %q", message)
+	}
+	if !strings.Contains(message, "the build-cache prune did not complete") {
+		t.Fatalf("expected the hanging prune, and only it, to be reported as not finishing, got %q", message)
 	}
 }
 
@@ -96,7 +124,7 @@ func TestDiskHeadroomPruneBoundLeavesNothingRunningBehind(t *testing.T) {
 	logs := &strings.Builder{}
 	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, logs, logs)}
 	policy := buildDiskHeadroomPolicy
-	policy.Limits = diskHeadroomShortLimits()
+	policy.Limits = diskHeadroomHangingPruneLimits()
 
 	if err := awaitHeadroomPreflight(t, ctx, policy); err != nil {
 		t.Fatalf("a build must still proceed when its prune does not finish, got %v", err)
@@ -124,7 +152,7 @@ echo "/dev/fake       456340275 455291699  1048576     100% `+root+`"`))
 	logs := &strings.Builder{}
 	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, logs, logs)}
 	policy := buildDiskHeadroomPolicy
-	policy.Limits = diskHeadroomShortLimits()
+	policy.Limits = diskHeadroomAnsweringLimits()
 
 	if err := awaitHeadroomPreflight(t, ctx, policy); err != nil {
 		t.Fatalf("a build must proceed on a disk it pruned, got %v", err)
@@ -183,7 +211,7 @@ esac`))
 	logs := &strings.Builder{}
 	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, logs, logs)}
 	policy := diskheadroom.ReleaseDiskHeadroomPolicy
-	policy.Limits = diskHeadroomShortLimits()
+	policy.Limits = diskHeadroomAnsweringLimits()
 
 	err := awaitHeadroomPreflight(t, ctx, policy)
 	if err == nil {

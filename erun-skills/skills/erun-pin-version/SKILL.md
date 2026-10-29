@@ -69,7 +69,10 @@ than handing the environment a version its own release line never publishes.
 
 5. **Realize it, as a separate explicit step**: `erun terraform apply`, then
    `erun deploy`. Never fold these into the re-pin: changing a pin must not be
-   a rollout by accident.
+   a rollout by accident. If the environment runs `<tenant>-zitadel`, dump its
+   `zitadel` database before the deploy: Zitadel migrates it on a new version,
+   and only that dump can take the IdP back (Upgrading the IdP in
+   `erun-docs/docs/deployment/deploy-platform.md`).
 
 ## Reverting
 
@@ -80,6 +83,11 @@ erun pin <tenant> <env> --revert
 Goes back to the version recorded before the last re-pin. Re-pinning to a
 version the tree already holds does not overwrite that record, so a revert
 still reaches the version you actually came from.
+
+A revert does not restore the hosted IdP's database. If the release being left
+moved `erun-zitadel`, stop Zitadel and restore the dump taken before the
+upgrade, then realize the revert; an older Zitadel starts on the migrated
+database without complaint, so nothing else will say it is wrong.
 
 ## Rules
 

@@ -5,9 +5,9 @@
 # Must match erun-ui/playwright's pin so install-deps matches its Chromium.
 ARG PLAYWRIGHT_VERSION=1.63.0
 
-FROM --platform=$BUILDPLATFORM node:22.14-bookworm AS node
+FROM --platform=$BUILDPLATFORM node:22.23.4-bookworm AS node
 
-FROM --platform=$BUILDPLATFORM golang:1.26.0 AS build
+FROM --platform=$BUILDPLATFORM golang:1.26.10 AS build
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \

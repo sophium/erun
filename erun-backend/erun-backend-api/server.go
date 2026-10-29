@@ -100,8 +100,13 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 		)
 	}
 	registerProtectedRoutes(mux, auth, options, txManager, authorizer)
-	return mux, nil
+	return http.MaxBytesHandler(mux, maxRequestBodyBytes), nil
 }
+
+// maxRequestBodyBytes bounds every request body, since public routes such as
+// invite acceptance decode theirs before anything is trusted. Every route takes a
+// small JSON object, and this is the console's /v1 proxy limit (nginx's default).
+const maxRequestBodyBytes = 1 << 20
 
 // registerProtectedRoutes returns the catalog capabilities are resolved over.
 func registerProtectedRoutes(mux *http.ServeMux, auth *AuthMiddleware, options HandlerOptions, txManager *repository.TxManager, authorizer Authorizer) *routeCatalog {

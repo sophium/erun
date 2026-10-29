@@ -344,7 +344,7 @@ func (r inviteRequestPublicRoutes) mine(w http.ResponseWriter, req *http.Request
 // verifyInviteRequestBearerToken verifies the token fully but never resolves a
 // tenant or user.
 func verifyInviteRequestBearerToken(req *http.Request, verifier InviteRequestTokenVerifier) (security.Claims, bool) {
-	token, ok := bearerTokenFromHeader(req.Header.Get("Authorization"))
+	token, ok := security.BearerToken(req.Header.Get("Authorization"))
 	if !ok {
 		return security.Claims{}, false
 	}
@@ -353,14 +353,6 @@ func verifyInviteRequestBearerToken(req *http.Request, verifier InviteRequestTok
 		return security.Claims{}, false
 	}
 	return claims, true
-}
-
-func bearerTokenFromHeader(header string) (string, bool) {
-	fields := strings.Fields(header)
-	if len(fields) != 2 || !strings.EqualFold(fields[0], "bearer") {
-		return "", false
-	}
-	return fields[1], true
 }
 
 func sourceAddress(req *http.Request) string {

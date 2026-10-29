@@ -14,6 +14,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -199,7 +201,38 @@ type User struct {
 }
 
 type usersSearchResponse struct {
-	Result []userSearchResult `json:"result"`
+	Result  []userSearchResult `json:"result"`
+	Details listDetails        `json:"details"`
+}
+
+// listDetails carries a v1 search's totalResult, which the gateway renders as a
+// JSON string; absent means the server did not report one.
+type listDetails struct {
+	TotalResult *listCount `json:"totalResult"`
+}
+
+type listCount uint64
+
+func (c *listCount) UnmarshalJSON(data []byte) error {
+	text := strings.Trim(string(data), `"`)
+	if text == "" || text == "null" {
+		*c = 0
+		return nil
+	}
+	value, err := strconv.ParseUint(text, 10, 64)
+	if err != nil {
+		return fmt.Errorf("zitadel list totalResult %s: %w", data, err)
+	}
+	*c = listCount(value)
+	return nil
+}
+
+// nameEqualsQuery narrows a v1 project or app search to one exact name, so the
+// match is found however many siblings the server's row cap would hide.
+func nameEqualsQuery(name string) map[string]any {
+	return map[string]any{"queries": []map[string]any{{
+		"nameQuery": map[string]any{"name": name, "method": "TEXT_QUERY_METHOD_EQUALS"},
+	}}}
 }
 
 type userSearchResult struct {
@@ -235,18 +268,29 @@ func (r userSearchResult) toUser() User {
 	return u
 }
 
-// ListUsers lists orgID's users, or the PAT's own org's when orgID is empty. A
-// call without the org header silently sees only its own org.
+// ListUsers lists orgID's users, newest first, or the PAT's own org's when orgID
+// is empty. A call without the org header silently sees only its own org.
+// Zitadel caps an unpaged v1 search at its MaxQueryLimit (1000 by default) from
+// v4.19.5, so it pages by offset alone, each page whatever size that server
+// allows. Pages run oldest first so a user created mid-walk lands past the
+// offsets already read, and the result is reversed into the unpaged order.
 func (c *Client) ListUsers(ctx context.Context, orgID string) ([]User, error) {
-	var resp usersSearchResponse
-	if err := c.callInOrg(ctx, orgID, http.MethodPost, "/management/v1/users/_search", map[string]any{}, &resp); err != nil {
-		return nil, err
+	users := []User{}
+	for {
+		var resp usersSearchResponse
+		body := map[string]any{"query": map[string]any{"offset": strconv.Itoa(len(users)), "asc": true}}
+		if err := c.callInOrg(ctx, orgID, http.MethodPost, "/management/v1/users/_search", body, &resp); err != nil {
+			return nil, err
+		}
+		for _, result := range resp.Result {
+			users = append(users, result.toUser())
+		}
+		total := resp.Details.TotalResult
+		if len(resp.Result) == 0 || total == nil || uint64(len(users)) >= uint64(*total) {
+			slices.Reverse(users)
+			return users, nil
+		}
 	}
-	users := make([]User, 0, len(resp.Result))
-	for _, result := range resp.Result {
-		users = append(users, result.toUser())
-	}
-	return users, nil
 }
 
 // CreateHumanUserParams is the enrollment input. An empty InitialPassword uses

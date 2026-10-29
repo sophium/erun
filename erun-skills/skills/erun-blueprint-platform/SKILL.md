@@ -645,8 +645,14 @@ or `kubectl`:
   applying, so changes can't land in the wrong env. Preview with
   `erun terraform apply --dry-run`.
 - **Helm:** `erun deploy --version <version> --components=…` (with the `values.<env>.yaml`
-  overlay), then the `erun-enable-hosting-edge` skill / `erun terraform apply`
-  for the edge.
+  overlay), then the edge: `erun terraform apply` when this env's root
+  instantiates the cluster-edge module, or the `erun-enable-hosting-edge` skill
+  when it leaves that module out. They are alternatives for an edge's first apply
+  only: the path that applied an edge maintains it from then on, and one edge is
+  never applied both ways — this tree's state
+  (`~/.erun/terraform/<tenant>/<env>/terraform.tfstate`) and the skill's in-cluster
+  state must never both hold it, and the skill refuses to adopt an edge this
+  tree's state holds.
 
 ## Step 5 — validate the scaffold
 

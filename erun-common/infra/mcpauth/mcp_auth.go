@@ -223,7 +223,7 @@ func mcpClaimsFromOIDC(verified OIDCClaims) MCPTokenClaims {
 
 // Requiring EdDSA closes the alg-confusion class (none/HMAC against the public key).
 func parseMCPToken(token string) (signingInput string, claims MCPTokenClaims, signature []byte, err error) {
-	segments := strings.Split(strings.TrimSpace(token), ".")
+	segments := strings.SplitN(strings.TrimSpace(token), ".", 4)
 	if len(segments) != 3 {
 		return "", MCPTokenClaims{}, nil, fmt.Errorf("malformed MCP token: expected 3 JWT segments")
 	}

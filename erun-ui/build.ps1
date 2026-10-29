@@ -59,7 +59,8 @@ try {
     Push-Location (Join-Path $ScriptDir "frontend")
     try {
         Write-Host ">> yarn install ..."
-        if (Test-Path "yarn.lock") { yarn install --frozen-lockfile } else { yarn install }
+        # A workspace member installs against the repository root's yarn.lock.
+        yarn install --frozen-lockfile
         if ($LASTEXITCODE -ne 0) { throw "failed to install frontend dependencies" }
         Write-Host ">> yarn build ..."
         yarn build

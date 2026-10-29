@@ -2,7 +2,7 @@
 # erun-devops and erun-backend-api images.
 
 # CGO is disabled, so the compiler runs natively and cross-compiles in `package`.
-FROM --platform=$BUILDPLATFORM golang:1.26.0 AS build
+FROM --platform=$BUILDPLATFORM golang:1.26.10 AS build
 
 WORKDIR /src
 

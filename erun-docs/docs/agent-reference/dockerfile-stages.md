@@ -34,7 +34,7 @@ flowchart LR
 A minimal Go component:
 
 ```dockerfile
-FROM --platform=$BUILDPLATFORM golang:1.26.0 AS build
+FROM --platform=$BUILDPLATFORM golang:1.26.10 AS build
 WORKDIR /src
 COPY app/go.mod app/go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
@@ -56,7 +56,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -trimpath -ldflags "-s -w" -o /out/app ./cmd/app
 
-FROM alpine:3.20 AS runtime
+FROM alpine:3.24 AS runtime
 COPY --from=dist --chmod=0755 /out/app /usr/local/bin/app
 ENTRYPOINT ["app"]
 ```
@@ -212,7 +212,7 @@ A suite that checks a deployed environment lives in its own Dockerfile, next to 
 The build context is the project root, as for component Dockerfiles. The suite directory's name is the exposed service the suite targets by default. The Dockerfile declares two stages:
 
 ```dockerfile
-FROM mcr.microsoft.com/playwright:v1.62.1-noble AS deps
+FROM mcr.microsoft.com/playwright:v1.64.1-noble AS deps
 WORKDIR /e2e
 COPY acme-devops/e2e/acme-web/package.json acme-devops/e2e/acme-web/yarn.lock ./
 RUN yarn install --frozen-lockfile --non-interactive

@@ -99,7 +99,7 @@ func (c *Client) findProjectID(ctx context.Context, orgID string, name string) (
 	var search struct {
 		Result []zitadelProject `json:"result"`
 	}
-	if err := c.callInOrg(ctx, orgID, http.MethodPost, "/management/v1/projects/_search", map[string]any{}, &search); err != nil {
+	if err := c.callInOrg(ctx, orgID, http.MethodPost, "/management/v1/projects/_search", nameEqualsQuery(name), &search); err != nil {
 		return "", err
 	}
 	for _, project := range search.Result {
@@ -118,7 +118,7 @@ func (c *Client) findAppID(ctx context.Context, orgID string, projectID string, 
 		} `json:"result"`
 	}
 	path := fmt.Sprintf("/management/v1/projects/%s/apps/_search", url.PathEscape(projectID))
-	if err := c.callInOrg(ctx, orgID, http.MethodPost, path, map[string]any{}, &search); err != nil {
+	if err := c.callInOrg(ctx, orgID, http.MethodPost, path, nameEqualsQuery(name), &search); err != nil {
 		return "", err
 	}
 	for _, app := range search.Result {

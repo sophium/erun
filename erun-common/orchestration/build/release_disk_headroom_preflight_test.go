@@ -10,13 +10,31 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared/diskheadroom"
 )
 
+const headroomShortBound = 500 * time.Millisecond
+
+// headroomAnsweringBound is far above what a stand-in that answers needs, so a loaded
+// machine slowing its reply is never read as the daemon not answering.
+const headroomAnsweringBound = 5 * time.Second
+
+// headroomTestBound is far above every bound above so a loaded machine is not read as a hang.
+const headroomTestBound = 30 * time.Second
+
+// diskHeadroomShortLimits is only for stand-ins that never answer: a call that cannot
+// return times out the same way however loaded the machine is.
 func diskHeadroomShortLimits() diskheadroom.DiskHeadroomTimeouts {
-	const short = 500 * time.Millisecond
-	return diskheadroom.DiskHeadroomTimeouts{Read: short, Probe: short, Prune: short}
+	return diskheadroom.DiskHeadroomTimeouts{Read: headroomShortBound, Probe: headroomShortBound, Prune: headroomShortBound}
 }
 
-// headroomTestBound is far above the short limits so a loaded machine is not read as a hang.
-const headroomTestBound = 30 * time.Second
+func diskHeadroomAnsweringLimits() diskheadroom.DiskHeadroomTimeouts {
+	return diskheadroom.DiskHeadroomTimeouts{Read: headroomAnsweringBound, Probe: headroomAnsweringBound, Prune: headroomAnsweringBound}
+}
+
+// diskHeadroomHangingPruneLimits shortens only the prune, whose stand-in never returns.
+func diskHeadroomHangingPruneLimits() diskheadroom.DiskHeadroomTimeouts {
+	limits := diskHeadroomAnsweringLimits()
+	limits.Prune = headroomShortBound
+	return limits
+}
 
 func awaitHeadroomPreflight(t *testing.T, ctx core.Context, policy diskheadroom.DiskHeadroomPolicy) error {
 	t.Helper()

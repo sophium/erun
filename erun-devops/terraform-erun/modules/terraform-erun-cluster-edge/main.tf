@@ -9,8 +9,8 @@ locals {
   arg_namespace                              = var.namespace == null ? "cert-manager" : var.namespace
   arg_ingress_namespace                      = var.ingress_namespace == null ? "traefik" : var.ingress_namespace
   arg_issuer_name                            = var.issuer_name == null ? "erun-cloudflare" : var.issuer_name
-  arg_cert_manager_chart_version             = var.cert_manager_chart_version == null ? "v1.20.3" : var.cert_manager_chart_version
-  arg_traefik_chart_version                  = var.traefik_chart_version == null ? "33.2.1" : var.traefik_chart_version
+  arg_cert_manager_chart_version             = var.cert_manager_chart_version == null ? "v1.20.5" : var.cert_manager_chart_version
+  arg_traefik_chart_version                  = var.traefik_chart_version == null ? "42.1.1" : var.traefik_chart_version
   arg_dns01_provider                         = var.dns01_provider == null ? "cloudflare" : var.dns01_provider
   arg_dns01_webhook_image_pull_secrets       = var.dns01_webhook_image_pull_secrets == null ? [] : var.dns01_webhook_image_pull_secrets
   arg_broker_url                             = var.broker_url == null ? "" : var.broker_url
@@ -47,8 +47,10 @@ locals {
   # The entrypoint-wide redirect also catches /.well-known/acme-challenge/, so it
   # is safe only when every certificate is solved over DNS-01
   # (see http01_acme_challenges_present).
+  # A named target redirects to that entrypoint's listen port (the chart's :8443,
+  # which nothing outside the pod reaches), so the target is the public port.
   traefik_redirect_args = local.arg_http_redirect_enabled && !local.arg_acme_challenge_path_exempt ? [
-    "--entryPoints.web.http.redirections.entryPoint.to=websecure",
+    "--entryPoints.web.http.redirections.entryPoint.to=:443",
     "--entryPoints.web.http.redirections.entryPoint.scheme=https",
     "--entryPoints.web.http.redirections.entryPoint.permanent=true",
   ] : []
@@ -340,7 +342,9 @@ resource "kubernetes_namespace" "cert_manager" {
 }
 
 # Optional; without it the transport policy has nowhere to go, which
-# edge_transport_policy reports.
+# edge_transport_policy reports. Helm installs the chart's crds/ only when they
+# are absent and never upgrades them, so moving an existing release to a newer
+# chart leaves the cluster's Traefik CRDs where they were.
 resource "helm_release" "traefik" {
   count = local.arg_install_ingress_controller ? 1 : 0
 

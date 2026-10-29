@@ -25,6 +25,9 @@ MCP transport guidance. Follow root `AGENTS.md` and shared Go conventions in
   Browser auth uses exactly `[attachAuthSubprotocol, token]` in subprotocols;
   header auth remains supported. Echo only the scheme, never the token.
   This fallback is attach-only; JSON-RPC still requires its bearer header.
+  The offer is read before anything is verified, so parsing it stops after the
+  two entries it reads while accepting exactly what gorilla's `Subprotocols`
+  would (`subprotocol_bound_test.go`).
 - Preserve `http.Hijacker`: do not wrap attach in the ordinary byte-counting
   traffic middleware. Record activity directly.
 - Binary frames carry PTY bytes; text frames carry resize control and one terminal

@@ -17,7 +17,7 @@ import (
 // buildDaemonEndpointAddr is where a test stage's `RUN --network=host` reaches a daemon.
 const buildDaemonEndpointAddr = "127.0.0.1:2375"
 
-const buildDaemonForwarderImage = "alpine/socat:1.8.0.3"
+const buildDaemonForwarderImage = "alpine/socat:1.8.1.3"
 
 const (
 	buildDaemonForwarderName = "erun-build-daemon"

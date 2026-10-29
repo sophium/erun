@@ -133,13 +133,13 @@ variable "issuer_name" {
 }
 
 variable "cert_manager_chart_version" {
-  description = "Pinned cert-manager Helm chart version. Keep >= v1.17.2: earlier versions delete the DNS-01 _acme-challenge TXT with an empty Cloudflare zone id, orphaning records and wedging issuance/renewal."
+  description = "Pinned cert-manager Helm chart version. Defaults to v1.20.5, the first v1.20 release whose controller, webhook, cainjector, acmesolver and startupapicheck images carry no fixable advisory. Keep >= v1.17.2 in any case: earlier versions delete the DNS-01 _acme-challenge TXT with an empty Cloudflare zone id, orphaning records and wedging issuance/renewal."
   type        = string
   default     = null
 }
 
 variable "traefik_chart_version" {
-  description = "Pinned Traefik Helm chart version."
+  description = "Pinned Traefik Helm chart version. Defaults to 42.1.1 (Traefik v3.7.16), the first chart past every Traefik advisory and the Alpine and Go standard library findings of earlier images. Chart 42 requires Kubernetes >= 1.30: on an older cluster the apply is refused with \"chart requires kubeVersion: >=1.30.0-0\". Helm never upgrades a chart's CRDs, so when an existing release moves to a newer chart, apply that chart's CRDs first: helm show crds traefik --repo https://traefik.github.io/charts --version <version> | kubectl apply --server-side --force-conflicts -f -."
   type        = string
   default     = null
 }

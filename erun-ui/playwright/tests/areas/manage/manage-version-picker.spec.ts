@@ -179,9 +179,6 @@ test.describe('manage dialog — version picker (#756)', () => {
 
     await expect(page.getByRole('option', { name: /1\.0\.16/ })).toBeVisible();
     await expect(page.getByRole('option', { name: /9\.9\.9/ })).toHaveCount(0);
-
-    // A background LoadState may still be in this handler at teardown; drain it first.
-    await page.unrouteAll({ behavior: 'ignoreErrors' });
   });
 
   test('saving a container registry re-queries the picker so the new registry contributes (#995)', async ({

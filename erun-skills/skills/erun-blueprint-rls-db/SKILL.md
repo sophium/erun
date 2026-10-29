@@ -218,7 +218,7 @@ atlas schema validate --env default
 ```
 
 If `atlas` is not installed, surface the install hint:
-`https://release.ariga.io/atlas/atlas-linux-amd64-v1.2.0` (or use the
+`https://release.ariga.io/atlas/atlas-linux-amd64-v1.3.5` (or use the
 Homebrew tap).
 
 To exercise the schema against a real database:

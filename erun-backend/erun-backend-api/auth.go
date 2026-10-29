@@ -197,10 +197,10 @@ func (m *AuthMiddleware) Wrap(next http.Handler) http.Handler {
 
 // authenticate hides verifier detail behind ErrInvalidBearerToken.
 func (m *AuthMiddleware) authenticate(r *http.Request) (Claims, error) {
-	token, err := bearerToken(r.Header.Get("Authorization"))
-	if err != nil {
-		logAuthRejected(r, err.Error())
-		return Claims{}, err
+	token, ok := security.BearerToken(r.Header.Get("Authorization"))
+	if !ok {
+		logAuthRejected(r, ErrMissingBearerToken.Error())
+		return Claims{}, ErrMissingBearerToken
 	}
 	claims, err := m.verifier.VerifyBearerToken(r.Context(), token)
 	if err != nil || strings.TrimSpace(claims.Issuer) == "" || strings.TrimSpace(claims.Subject) == "" {
@@ -434,12 +434,4 @@ func (m *AuthMiddleware) logAuditEvent(r *http.Request) error {
 		event.MCPTool = tool
 	}
 	return m.audit.LogAuditEvent(r.Context(), event)
-}
-
-func bearerToken(header string) (string, error) {
-	fields := strings.Fields(header)
-	if len(fields) != 2 || !strings.EqualFold(fields[0], "bearer") {
-		return "", ErrMissingBearerToken
-	}
-	return fields[1], nil
 }

@@ -114,7 +114,8 @@ func SubjectFromUnverifiedJWT(token string) (string, error) {
 }
 
 func decodeUnverifiedJWTPayload(token string, claims any) error {
-	parts := strings.Split(strings.TrimSpace(token), ".")
+	// SplitN bounds the work an unauthenticated header can cause; only the payload is read.
+	parts := strings.SplitN(strings.TrimSpace(token), ".", 3)
 	if len(parts) < 2 {
 		return errors.New("token is not a jwt")
 	}

@@ -2,6 +2,16 @@
 // Authenticated REST via a saved Playwright storageState session; see SKILL.md.
 import { request } from 'playwright';
 import { argv, env, exit, stdout } from 'node:process';
+import { chmodSync, existsSync, writeFileSync } from 'node:fs';
+
+// storageState({ path }) creates the file under the process umask, which leaves
+// live session cookies readable by other local users.
+function writeSession(path, state) {
+  if (existsSync(path)) {
+    chmodSync(path, 0o600);
+  }
+  writeFileSync(path, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+}
 
 function usage(message) {
   if (message) {
@@ -59,7 +69,7 @@ try {
     ...(body ? { data: body } : {}),
   });
   // Roll the session forward so any refreshed auth cookies are kept.
-  await context.storageState({ path: sessionPath });
+  writeSession(sessionPath, await context.storageState());
   const text = await response.text();
   stdout.write(text.endsWith('\n') ? text : `${text}\n`);
   if (!response.ok()) {

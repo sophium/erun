@@ -319,10 +319,10 @@ func awaitDiskHeadroomPreflight(t *testing.T, ctx core.Context, check func(core.
 	}
 }
 
-// awaitBuildCacheRetention runs the production wiring with shrunk bounds.
+// awaitBuildCacheRetention runs the production wiring under bounds its stand-ins answer within.
 func awaitBuildCacheRetention(t *testing.T, policy diskheadroom.DiskHeadroomPolicy) error {
 	t.Helper()
-	policy.Limits = diskHeadroomShortLimits()
+	policy.Limits = diskHeadroomAnsweringLimits()
 	return awaitDiskHeadroomPreflight(t, core.Context{}, func(ctx core.Context) error {
 		diskheadroom.EnsureBuildCacheRetention(ctx, policy)
 		return nil

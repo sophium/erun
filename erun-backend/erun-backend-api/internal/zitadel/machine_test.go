@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -15,6 +16,9 @@ type fakeZitadel struct {
 	projects map[string]string
 	apps     map[string]fakeApp
 	calls    []string
+	// rowCap > 0 caps an unfiltered search the way Zitadel v4.19.5+ caps an
+	// unpaged v1 list at its MaxQueryLimit.
+	rowCap int
 }
 
 type fakeApp struct {
@@ -77,7 +81,7 @@ type fakeRoute struct {
 
 func (f *fakeZitadel) routes() []fakeRoute {
 	return []fakeRoute{
-		{postTo("/management/v1/projects/_search"), func(w http.ResponseWriter, _ *http.Request) { f.searchProjects(w) }},
+		{postTo("/management/v1/projects/_search"), f.searchProjects},
 		{postTo("/management/v1/projects"), f.createProject},
 		{postSuffixed("/apps/_search"), f.searchApps},
 		{postSuffixed("/apps/api"), f.createAPIApp},
@@ -113,12 +117,43 @@ func getContaining(substring string) func(*http.Request) bool {
 	}
 }
 
-func (f *fakeZitadel) searchProjects(w http.ResponseWriter) {
+func (f *fakeZitadel) searchProjects(w http.ResponseWriter, r *http.Request) {
 	result := make([]map[string]string, 0, len(f.projects))
 	for name, id := range f.projects {
 		result = append(result, map[string]string{"id": id, "name": name})
 	}
-	writeFakeJSON(w, map[string]any{"result": result})
+	writeFakeJSON(w, map[string]any{"result": f.narrow(r, result)})
+}
+
+// narrow applies a request's exact-name query, then the row cap to an unfiltered
+// one, over a name-ordered result so a capped page is deterministic.
+func (f *fakeZitadel) narrow(r *http.Request, result []map[string]string) []map[string]string {
+	var body struct {
+		Queries []struct {
+			NameQuery *struct {
+				Name   string `json:"name"`
+				Method string `json:"method"`
+			} `json:"nameQuery"`
+		} `json:"queries"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	sort.Slice(result, func(i, j int) bool { return result[i]["name"] < result[j]["name"] })
+	for _, query := range body.Queries {
+		if query.NameQuery == nil || query.NameQuery.Method != "TEXT_QUERY_METHOD_EQUALS" {
+			continue
+		}
+		filtered := make([]map[string]string, 0, 1)
+		for _, item := range result {
+			if item["name"] == query.NameQuery.Name {
+				filtered = append(filtered, item)
+			}
+		}
+		return filtered
+	}
+	if f.rowCap > 0 && len(result) > f.rowCap {
+		return result[:f.rowCap]
+	}
+	return result
 }
 
 func (f *fakeZitadel) createProject(w http.ResponseWriter, r *http.Request) {
@@ -139,7 +174,7 @@ func (f *fakeZitadel) searchApps(w http.ResponseWriter, r *http.Request) {
 			result = append(result, map[string]string{"id": app.id, "name": strings.TrimPrefix(key, projectID+"\x00")})
 		}
 	}
-	writeFakeJSON(w, map[string]any{"result": result})
+	writeFakeJSON(w, map[string]any{"result": f.narrow(r, result)})
 }
 
 func (f *fakeZitadel) createAPIApp(w http.ResponseWriter, r *http.Request) {
@@ -403,5 +438,30 @@ func TestDeleteMachineIdentityDoesNotCreateTheProjectItWasLookingFor(t *testing.
 	}
 	if _, ok := fake.projects[machineIdentityProjectName]; ok {
 		t.Fatal("revocation created the machine-identity project")
+	}
+}
+
+// Zitadel v4.19.5+ returns at most its MaxQueryLimit rows for an unfiltered v1
+// search; an identity created after that many siblings must still be found.
+func TestMachineIdentityIsFoundPastTheServerRowCap(t *testing.T) {
+	fake := newFakeZitadel()
+	fake.rowCap = 1
+	client, _ := newTestClient(t, fake.handler())
+	ctx := context.Background()
+	for _, loginName := range []string{"erun-env-0001", "erun-env-0002", "erun-env-0002"} {
+		if _, err := client.EnsureMachineIdentity(ctx, EnsureMachineIdentityParams{OrgID: "org-1", LoginName: loginName}); err != nil {
+			t.Fatalf("EnsureMachineIdentity(%s): %v", loginName, err)
+		}
+	}
+	if creates := fake.countContains("/apps/api"); creates != 2 {
+		t.Fatalf("expected one application create per identity, got %d: re-provisioning past the row cap created a second application, calls %v", creates, fake.recorded())
+	}
+
+	removed, err := client.DeleteMachineIdentity(ctx, DeleteMachineIdentityParams{OrgID: "org-1", LoginName: "erun-env-0002"})
+	if err != nil {
+		t.Fatalf("DeleteMachineIdentity: %v", err)
+	}
+	if !removed || fake.holdsApp("project-"+machineIdentityProjectName, "erun-env-0002") {
+		t.Fatalf("removed=%v: an identity past the row cap was not revoked, so its client secret can still mint tokens", removed)
 	}
 }

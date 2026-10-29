@@ -53,7 +53,7 @@ func startRetentionPsql(t *testing.T, ctx context.Context, databaseURL string, p
 		files = append(files, testcontainers.ContainerFile{HostFilePath: sqlFile, ContainerFilePath: retentionPolicyPath(policy), FileMode: 0o644})
 	}
 
-	container, err := testcontainers.Run(ctx, "postgres:18.3",
+	container, err := testcontainers.Run(ctx, "postgres:18.6",
 		testcontainers.WithEntrypoint("sleep", "infinity"),
 		testcontainers.WithHostPortAccess(port),
 		testcontainers.WithFiles(files...),

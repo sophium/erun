@@ -78,7 +78,7 @@ type eddsaHeader struct {
 
 // parseEdDSAToken decodes a JWT, requiring alg=EdDSA to block alg confusion.
 func parseEdDSAToken(token string) (signingInput string, claims mcpauth.MCPTokenClaims, signature []byte, err error) {
-	segments := strings.Split(strings.TrimSpace(token), ".")
+	segments := strings.SplitN(strings.TrimSpace(token), ".", 4)
 	if len(segments) != 3 {
 		return "", mcpauth.MCPTokenClaims{}, nil, fmt.Errorf("malformed token: expected 3 JWT segments")
 	}

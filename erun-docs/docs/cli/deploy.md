@@ -139,7 +139,7 @@ Subcommand:
 
 You always say *which* version:
 
-- **`--version <v>`** — install a specific published version. Use it to roll forward to a new build, or to roll back to an earlier one.
+- **`--version <v>`** — install a specific published version. Use it to roll forward to a new build, or to roll back to an earlier one. Rolling back across a release that moved the hosted IdP also needs its database restored; see [Hosted IdP](/deployment/deploy-platform#hosted-idp).
 - **`--current`** — reinstall the version the environment already runs (its persisted runtime version). Use it to re-roll the same version without retyping the number.
 
 To produce a *new* version from your working tree, build and push it first ([`erun build`](/cli/build) mints it, [`erun push`](/cli/push) publishes it), then `deploy --version` that version. The desktop app composes those steps for you; the `build --deploy` shortcut runs them end to end for an Operator at the terminal (see [Command primitives](/concepts/command-primitives)).
