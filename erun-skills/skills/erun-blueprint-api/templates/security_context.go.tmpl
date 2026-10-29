@@ -1,0 +1,54 @@
+package security
+
+import (
+	"context"
+	"errors"
+
+	"github.com/google/uuid"
+)
+
+// ErrMissingContext means code that needs the authenticated identity ran
+// outside the authentication middleware. It is an internal wiring error,
+// never a 401.
+var ErrMissingContext = errors.New("security: missing security context (internal wiring error)")
+
+// Claims is the minimum surface of a verified OIDC bearer token that the
+// auth pipeline consumes. The TokenVerifier implementation populates it
+// from a verified token; downstream resolvers read it.
+type Claims struct {
+	Issuer  string
+	Subject string
+	Email   string
+}
+
+// Context is the request-scoped authenticated identity. The authentication
+// middleware sets it once; authorization, audit, repository transaction
+// wiring, and routes all read this one value, which is why it lives in a
+// package every layer can import without a cycle.
+type Context struct {
+	TenantID        uuid.UUID
+	UserID          uuid.UUID
+	IsOperations    bool
+	ExternalIssuer  string
+	ExternalSubject string
+	Claims          Claims
+}
+
+type contextKey struct{}
+
+func WithContext(ctx context.Context, sec Context) context.Context {
+	return context.WithValue(ctx, contextKey{}, sec)
+}
+
+func FromContext(ctx context.Context) (Context, bool) {
+	sec, ok := ctx.Value(contextKey{}).(Context)
+	return sec, ok
+}
+
+func RequiredFromContext(ctx context.Context) (Context, error) {
+	sec, ok := FromContext(ctx)
+	if !ok {
+		return Context{}, ErrMissingContext
+	}
+	return sec, nil
+}

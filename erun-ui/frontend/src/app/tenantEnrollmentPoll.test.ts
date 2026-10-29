@@ -9,13 +9,6 @@ import {
   TENANT_ENROLLMENT_POLL_INTERVAL_MS,
 } from './tenantEnrollmentPoll';
 
-// These pure functions carry the sidebar tenant-enrollment icon's poll gate
-// and its transition-detection logic. Playwright cannot drive the
-// pending/declined/enrolled transitions without a real
-// backend or a stubbed Wails bridge response (no precedent for the latter in
-// this suite's headless harness -- see the spec's own comment), so this is
-// the coverage for that state-classification logic itself.
-
 test('local-only is never polled', () => {
   assert.equal(nextEnrollmentPollingInterval('local-only'), 0);
 });
@@ -29,9 +22,6 @@ test('enrolled stops polling permanently', () => {
   assert.equal(nextEnrollmentPollingInterval('enrolled'), 0);
 });
 
-// A mismatch is moved by the operator's own connect action, which ends in the
-// same sign-in that invalidates the TenantEnrollment tag -- a timer would only
-// re-ask a question whose answer changes when someone clicks something.
 test('tenant-mismatch is never polled, like local-only', () => {
   assert.equal(nextEnrollmentPollingInterval('tenant-mismatch'), 0);
 });

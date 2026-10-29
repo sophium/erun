@@ -8,13 +8,8 @@ export interface TenantSwitchMismatch {
   resolvedType: string;
 }
 
-// TenantSwitchMismatchBanner is what an unsuccessful switch looks like: the
-// console never keeps the old token and relabels which tenant it claims to be
-// on, so when a fresh sign-in comes back resolving to a tenant other than the
-// one requested, it says so plainly instead of silently proceeding as if the
-// switch had worked. `onRetry` is omitted when there is no OIDC config to
-// retry against (the dev-token fallback), in which case only dismissing is
-// offered.
+// TenantSwitchMismatchBanner reports a switch whose fresh sign-in resolved to
+// a different tenant than requested. `onRetry` is omitted without OIDC config.
 export function TenantSwitchMismatchBanner({
   mismatch,
   onRetry,

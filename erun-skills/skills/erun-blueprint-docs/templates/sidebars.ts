@@ -1,7 +1,6 @@
 import type { SidebarsConfig } from '@docusaurus/plugin-content-docs';
 
-// Blueprint sidebar. Add each new page id under the category that matches its
-// audience (Operator-facing vs Agent-reference), not its topic. The id is the
+// File each page id under its audience category, not its topic. The id is the
 // path relative to docs/ without the .md extension.
 const sidebars: SidebarsConfig = {
   docsSidebar: [

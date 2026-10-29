@@ -139,18 +139,30 @@
 {{- if eq $adminPassword "" -}}
 {{- $adminPassword = printf "Er%s%s!" (randAlphaNum 24) (randNumeric 4) -}}
 {{- end -}}
+{{- /* Login V2 signs its session cookies with this key. Left unset, login derives
+       it from the login-client PAT, so rotating that PAT signs every user out;
+       it is generated and lookup-persisted the same way as the admin password. */ -}}
+{{- $loginSecretName := printf "%s-zitadel-login" $tenant -}}
+{{- $sessionCookieSecret := "" -}}
+{{- $existingLoginSecret := lookup "v1" "Secret" .Release.Namespace $loginSecretName -}}
+{{- if and $existingLoginSecret (hasKey $existingLoginSecret.data "session-cookie-secret") -}}
+{{- $sessionCookieSecret = (index $existingLoginSecret.data "session-cookie-secret" | b64dec) -}}
+{{- end -}}
+{{- if eq $sessionCookieSecret "" -}}
+{{- $sessionCookieSecret = randAlphaNum 48 -}}
+{{- end -}}
 {{- /* Both PATs need an expiration date, and it is not optional: the date is
        what makes core mint the tokens at all. Left unset, core still creates the
        two machine users and writes no token, so the login container waits on a
        file that never appears and the pod never goes Ready — verified against
-       v4.15.3. The default is therefore far enough out to be no time bomb;
+       v4.15.3 and v4.20.0. The default is therefore far enough out to be no time bomb;
        shortening it means rotating the login client's token by hand. */ -}}
 {{- $patExpiration := default "2100-01-01T00:00:00Z" $zitadel.patExpiration -}}
 {{- $imageOverrides := default dict .Values.imageOverrides -}}
 {{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
-{{- $zitadelImage := default (printf "%s/erun-zitadel:v4.15.3" $containerRegistry) (index $imageOverrides "erun-zitadel") -}}
-{{- $loginImage := default (printf "%s/erun-zitadel-login:v4.15.3" $containerRegistry) (index $imageOverrides "erun-zitadel-login") -}}
-{{- $postgresImage := default (printf "%s/erun-backend-postgres:18.3" $containerRegistry) (index $imageOverrides "erun-backend-postgres") -}}
+{{- $zitadelImage := default (printf "%s/erun-zitadel:v4.20.0" $containerRegistry) (index $imageOverrides "erun-zitadel") -}}
+{{- $loginImage := default (printf "%s/erun-zitadel-login:v4.20.0" $containerRegistry) (index $imageOverrides "erun-zitadel-login") -}}
+{{- $postgresImage := default (printf "%s/erun-backend-postgres:18.6" $containerRegistry) (index $imageOverrides "erun-backend-postgres") -}}
 {{- /* OIDC application bootstrap: the console, an erun CLI/agent, and a mobile
        client each need a real OIDC client to authenticate against, and until
        now this chart created only the two machine-user PATs, never an
@@ -267,9 +279,7 @@ roleRef:
   kind: Role
   name: {{ $tenant }}-zitadel-oidc-bootstrap
 ---
-# A separate least-privilege Role for the durable PATs Secret, rather than
-# widening the ConfigMap Role above: `create` cannot be scoped by
-# resourceNames (the object does not exist yet), so the two secrets verbs that
+# Separate Role: `create` cannot be scoped by resourceNames, so the verbs that
 # can be name-scoped are split from it.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -312,6 +322,16 @@ stringData:
   {{ $adminSecretKey }}: {{ $adminPassword | quote }}
 ---
 apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $loginSecretName }}
+  labels:
+    app: {{ $tenant }}-zitadel
+type: Opaque
+stringData:
+  session-cookie-secret: {{ $sessionCookieSecret | quote }}
+---
+apiVersion: v1
 kind: Service
 metadata:
   name: {{ $tenant }}-zitadel
@@ -329,10 +349,7 @@ spec:
       port: {{ $loginPort }}
       targetPort: login
 ---
-# One origin, two backends. Path order matters only for readability — the
-# ingress controller matches the longer prefix first — but the split does not:
-# /ui/v2/login is the only path Login V2 owns, and core must keep everything
-# else, including /.well-known/openid-configuration and /oauth/v2/authorize.
+# /ui/v2/login is the only path Login V2 owns; core serves everything else.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -397,15 +414,11 @@ spec:
     spec:
       serviceAccountName: {{ $oidcServiceAccount }}
       securityContext:
-        # The two containers hand the login-client PAT over through the shared
-        # emptyDir, and they do not run as the same uid, so the volume is
-        # group-owned instead. Safe here in a way it is not in the runtime pod:
-        # this pod mounts no PersistentVolumeClaim for the kubelet to recurse.
+        # The containers share PATs via emptyDir under different uids, so it is
+        # group-owned; safe because this pod mounts no PVC.
         fsGroup: 1000
       initContainers:
-        # Core creates and migrates its own database, but only once the server
-        # answers; waiting here keeps a cold platform bring-up out of core's
-        # restart loop. Reuses the pinned postgres image for pg_isready.
+        # Waiting for postgres keeps a cold bring-up out of core's restart loop.
         - name: wait-for-postgres
           image: {{ $postgresImage }}
           env:
@@ -424,11 +437,8 @@ spec:
             - sh
             - -c
             - until pg_isready -q; do echo "waiting for postgres"; sleep 2; done
-        # Seeds the shared emptyDir from the durable PATs Secret before core
-        # starts, so a restarted pod's login and oidc-bootstrap containers find
-        # both PATs immediately instead of waiting forever on files core will
-        # never rewrite (see the file header). A no-op on the very first init,
-        # when the Secret does not exist yet.
+        # Core writes the PATs only on first init, so a restarted pod must
+        # restore them from the durable Secret.
         - name: restore-pats
           image: {{ $oidcBootstrapImage }}
           imagePullPolicy: IfNotPresent
@@ -452,10 +462,7 @@ spec:
         - name: erun-zitadel
           image: {{ $zitadelImage }}
           imagePullPolicy: IfNotPresent
-          # --masterkeyFromEnv reads ZITADEL_MASTERKEY instead of taking the key
-          # on the command line, so the operator's masterkey never reaches argv.
-          # --tlsMode external: the ingress terminates TLS and core serves plain
-          # HTTP behind it while still treating the origin as secure.
+          # --masterkeyFromEnv keeps the masterkey out of argv; the ingress terminates TLS.
           args:
             - start-from-init
             - --masterkeyFromEnv
@@ -492,8 +499,7 @@ spec:
                   key: {{ $postgresPasswordSecretKey }}
             - name: ZITADEL_DATABASE_POSTGRES_USER_SSL_MODE
               value: disable
-            # The admin credentials are the same shared-postgres superuser: core
-            # needs them to create and migrate its own database on first start.
+            # Core needs superuser credentials to create its database on first start.
             - name: ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME
               value: {{ $postgresUser | quote }}
             - name: ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD
@@ -518,8 +524,6 @@ spec:
               value: {{ $adminEmail | quote }}
             - name: ZITADEL_FIRSTINSTANCE_ORG_HUMAN_EMAIL_VERIFIED
               value: "true"
-            # The org-owner service-account PAT: what an operator or a
-            # provisioning step drives the Management API with.
             - name: ZITADEL_FIRSTINSTANCE_PATPATH
               value: {{ printf "%s/admin-sa.pat" $bootstrapDir | quote }}
             - name: ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_USERNAME
@@ -528,7 +532,6 @@ spec:
               value: Admin Service Account
             - name: ZITADEL_FIRSTINSTANCE_ORG_MACHINE_PAT_EXPIRATIONDATE
               value: {{ $patExpiration | quote }}
-            # The IAM_LOGIN_CLIENT PAT the login container authenticates with.
             - name: ZITADEL_FIRSTINSTANCE_LOGINCLIENTPATPATH
               value: {{ printf "%s/login-client.pat" $bootstrapDir | quote }}
             - name: ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_USERNAME
@@ -537,8 +540,7 @@ spec:
               value: Login Client
             - name: ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_PAT_EXPIRATIONDATE
               value: {{ $patExpiration | quote }}
-            # Login V2 is off unless explicitly required, and an authorize
-            # request then renders nothing at all.
+            # Without this, an authorize request renders no login page.
             - name: ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_REQUIRED
               value: "true"
             - name: ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_BASEURI
@@ -547,13 +549,8 @@ spec:
               value: {{ printf "%s%s/login?authRequest=" $issuer $loginBasePath | quote }}
             - name: ZITADEL_OIDC_DEFAULTLOGOUTURLV2
               value: {{ printf "%s%s/logout?post_logout_redirect=" $issuer $loginBasePath | quote }}
-            # The instance's Domain Policy, applied when core sets the
-            # first instance up — Zitadel's own defaults here are false, which
-            # would make login names unique across the whole instance instead
-            # of per organization, and let an org claim a domain it does not
-            # control. These are read at first-instance init only, so they
-            # decide the shape of a freshly provisioned instance; they do not
-            # rewrite an instance that is already initialised.
+            # Zitadel's false defaults would make login names instance-unique and
+            # skip domain verification. Read at first-instance init only.
             - name: ZITADEL_DEFAULTINSTANCE_DOMAINPOLICY_USERLOGINMUSTBEDOMAIN
               value: "true"
             - name: ZITADEL_DEFAULTINSTANCE_DOMAINPOLICY_VALIDATEORGDOMAINS
@@ -581,17 +578,21 @@ spec:
           image: {{ $loginImage }}
           imagePullPolicy: IfNotPresent
           env:
-            # Same pod, so the login container reaches core over the loopback
-            # rather than back out through the Service and the ingress.
             - name: ZITADEL_API_URL
               value: {{ printf "http://localhost:%v" $corePort | quote }}
             - name: NEXT_PUBLIC_BASE_PATH
               value: {{ $loginBasePath | quote }}
             - name: ZITADEL_SERVICE_USER_TOKEN_FILE
               value: {{ printf "%s/login-client.pat" $bootstrapDir | quote }}
-            # Core is addressed over the loopback, so the request carries no
-            # public origin of its own; these headers restore the one the issuer
-            # and every redirect_uri agree on.
+            # Optional, so a deleted Secret falls back to the PAT-derived key rather
+            # than holding the login container in CreateContainerConfigError.
+            - name: ZITADEL_SESSION_COOKIE_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $loginSecretName }}
+                  key: session-cookie-secret
+                  optional: true
+            # Restores the public origin that the issuer and redirect_uris expect.
             - name: CUSTOM_REQUEST_HEADERS
               value: {{ printf "Host:%s,X-Forwarded-Proto:%s" $externalDomain $scheme | quote }}
             - name: PORT
@@ -599,9 +600,7 @@ spec:
           ports:
             - name: login
               containerPort: {{ $loginPort }}
-          # The login-client PAT only exists once core has finished initialising,
-          # so this container restarts until then. The probe is what makes that
-          # wait legible rather than a bare CrashLoopBackOff.
+          # Restarts until core has written the login-client PAT.
           startupProbe:
             httpGet:
               path: {{ printf "%s/healthy" $loginBasePath }}

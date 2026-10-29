@@ -14,9 +14,7 @@ export type RequestsState =
   | { status: 'ready'; requests: InviteRequest[] }
   | { status: 'error'; message: string };
 
-// RequestActionState is keyed per inviteRequestId (see actionStates below),
-// so approving or declining one row never blocks acting on another --
-// mirrors environments/controller.ts's per-environmentId DeployState.
+// Keyed per inviteRequestId so one row's action never blocks another.
 export type RequestActionState =
   | { status: 'idle' }
   | { status: 'busy' }
@@ -42,11 +40,7 @@ function useActiveRef(): React.RefObject<boolean> {
   return activeRef;
 }
 
-// useRequestsController lists pending invite requests and drives the
-// per-row approve/decline actions. Approving surfaces the decided request
-// (carrying the minted invite token) through `approved`, so the panel can
-// show it once in a dialog even after the row itself disappears from the
-// now-refetched pending list.
+// `approved` outlives the row, which disappears from the refetched pending list.
 export function useRequestsController(token: string): RequestsController {
   const listQuery = useListInviteRequestsQuery(token, {
     pollingInterval: PENDING_REQUESTS_POLL_MS,
@@ -89,10 +83,7 @@ export function useRequestsController(token: string): RequestsController {
     [token, approveInviteRequest, setActionState, activeRef],
   );
 
-  // decline always resolves once the request settles, whether it succeeded
-  // or failed -- mirroring identity/controller.ts's setActive -- so the
-  // confirm dialog can await it to know when to stop showing its own
-  // in-flight state; a failure surfaces through actionStates instead.
+  // Resolves on success or failure so the confirm dialog can await it.
   const decline = React.useCallback(
     (id: string, reason: string): Promise<void> => {
       setActionState(id, { status: 'busy' });

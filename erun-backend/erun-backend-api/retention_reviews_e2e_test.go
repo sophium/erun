@@ -13,45 +13,14 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
 )
 
-// End-to-end proof that the reviews retention sweep
-// (erun-backend-db/retention/reviews.sql) deletes exactly the rows the design
-// in erun-backend-db/AGENTS.md ("Reviews") says it should, and nothing else --
-// against a real migrated PostgreSQL, not a mock. Reviews has six inbound
-// foreign keys (comments, releases, review_reviewers, review_merge_queue,
-// builds), so this locks the referential order directly rather than
-// trusting the design's own guard list, which omits builds.
-//
-// Locks these properties against persisted database state:
-//
-//  1. a CLOSED review past the 90-day age bound with no referencing row in any
-//     of comments/releases/builds/review_merge_queue is deleted
-//     together with its review_reviewers rows.
-//  2. a CLOSED review past the age bound with an unpinned builds row still
-//     pointing at it survives.
-//  3. a CLOSED review past the age bound with a stale last_failed_build_id pin
-//     survives (guarded by the same builds row), but the pin itself is nulled;
-//     the build row is untouched.
-//  4. a CLOSED review past the age bound referenced by a comment, a release, a
-//     historical GATE build row, or a review_merge_queue row each survives.
-//  5. an OPEN review, however old, is exempt.
-//  6. a MERGED review, however old, is exempt entirely, and its pinned build
-//     survives too.
-//  7. a CLOSED review within the 90-day age bound survives.
-//  8. CLOSED reviews with no referencing rows beyond the 2,000-per-tenant count
-//     cap are deleted even when every row is within the age bound.
-//
-// It also proves dry_run=true reports the same counts but deletes and nulls
-// nothing, and that both runs record their outcome in retention_runs.
-//
-// The SQL file runs through retention.sh itself in a real psql container.
-//
-// The fixtures carry run-unique ids and tenant names, and every count is
-// scoped to this test's own tenants, because the package database is shared
-// with the package's other suites.
+// Runs erun-backend-db/retention/reviews.sql through retention.sh in a real psql
+// container; policy is in erun-backend-db/AGENTS.md ("Reviews"). The design's guard
+// list omits builds, so the referential order is locked here directly. Ids and tenant
+// names are run-unique because the package database is shared.
 
 const retentionReviewsPolicy = "reviews.sql"
 
-// retentionReviewsFixtureSQL is the fixture block, with the literal id prefix replaced by {{p}} and tenant names suffixed by {{n}}.
+// {{p}} replaces the id prefix and {{n}} suffixes tenant names.
 const retentionReviewsFixtureSQL = `
 INSERT INTO tenants (tenant_id, name) VALUES
   ('{{p}}000000000001', 'clean{{n}}'),
@@ -162,7 +131,6 @@ SELECT '{{p}}00000000000b', '{{p}}10000000000b', 'r-' || i, 'main', 'feat-' || i
 FROM generate_series(1, 2005) AS i;
 `
 
-// retentionReviewsFixture is one run's seeded population.
 type retentionReviewsFixture struct {
 	db        *sql.DB
 	psql      retentionPsql
@@ -181,8 +149,7 @@ func (f retentionReviewsFixture) tenantList() string {
 	return strings.Join(quoted, ", ")
 }
 
-// retentionReviewsCount mirrors the shell's count_query: one scalar, rendered
-// as psql -tA would (NULL renders empty).
+// NULL renders empty, as psql -tA would.
 func retentionReviewsCount(t *testing.T, db *sql.DB, query string, args ...any) string {
 	t.Helper()
 	var value sql.NullString
@@ -225,8 +192,6 @@ func retentionReviewsSeed(t *testing.T) retentionReviewsFixture {
 	return f
 }
 
-// retentionReviewsCleanup removes this run's rows child-first, so the shared
-// package database is left as it was found.
 func retentionReviewsCleanup(t *testing.T, f retentionReviewsFixture) {
 	t.Helper()
 	in := "(" + f.tenantList() + ")"
@@ -252,8 +217,6 @@ func retentionReviewsCleanup(t *testing.T, f retentionReviewsFixture) {
 	}
 }
 
-// retentionReviewsReportHas reports whether the sweep's output carries the
-// given eligible_for_deletion row.
 func retentionReviewsReportHas(out, table, count string) bool {
 	return retentionReport(out)[table] == count
 }
@@ -265,8 +228,6 @@ func retentionReviewsRunValue(t *testing.T, f retentionReviewsFixture, column, t
 		table, dryRun, f.startedAt)
 }
 
-// TestRetentionReviewsSweepDeletesOnlyUnreferencedAgedClosedReviews sweeps
-// reviews with the real retention policy.
 func TestRetentionReviewsSweepDeletesOnlyUnreferencedAgedClosedReviews(t *testing.T) {
 	f := retentionReviewsSeed(t)
 	db := f.db
@@ -281,7 +242,6 @@ func TestRetentionReviewsSweepDeletesOnlyUnreferencedAgedClosedReviews(t *testin
 		t.Fatalf("expected 3 fixture review_reviewers (clean, builds-unpinned, builds-pinned), got %s", initialReviewers)
 	}
 
-	// --- Dry run reports the exact eligible counts and mutates nothing ---
 	report := f.psql.sweep(t, context.Background(), true)
 	if !retentionReviewsReportHas(report, "reviews", "6") {
 		t.Fatalf("dry run must report 6 reviews eligible (1 clean + 5 count-cap), got:\n%s", report)
@@ -294,7 +254,6 @@ func TestRetentionReviewsSweepDeletesOnlyUnreferencedAgedClosedReviews(t *testin
 	retentionReviewsExpect(t, db, "false", "dry run must not null the stale pin either",
 		`SELECT last_failed_build_id IS NULL FROM reviews WHERE review_id = $1`, f.id("000000000301"))
 
-	// --- The dry run recorded its outcome: eligible counts, zero deleted ---
 	for _, c := range []struct{ column, table, want, why string }{
 		{"eligible_count", "reviews", "6", "the dry run must record 6 reviews eligible in retention_runs"},
 		{"deleted_count", "reviews", "0", "the dry run must record 0 reviews deleted in retention_runs"},
@@ -306,10 +265,8 @@ func TestRetentionReviewsSweepDeletesOnlyUnreferencedAgedClosedReviews(t *testin
 		}
 	}
 
-	// --- Real run deletes/nulls exactly the eligible rows ---
 	f.psql.sweep(t, context.Background(), false)
 
-	// --- The real run recorded its outcome: eligible counts, matching deleted counts ---
 	for _, c := range []struct{ column, table, want, why string }{
 		{"eligible_count", "reviews", "6", "the real run must record 6 reviews eligible in retention_runs"},
 		{"deleted_count", "reviews", "6", "the real run must record 6 reviews deleted in retention_runs"},
@@ -325,41 +282,33 @@ func TestRetentionReviewsSweepDeletesOnlyUnreferencedAgedClosedReviews(t *testin
 	reviewerCount := `SELECT count(*) FROM review_reviewers WHERE review_id = $1`
 	buildCount := `SELECT count(*) FROM builds WHERE build_id = $1`
 
-	// 1: clean is gone, its reviewer is gone.
 	retentionReviewsExpect(t, db, "0", "the clean CLOSED review must be deleted", reviewCount, f.id("000000000101"))
 	retentionReviewsExpect(t, db, "0", "the clean review's reviewer must be deleted with it", reviewerCount, f.id("000000000101"))
 
-	// 2: builds-unpinned survives -- the unpinned builds row is the guard.
 	retentionReviewsExpect(t, db, "1", "a CLOSED review with an unpinned builds row must survive", reviewCount, f.id("000000000201"))
 	retentionReviewsExpect(t, db, "1", "its reviewer must survive too", reviewerCount, f.id("000000000201"))
 	retentionReviewsExpect(t, db, "1", "the unpinned build itself must be untouched", buildCount, f.id("000000000202"))
 
-	// 3: builds-pinned survives, its reviewer survives, the build is
-	// untouched, but the stale pin is nulled.
+	// The stale pin is nulled even though the review survives.
 	retentionReviewsExpect(t, db, "1", "a CLOSED review with a pinned builds row must survive", reviewCount, f.id("000000000301"))
 	retentionReviewsExpect(t, db, "1", "its reviewer must survive too", reviewerCount, f.id("000000000301"))
 	retentionReviewsExpect(t, db, "", "the stale last_failed_build_id pin must be nulled",
 		`SELECT last_failed_build_id::text FROM reviews WHERE review_id = $1`, f.id("000000000301"))
 	retentionReviewsExpect(t, db, "1", "the pinned build itself must survive -- this policy never touches builds", buildCount, f.id("000000000302"))
 
-	// 4-7: each guard keeps its review alive.
 	retentionReviewsExpect(t, db, "1", "a CLOSED review referenced by a comment must survive", reviewCount, f.id("000000000401"))
 	retentionReviewsExpect(t, db, "1", "a CLOSED review referenced by a release must survive", reviewCount, f.id("000000000501"))
 	retentionReviewsExpect(t, db, "1", "a CLOSED review referenced by a historical GATE build must survive", reviewCount, f.id("000000000601"))
 	retentionReviewsExpect(t, db, "1", "the historical GATE build itself must be untouched", buildCount, f.id("000000000602"))
 	retentionReviewsExpect(t, db, "1", "a CLOSED review referenced by a review_merge_queue row must survive", reviewCount, f.id("000000000701"))
 
-	// 8: OPEN survives no matter how old.
 	retentionReviewsExpect(t, db, "1", "an OPEN review must survive no matter how old it is", reviewCount, f.id("000000000801"))
 
-	// 9: MERGED survives entirely, its pinned build survives too.
 	retentionReviewsExpect(t, db, "1", "a MERGED review must survive no matter how old it is", reviewCount, f.id("000000000901"))
 	retentionReviewsExpect(t, db, "1", "a MERGED review's pinned build must survive", buildCount, f.id("000000000902"))
 
-	// 10: young survives (within the 90-day age bound).
 	retentionReviewsExpect(t, db, "1", "a CLOSED review within the age bound must survive", reviewCount, f.id("000000000a01"))
 
-	// 11: count-cap tenant keeps exactly 2000, the 5 oldest are gone.
 	capTenant := f.id("00000000000b")
 	retentionReviewsExpect(t, db, "2000", "the count-cap tenant must keep exactly 2000 reviews",
 		`SELECT count(*) FROM reviews WHERE tenant_id = $1`, capTenant)

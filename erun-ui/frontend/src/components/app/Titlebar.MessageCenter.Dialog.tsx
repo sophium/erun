@@ -45,11 +45,7 @@ interface TitlebarMessageCenterDialogProps {
   onClose: () => void;
 }
 
-// TitlebarMessageCenterDialog is the message centre's review surface: the
-// session's full notification history, filterable by class, with debug
-// hidden until explicitly revealed. Opening always starts from whichever
-// class icon (or the history fallback) was clicked; the tab strip lets the
-// operator move to a different class without closing.
+// TitlebarMessageCenterDialog shows the session's notification history, filterable by class.
 export function TitlebarMessageCenterDialog({
   initialFilter,
   onClose,
@@ -151,13 +147,7 @@ function MessageCenterFilterBar({
   );
 }
 
-// MessageCenterBulkActions clears a whole class (or everything) at once,
-// as the bulk form of the same dismissNotification path a single row's
-// "Mark read" already uses -- clear means mark-all-read, not remove, so the
-// class icons zero out and disappear from the titlebar while every message
-// stays browsable here. Each button hides once its own scope has nothing
-// left unread, mirroring the per-row dismiss action's own hide-when-done
-// convention.
+// MessageCenterBulkActions marks a whole class read; messages stay browsable.
 function MessageCenterBulkActions({
   filter,
   counts,
@@ -219,14 +209,7 @@ function MessageCenterRow({
   );
 }
 
-// MessageCenterEnvAction dispatches to whichever named remedy the
-// notification carries -- ported from the old single-pill's StatusEnvAction
-// switch, now keyed off the notification directly instead of the pill's own
-// derived TitlebarStatusValue. Every branch that navigates to a destination
-// surface (the Manage dialog, the tenant dashboard) also closes this dialog:
-// left open, it would stack a second modal underneath the one the operator
-// just asked for. Report-bug/Copy don't navigate anywhere, so they don't
-// close it -- see MessageCenterReportBugAction/MessageCenterCopyAction.
+// Navigating branches close this dialog so it does not stack under the destination modal.
 function MessageCenterEnvAction({
   notification: n,
   onClose,
@@ -294,11 +277,7 @@ function MessageCenterEnvAction({
   }
 }
 
-// MessageCenterReportBugAction is the standing action every error message
-// carries, ported from the old pill's StatusReportBugAction (root AGENTS.md
-// "Smooth, Seamless, No Dead Ends": an error must never have nothing to do
-// about it). Hands the failure to an agent that drafts the report rather
-// than opening a form; disables and spins for the admission round-trip.
+// MessageCenterReportBugAction hands the failure to an agent that drafts the report.
 function MessageCenterReportBugAction({
   notification: n,
 }: {

@@ -9,16 +9,14 @@ import (
 	"strings"
 )
 
-// build lays out the package root, writes its control file and packs it. The
-// root is a temporary directory, so a rerun never packs a stale file.
+// build packs spec from a fresh temporary root, so a rerun never packs a stale file.
 func (d debpkg) build(spec packageSpec) error {
 	root, err := os.MkdirTemp("", "debpkg-")
 	if err != nil {
 		return err
 	}
 	defer func() { _ = os.RemoveAll(root) }()
-	// The root is the archive's `./` entry, so it carries a package
-	// directory's mode, not MkdirTemp's private one.
+	// The root is the archive's `./` entry, so it needs a directory's mode.
 	if err := os.Chmod(root, 0o755); err != nil {
 		return err
 	}
@@ -36,7 +34,6 @@ func (d debpkg) build(spec packageSpec) error {
 	return err
 }
 
-// layout fills root with the package's binaries, files and DEBIAN/control.
 func (d debpkg) layout(spec packageSpec, root string) error {
 	env, err := d.goBuildEnv(spec)
 	if err != nil {
@@ -62,9 +59,8 @@ func debFileName(spec packageSpec) string {
 	return spec.Name + "_" + spec.Version + "_" + spec.Arch + ".deb"
 }
 
-// goBuildEnv targets linux on the package's architecture. A CGO build for a
-// foreign architecture compiles with that architecture's cross toolchain and
-// links against its multiarch libraries, which cross-deps installed.
+// goBuildEnv uses the target's cross toolchain and multiarch libraries for a
+// foreign-architecture CGO build.
 func (d debpkg) goBuildEnv(spec packageSpec) ([]string, error) {
 	env := []string{"GOOS=linux", "GOARCH=" + spec.Arch, "CGO_ENABLED=0"}
 	if !spec.CGO {
@@ -136,8 +132,6 @@ func copyPackageFile(file packageFile, root string) error {
 	return os.Chmod(dest, file.Mode)
 }
 
-// depends joins --depends with the libraries dpkg-shlibdeps finds for each
-// --shlibdeps binary, named as this Debian release names them.
 func (d debpkg) depends(spec packageSpec, root string) (string, error) {
 	fields := []string{}
 	if spec.Depends != "" {
@@ -153,8 +147,7 @@ func (d debpkg) depends(spec packageSpec, root string) (string, error) {
 	return strings.Join(fields, ", "), nil
 }
 
-// shlibDeps runs dpkg-shlibdeps from a scratch source tree, which it needs a
-// debian/control in, and reads its shlibs:Depends substitution.
+// shlibDeps needs a scratch debian/control for dpkg-shlibdeps to run.
 func (d debpkg) shlibDeps(arch, binary string) (string, error) {
 	tree, err := os.MkdirTemp("", "debpkg-shlibs-")
 	if err != nil {
@@ -179,7 +172,7 @@ func (d debpkg) shlibDeps(arch, binary string) (string, error) {
 	return "", errors.New("dpkg-shlibdeps found no libraries for " + binary)
 }
 
-// controlFile is DEBIAN/control, fields in the order dpkg documents them.
+// controlFile orders fields as dpkg documents them.
 func controlFile(spec packageSpec) string {
 	lines := []string{
 		"Package: " + spec.Name,

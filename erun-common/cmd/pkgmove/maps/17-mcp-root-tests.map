@@ -1,0 +1,81 @@
+# Move each erun-mcp root test to the tools package whose code it exercises, so a
+# tool edit recompiles only that tool's tests; assembled-server tests stay in root.
+
+# Run from erun-mcp, paths relative to the erun-mcp module root:
+#   go run ../erun-common/cmd/pkgmove plan -map <this map> \
+#     -dir . -module github.com/sophium/erun/erun-mcp -importers . -timing-env ERUN_TIMING_DIR
+
+# Production moved down so the moved tests reach it without importing root.
+# Runtime defaults: the server and the moved handler tests both normalize a RuntimeConfig.
+tools/shared/runtimedefaults runtime.go
+# The metrics recorder's constructor lives with its type; the server still calls it.
+tools/shared/toolmetrics metrics.go:newMetricsRecorder
+# The AWS credential inject/clear tools are cloud tools; only registration stays in root.
+tools/cloud credentials*.go
+# The idle-stop cancel/history/record tools belong to the idle group.
+tools/idle idle_stop*.go
+
+# Whole files whose every test drives one tool group's handler directly.
+tools/activity activity_lease_test.go
+tools/environment environment_test.go
+tools/exectool exec_test.go
+tools/pin pin_test.go
+tools/platform platform_alias_message_test.go
+tools/build server_list_release_tools_test.go
+
+# Server-level tests stay in root: they build newServer/newHTTPHandler, span tool
+# groups (depguard forbids a group's tests importing another group), or cover
+# server.go's own middleware, session keepalive and metrics listener.
+. *_test.go
+
+# capabilities_test.go: the guard and caller-identity unit tests.
+tools/shared/callerid capabilities_test.go:TestAnUnauthenticatedEdgeKeepsTheCoarseAdminSurface
+tools/shared/registrar capabilities_test.go:TestGuardRefusesEvenWhenAHandlerIsReachedDirectly
+tools/shared/registrar capabilities_test.go:TestGuardToolAttributesEachConcurrentCallToItsOwnCaller
+tools/shared/registrar capabilities_test.go:TestGuardToolWithNoAuthContextDoesNotInheritThePreviousCaller
+tools/shared/registrar capabilities_test.go:TestOperateCapabilityReachesItsHandlerAtCallTime
+
+# cross_environment_sweep_test.go: the single-group scope tests.
+tools/expose cross_environment_sweep_test.go:TestExposeAndUnexposeAcceptTheirOwnScope
+tools/terraform cross_environment_sweep_test.go:TestTerraformAcceptsItsOwnScope
+
+# job_envelope_test.go: the envelope's own tests, and exec's background supervisor.
+tools/shared/jobenvelope job_envelope_test.go:TestJobEnvelopeLeavesTheParentEmptyWhenTheCallerNamesNone
+tools/shared/jobenvelope job_envelope_test.go:TestJobEnvelopeMarksAHandoffTask
+tools/shared/jobenvelope job_envelope_test.go:TestJobEnvelopeMirrorsTheWorksOutputIntoTheJobsLog
+tools/shared/jobenvelope job_envelope_test.go:TestJobEnvelopeRecordsTheCallersJobAsTheTasksParent
+tools/exectool job_envelope_test.go:TestExecRawBackgroundThreadsTheCallersJobIDToTheSupervisor
+
+# mcp_overview_doc_test.go: the environment tool's documented read model.
+tools/environment mcp_overview_doc_test.go:TestMCPOverviewEnvironmentExampleMatchesTheResolvedJSON
+
+# metrics_test.go: the recorder's series and the guard's recording into it.
+tools/shared/toolmetrics metrics_test.go:TestMetricsEndpointServesAllFiveDocumentedSeries
+tools/shared/registrar metrics_test.go:TestGuardToolRecordsMCPCallsAndAuditEvents
+tools/shared/registrar metrics_test.go:TestNilMetricsRecorderIsSafe
+tools/shared/registrar metrics_test.go:guardToolTestOutput
+
+# preview_advertised_test.go: advertisePreview on synthetic input types.
+tools/shared/registrar preview_advertised_test.go:TestAdvertisePreviewFollowsTheInputType
+tools/shared/registrar preview_advertised_test.go:TestAdvertisePreviewRefusesAFalseClaim
+tools/shared/registrar preview_advertised_test.go:embeddedPreview
+tools/shared/registrar preview_advertised_test.go:promotedPreview
+tools/shared/registrar preview_advertised_test.go:noPreview
+
+# server_build_init_tools_test.go
+tools/build server_build_init_tools_test.go:TestBuildToolBuildsComponentWithMultiPlatformSpec
+tools/initenv server_build_init_tools_test.go:TestInitToolReturnsInteractionWhenSharedInitNeedsInput
+tools/initenv server_build_init_tools_test.go:TestInitToolReturnsRepositoryInteractionForRemoteInit
+tools/initenv server_build_init_tools_test.go:TestInitToolUsesExplicitRuntimeVersionOverride
+
+# server_git_tools_test.go
+tools/diff server_git_tools_test.go:TestDiffToolReturnsStructuredGitDiff
+tools/exectool server_git_tools_test.go:TestCommitToolCommitsAndRefusesBranchMismatch
+tools/exectool server_git_tools_test.go:TestCommitToolRejectsBlankPathEntries
+tools/exectool server_git_tools_test.go:TestCommitToolScopedPathsCommitsOnlyTheDeclaredFile
+tools/exectool server_git_tools_test.go:TestWriteToolRefusesWriteThroughInTreeSymlink
+tools/exectool server_git_tools_test.go:TestWriteToolWritesContentByteIdenticallyAndRefusesOutsideRoot
+
+# server_test.go: the version tool's handler.
+tools/version server_test.go:TestBuildVersionOutput
+tools/version server_test.go:TestBuildVersionOutputDefaultsVersion

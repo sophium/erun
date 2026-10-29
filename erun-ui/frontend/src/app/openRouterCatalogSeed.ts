@@ -5,16 +5,10 @@ import type {
   UIOpenRouterModel,
 } from '@/uiOpenRouterTypes';
 
-// A host gateway with a base URL, offered as the catalog's starting point.
 type SeedableDefaults = UIHostGatewayDefaults & { baseUrl: string };
 
-// seedOpenRouterCatalog offers this machine's own Claude Code gateway as the
-// catalog's starting point, so an operator who already runs Claude Code through
-// a gateway does not retype an endpoint and model they configured once.
-//
-// It fills the dialog only. Nothing is stored until the operator saves, and a
-// catalog they have already configured is never overwritten: the defaults are
-// a starting point, not a source of truth.
+// seedOpenRouterCatalog pre-fills from this machine's Claude Code gateway; it
+// never overwrites a configured catalog and stores nothing until save.
 export function seedOpenRouterCatalog(config: UIERunConfig): UIERunConfig {
   const defaults = config.openRouterDefaults;
   if (!defaults?.baseUrl || isConfigured(config)) {
@@ -26,9 +20,7 @@ export function seedOpenRouterCatalog(config: UIERunConfig): UIERunConfig {
   };
 }
 
-// isConfigured reports whether the operator has already named a gateway. Only
-// the base URL decides it: a catalog holding models but no gateway is one they
-// have begun and not finished.
+// A catalog with models but no base URL is unfinished, not configured.
 function isConfigured(config: UIERunConfig): boolean {
   return (config.openRouter?.baseUrl ?? '').trim() !== '';
 }
@@ -43,9 +35,7 @@ function seededCatalog(config: UIERunConfig, defaults: SeedableDefaults): UIOpen
   };
 }
 
-// seededModels offers the model those settings run on, with the window they
-// declare for it. Settings that name no model seed none: the operator picks
-// from the gateway's published list instead of being handed a blank row.
+// No model in the settings seeds none, rather than a blank row.
 function seededModels(defaults: UIHostGatewayDefaults): UIOpenRouterModel[] {
   if (!defaults.model) {
     return [];

@@ -11,14 +11,8 @@ import {
 } from './storage';
 import { normalizeDialogValue } from './versionSuggestions';
 
-// environmentDialogResourceLimitMessage is the runtime-capacity requirement as
-// this dialog asks it, exempting a host env. That exemption is the whole point
-// of the helper: a host env has no pod to size, and createHostEnvConfig records
-// no runtime resources at all, so a message here would refuse a Create that the
-// host form offers no field to satisfy — a dead end whose only exit is closing
-// the dialog. Both the submit gate's runtimeCapacityBlocker and
-// submitEnvironmentDialog call this, so what the Create button offers and what
-// submit accepts cannot disagree about it.
+// environmentDialogResourceLimitMessage exempts host envs, which have no pod
+// and no field to satisfy it. Shared by the submit gate and submit.
 export function environmentDialogResourceLimitMessage(dialog: EnvironmentDialogState): string {
   if (environmentTypeIsHost(dialog.envType)) {
     return '';
@@ -40,37 +34,22 @@ export function normalizedEnvironmentDialogValues(
   };
 }
 
-// missingRequiredFieldReason is the single source of truth for what the New
-// Environment dialog requires before it can be submitted: it returns a
-// user-facing reason for the first missing value, or null when the dialog is
-// submittable. Both the Create button's enabled state and submitEnvironmentDialog
-// derive from it, so the button can never look active while submit would fail —
-// the defect where an unselected Kubernetes context left an active-looking button
-// that silently did nothing on click, with no error shown.
+// missingRequiredFieldReason is the single source for both the Create button
+// state and submit, so the button never looks active when submit would fail.
 export function missingRequiredFieldReason(dialog: EnvironmentDialogState): string | null {
   const values = normalizedEnvironmentDialogValues(dialog);
   if (!values.tenant || !values.environment) {
     return 'Enter a tenant and environment name.';
   }
-  // Mirror erun-common's ValidateTenantName: a tenant name is a single DNS-safe
-  // label of lowercase letters and digits with no hyphens, so the <tenant>-<env>
-  // namespace stays unambiguous. Surface it here so Create is blocked with a clear
-  // reason instead of failing only once `erun init` runs in the terminal.
+  // Mirrors erun-common's ValidateTenantName.
   if (!/^[a-z0-9]{1,63}$/.test(values.tenant)) {
     return 'Tenant name must use only lowercase letters and digits (no hyphens or uppercase).';
   }
-  // local-agent and host envs both resolve their worktree from a directory on
-  // this machine, so the path is required for either; they differ only in
-  // whether an agent pod mounts that directory. It is free-text rather than a
-  // pick-list because the user chooses where their project lives.
   if (values.envType === 'local-agent' || values.envType === 'host') {
     if (!values.localRepoPath) {
       return 'Local repo path is required — this environment is a directory on this machine.';
     }
-    // A host env has no pod and no cluster at all, so it needs neither a
-    // kubernetes context nor a container registry. Neither field is rendered
-    // for it, so requiring either would block Create with a reason naming a
-    // control the user cannot see or fill (a dead end).
+    // Host envs render neither field, so requiring them would be a dead end.
     if (values.envType === 'host') {
       return null;
     }
@@ -81,12 +60,8 @@ export function missingRequiredFieldReason(dialog: EnvironmentDialogState): stri
   return registryMissingReason(dialog, values.containerRegistry);
 }
 
-// registryMissingReason covers all three registry choices: the hosted
-// registry is disabled in the UI until its reachability probe resolves
-// available, but submit is blocked on that same condition rather than relying
-// on the control's disabled state alone. The in-cluster and hosted registries
-// need no host string — the first resolves from the kube-context, the second
-// from the tenant — so a container registry is only required otherwise.
+// Submit checks hosted-registry availability itself rather than trusting the
+// disabled control. In-cluster and hosted registries need no host string.
 function registryMissingReason(
   dialog: EnvironmentDialogState,
   containerRegistry: string,

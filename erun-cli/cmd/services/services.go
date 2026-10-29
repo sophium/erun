@@ -1,0 +1,109 @@
+package services
+
+import (
+	"fmt"
+	"strconv"
+	"strings"
+
+	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/cmd/shared/envscope"
+	"github.com/sophium/erun/cmd/shared/textfmt"
+	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/command/expose"
+	"github.com/sophium/erun/erun-common/infra/cloud/shelllaunch"
+	"github.com/spf13/cobra"
+)
+
+// NewServicesCmd builds `erun services`, listing the names `erun expose` accepts.
+func NewServicesCmd(resolveOpen envscope.OpenResolver) *cobra.Command {
+	var tenant, environment string
+	cmd := &cobra.Command{
+		Use:   "services",
+		Short: "List the Services an environment runs, and which are already exposed",
+		Long: "Report every Service in the environment's namespace with its type, its\n" +
+			"ports, and the public hostname it already has when an erun-expose Ingress\n" +
+			"fronts it.\n\n" +
+			"This answers the question that precedes `erun expose`: what is this\n" +
+			"environment running, and which of those is already published. The exposure\n" +
+			"is read from the Ingress's own backend rather than re-derived from the\n" +
+			"`<tenant>-<service>` convention, so a repo-native chart that names its\n" +
+			"Service something else still reports the Service its Ingress actually routes\n" +
+			"to.\n\n" +
+			"Both reads are plain `kubectl get`s: nothing here can mutate the cluster,\n" +
+			"which is what makes it safe to grant to an orchestrator that must never\n" +
+			"reach for `exec raw`.",
+		Example: "  erun services --tenant team --environment dev\n" +
+			"  erun services --tenant team --environment dev --output json",
+		Args:          cobra.NoArgs,
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runServicesCommand(clicmd.CommandContext(cmd), resolveOpen, envscope.ScopedOpenParams(cmd.CommandPath(), tenant, environment))
+		},
+	}
+	clicmd.AddDryRunFlag(cmd)
+	cmd.Flags().StringVar(&tenant, "tenant", "", "Target a specific tenant (default: the current scope)")
+	cmd.Flags().StringVar(&environment, "environment", "", "Target a specific environment; requires --tenant")
+	return cmd
+}
+
+func runServicesCommand(ctx core.Context, resolveOpen envscope.OpenResolver, params model.OpenParams) error {
+	result, err := resolveOpen(params)
+	if err != nil {
+		return err
+	}
+	req := shelllaunch.ShellLaunchParamsFromResult(result)
+	services, err := expose.RunListEnvironmentServices(ctx, req)
+	if err != nil {
+		return fmt.Errorf("cannot list this environment's Services: %w", err)
+	}
+	if ctx.DryRun {
+		return nil
+	}
+	if ctx.Output == model.OutputJSON {
+		return ctx.WriteResult(services)
+	}
+	return writeServicesResult(ctx, services)
+}
+
+// writeServicesResult renders the listing, with an exposed Service's address on an indented line.
+func writeServicesResult(ctx core.Context, result model.EnvironmentServiceList) error {
+	if _, err := fmt.Fprintf(ctx.Stdout, "Namespace: %s\n", result.Namespace); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(ctx.Stdout, "Services (%d):\n", len(result.Services)); err != nil {
+		return err
+	}
+	if len(result.Services) == 0 {
+		_, err := fmt.Fprintf(ctx.Stdout, "  none -- this environment is running no Services yet\n")
+		return err
+	}
+	for _, service := range result.Services {
+		if _, err := fmt.Fprintf(ctx.Stdout, "  %s (%s): ports %s\n",
+			service.Name, textfmt.ValueOrNone(service.Type), formatServicePorts(service.Ports)); err != nil {
+			return err
+		}
+		if service.Exposure == nil {
+			continue
+		}
+		if _, err := fmt.Fprintf(ctx.Stdout, "    exposed as %s at %s://%s\n",
+			service.Exposure.Label, service.Exposure.Scheme, service.Exposure.Hostname); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// formatServicePorts renders a Service's ports, named where kubectl names them.
+func formatServicePorts(ports []model.ObservedServicePort) string {
+	rendered := make([]string, 0, len(ports))
+	for _, port := range ports {
+		if strings.TrimSpace(port.Name) != "" {
+			rendered = append(rendered, fmt.Sprintf("%s:%d", port.Name, port.Port))
+			continue
+		}
+		rendered = append(rendered, strconv.Itoa(port.Port))
+	}
+	return textfmt.FormatStringList(rendered)
+}

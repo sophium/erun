@@ -41,7 +41,6 @@ describe('LandingScreen content', () => {
     const h2 = screen.getByRole('heading', { level: 2, name: 'What makes Acme different' });
     expect(h1).toBeInTheDocument();
     expect(h2).toBeInTheDocument();
-    // Heading order: the pitch (h1) must read before the differentiators (h2).
     expect(h1.compareDocumentPosition(h2) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     expect(screen.getAllByRole('link', { name: 'Read the docs' })).toHaveLength(2);
@@ -103,10 +102,7 @@ describe('LandingScreen content', () => {
       />,
     );
 
-    // The hero's primary "Read the docs" CTA still renders only when an
-    // instance configures a real docsUrl (never a hardcoded fallback host),
-    // but the footer is the one link every visitor can always reach, so it
-    // falls back rather than disappearing.
+    // The footer link falls back to the public docs; the hero CTA does not.
     const docsLinks = screen.getAllByRole('link', { name: 'Read the docs' });
     expect(docsLinks).toHaveLength(1);
     expect(docsLinks[0]).toHaveAttribute('href', 'https://docs.erunpaas.com');
@@ -124,9 +120,6 @@ describe('LandingScreen content', () => {
       />,
     );
 
-    // No Sign in button can work with no OIDC configured, so the state must
-    // still offer a way forward: the footer's docs link, and the
-    // explanation's own link to the page that walks through configuring one.
     expect(screen.getByRole('link', { name: 'Read the docs' })).toHaveAttribute(
       'href',
       'https://docs.erunpaas.com',
@@ -183,9 +176,7 @@ describe('LandingScreen content', () => {
       />,
     );
 
-    // jsdom does not run layout, so this asserts the responsive contract at
-    // the class level: mobile-first with no override below `sm` (640px),
-    // narrower than a 375px phone viewport — not a rendered pixel measurement.
+    // jsdom has no layout, so this asserts the responsive classes only.
     const ctaRow = screen.getByRole('button', { name: 'Sign in' }).parentElement;
     expect(ctaRow?.className).toContain('flex-col');
     expect(ctaRow?.className).toContain('sm:flex-row');

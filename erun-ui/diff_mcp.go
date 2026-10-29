@@ -7,7 +7,10 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
+	mcppkg "github.com/sophium/erun/erun-common/infra/mcp"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 type idleProbeRoundTripper struct {
@@ -16,7 +19,7 @@ type idleProbeRoundTripper struct {
 
 func (t idleProbeRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	req = req.Clone(req.Context())
-	req.Header.Set(eruncommon.MCPIdleProbeHeader, "true")
+	req.Header.Set(mcppkg.MCPIdleProbeHeader, "true")
 	base := t.base
 	if base == nil {
 		base = http.DefaultTransport
@@ -24,9 +27,7 @@ func (t idleProbeRoundTripper) RoundTrip(req *http.Request) (*http.Response, err
 	return base.RoundTrip(req)
 }
 
-// mcpAuthRoundTripper carries the per-env bearer so an auth-enabled env edge accepts the call.
-// An empty token is a deliberate no-op: non-auth envs and unit tests keep working, and an
-// auth-enabled env's 401 on the empty bearer is the intended outcome, not a bug.
+// mcpAuthRoundTripper adds the per-env bearer; an empty token deliberately sends none.
 type mcpAuthRoundTripper struct {
 	token string
 	base  http.RoundTripper
@@ -44,8 +45,7 @@ func (t mcpAuthRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 	return base.RoundTrip(req)
 }
 
-// mcpClientTransport wraps the idle-probe round-tripper for diagnostic reads so the call does
-// not register as activity and hold an idle env awake.
+// mcpClientTransport uses the idle-probe round-tripper so diagnostic reads do not keep an env awake.
 func mcpClientTransport(endpoint, bearer string, idleProbe bool) *mcp.StreamableClientTransport {
 	var base http.RoundTripper
 	if idleProbe {
@@ -60,11 +60,11 @@ func mcpClientTransport(endpoint, bearer string, idleProbe bool) *mcp.Streamable
 	}
 }
 
-func loadDiffFromMCP(ctx context.Context, endpoint, bearer string, options uiDiffOptions) (eruncommon.DiffResult, error) {
+func loadDiffFromMCP(ctx context.Context, endpoint, bearer string, options uimodel.DiffOptions) (model.DiffResult, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
 	session, err := client.Connect(ctx, mcpClientTransport(endpoint, bearer, true), nil)
 	if err != nil {
-		return eruncommon.DiffResult{}, err
+		return model.DiffResult{}, err
 	}
 	defer func() {
 		_ = session.Close()
@@ -79,25 +79,25 @@ func loadDiffFromMCP(ctx context.Context, endpoint, bearer string, options uiDif
 		},
 	})
 	if err != nil {
-		return eruncommon.DiffResult{}, err
+		return model.DiffResult{}, err
 	}
 
 	data, err := json.Marshal(result.StructuredContent)
 	if err != nil {
-		return eruncommon.DiffResult{}, err
+		return model.DiffResult{}, err
 	}
-	var diff eruncommon.DiffResult
+	var diff model.DiffResult
 	if err := json.Unmarshal(data, &diff); err != nil {
-		return eruncommon.DiffResult{}, err
+		return model.DiffResult{}, err
 	}
 	return diff, nil
 }
 
-func setEnvironmentCloudAliasViaMCP(ctx context.Context, endpoint, bearer, tenant, environment, alias string) (eruncommon.EnvConfig, error) {
+func setEnvironmentCloudAliasViaMCP(ctx context.Context, endpoint, bearer, tenant, environment, alias string) (config.EnvConfig, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
 	session, err := client.Connect(ctx, mcpClientTransport(endpoint, bearer, false), nil)
 	if err != nil {
-		return eruncommon.EnvConfig{}, err
+		return config.EnvConfig{}, err
 	}
 	defer func() {
 		_ = session.Close()
@@ -112,24 +112,23 @@ func setEnvironmentCloudAliasViaMCP(ctx context.Context, endpoint, bearer, tenan
 		},
 	})
 	if err != nil {
-		return eruncommon.EnvConfig{}, err
+		return config.EnvConfig{}, err
 	}
 
 	data, err := json.Marshal(result.StructuredContent)
 	if err != nil {
-		return eruncommon.EnvConfig{}, err
+		return config.EnvConfig{}, err
 	}
 	var output struct {
-		EnvConfig eruncommon.EnvConfig `json:"envConfig"`
+		EnvConfig config.EnvConfig `json:"envConfig"`
 	}
 	if err := json.Unmarshal(data, &output); err != nil {
-		return eruncommon.EnvConfig{}, err
+		return config.EnvConfig{}, err
 	}
 	return output.EnvConfig, nil
 }
 
-// runPodRawFromMCP issues idle-probe reads so a hover or an open Diagnostics console never
-// holds an idle env awake.
+// runPodRawFromMCP uses idle-probe reads so hovers and Diagnostics do not keep an env awake.
 func runPodRawFromMCP(ctx context.Context, endpoint, bearer string, argv []string) (string, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
 	session, err := client.Connect(ctx, mcpClientTransport(endpoint, bearer, true), nil)
@@ -163,7 +162,6 @@ func runPodRawFromMCP(ctx context.Context, endpoint, bearer string, argv []strin
 	return output.Stdout, nil
 }
 
-// loadPodBranchFromMCP is the sidebar hover card's "Working on" source for remote envs.
 func loadPodBranchFromMCP(ctx context.Context, endpoint, bearer string) (string, error) {
 	out, err := runPodRawFromMCP(ctx, endpoint, bearer, []string{"git", "rev-parse", "--abbrev-ref", "HEAD"})
 	if err != nil {
@@ -172,11 +170,11 @@ func loadPodBranchFromMCP(ctx context.Context, endpoint, bearer string) (string,
 	return strings.TrimSpace(out), nil
 }
 
-func loadIdleStatusFromMCP(ctx context.Context, endpoint, bearer string) (eruncommon.EnvironmentIdleStatus, error) {
+func loadIdleStatusFromMCP(ctx context.Context, endpoint, bearer string) (model.EnvironmentIdleStatus, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
 	session, err := client.Connect(ctx, mcpClientTransport(endpoint, bearer, true), nil)
 	if err != nil {
-		return eruncommon.EnvironmentIdleStatus{}, err
+		return model.EnvironmentIdleStatus{}, err
 	}
 	defer func() {
 		_ = session.Close()
@@ -184,28 +182,22 @@ func loadIdleStatusFromMCP(ctx context.Context, endpoint, bearer string) (erunco
 
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "idle"})
 	if err != nil {
-		return eruncommon.EnvironmentIdleStatus{}, err
+		return model.EnvironmentIdleStatus{}, err
 	}
 
 	data, err := json.Marshal(result.StructuredContent)
 	if err != nil {
-		return eruncommon.EnvironmentIdleStatus{}, err
+		return model.EnvironmentIdleStatus{}, err
 	}
-	var status eruncommon.EnvironmentIdleStatus
+	var status model.EnvironmentIdleStatus
 	if err := json.Unmarshal(data, &status); err != nil {
-		return eruncommon.EnvironmentIdleStatus{}, err
+		return model.EnvironmentIdleStatus{}, err
 	}
 	return status, nil
 }
 
-// apiLogMCPRawCommand mirrors loadAPILogFromKubernetes's kubectl invocation
-// for the MCP `raw` fallback (used when the desktop has no local Kubernetes
-// context): the runtime pod resolves its own namespace since the caller has
-// no --namespace to pass in from outside. The target is the erun-backend-api
-// chart's Deployment/Service name (<tenant>-api, per
-// eruncommon.APIDeploymentName) selected with -l/--prefix rather than
-// deployment/<name>, so a transient multi-pod rollout names which replica the
-// log came from instead of kubectl quietly picking one.
+// apiLogMCPRawCommand mirrors loadAPILogFromKubernetes for the MCP `raw` fallback; the pod
+// resolves its own namespace. It selects <tenant>-api by label with --prefix so each line names its replica.
 const apiLogMCPRawCommand = `namespace=${ERUN_NAMESPACE:-}; if [ -z "$namespace" ] && [ -r /var/run/secrets/kubernetes.io/serviceaccount/namespace ]; then namespace=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace); fi; kubectl --context "${ERUN_KUBERNETES_CONTEXT:-in-cluster}" --namespace "$namespace" logs -l app="${ERUN_TENANT:-erun}-api" --prefix -c erun-backend-api --tail 400`
 
 func loadAPILogFromMCP(ctx context.Context, endpoint, bearer string) (string, error) {

@@ -21,12 +21,10 @@ import { TerminalPane } from './TerminalPane';
 import { TerminalTabStrip } from './TerminalTabStrip';
 import { Titlebar } from './Titlebar';
 
-// AppShell is the tests' entry point into the rendered app.
 export class AppShell {
   constructor(public readonly page: Page) {}
 
-  // The theme's gating class lives on <html>, not any component the other
-  // POMs render, so it is exposed here rather than on Titlebar.
+  // The theme class lives on <html>, outside any component POM.
   documentElement(): Locator {
     return this.page.locator('html');
   }
@@ -35,32 +33,13 @@ export class AppShell {
     await this.page.goto('/');
     await this.page.waitForLoadState('domcontentloaded');
     await this.titlebar.toggleButton().waitFor({ state: 'visible' });
-    // The "Loading environments..." overlay clears only once the tenant list
-    // is final; wait it out before asserting on sidebar rows, or the check
-    // races the still-loading list.
-    //
-    // This is a settle, not an assertion, so its expiry must not be the thing a
-    // test dies on. Hidden is already satisfied when the overlay never rendered
-    // (a fast machine). A contended gate is the other case: four workers on a
-    // 4-CPU dind keep the overlay up past 30s, and an uncapped wait spends the
-    // enclosing budget here -- which reports as "Test timeout of 30000ms
-    // exceeded while setting up app" at this line, naming neither the overlay
-    // nor the surface under test.
-    //
-    // The bound must be BELOW whatever budget encloses this call, or the
-    // tolerance is unreachable and the budget always wins first. An earlier
-    // revision capped at 45s against a 30s test timeout capped nothing: the run
-    // died at the row wait below with "Target page ... has been closed", the
-    // budget having expired while this wait was still pending. erunApp.ts gives
-    // the app fixture 60s of its own, so 40s here leaves that fixture room to
-    // reach the row wait -- which IS the assertion that has to hold and fails
-    // informatively when the shell genuinely never became usable.
+    // Settle, not assertion: the row wait below is what must hold. The 40s cap stays below the
+    // app fixture's 60s (erunApp.ts) so a contended overlay cannot eat the whole budget.
     await this.page
       .getByText('Loading environments...', { exact: true })
       .waitFor({ state: 'hidden', timeout: 40_000 })
       .catch(() => {
-        // Expected when the overlay never rendered at all, and tolerated when a
-        // contended gate keeps it up past the bound: the row wait below decides.
+        // Tolerated: the row wait below decides.
       });
     await this.page
       .locator(
@@ -70,20 +49,14 @@ export class AppShell {
       .waitFor({ state: 'visible' });
   }
 
-  // reboot re-runs the boot sequence and hands control back as soon as the app
-  // chrome is up, for callers that assert on a specific surface boot produces
-  // (which session ends up owning the terminal pane). Waiting on that surface is
-  // both stricter and faster than open()'s generic settle, whose overlay wait
-  // clears only once the pane's session streams its first output.
+  // reboot returns once the chrome is up, for callers that wait on a specific boot surface.
   async reboot(): Promise<void> {
     await this.page.goto('/');
     await this.page.waitForLoadState('domcontentloaded');
     await this.titlebar.toggleButton().waitFor({ state: 'visible' });
   }
 
-  // reloadEnvironments surfaces a freshly-seeded env deterministically instead
-  // of waiting on fsnotify, which can race the watcher's readiness right after
-  // boot (see the seededEnv fixture).
+  // reloadEnvironments avoids racing fsnotify right after boot.
   async reloadEnvironments(): Promise<void> {
     await this.page.evaluate(() => {
       (window as unknown as { runtime: { EventsEmit: (name: string) => void } }).runtime.EventsEmit(
@@ -176,10 +149,8 @@ export class AppShell {
     return new TerminalPane(this.page);
   }
 
-  // openEnvironmentTerminal opens an env and settles on its Local session,
-  // returning the session id that owns the terminal pane. The env also spawns
-  // ERun and AI tabs and each spawn reassigns pane ownership, so all three must
-  // be up before a spec reads the id or writes into the pane.
+  // openEnvironmentTerminal waits for Local, ERun and AI tabs, since each spawn reassigns
+  // pane ownership, then returns the owning session id.
   async openEnvironmentTerminal(tenant: string, environment: string): Promise<number> {
     await this.sidebar.openEnvironment(tenant, environment);
     for (const name of ['Local', 'ERun', 'AI']) {

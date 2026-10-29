@@ -45,11 +45,6 @@ function collectDispatched(thunk: AppThunk): RecordedAction[] {
   return actions;
 }
 
-// A bare backend error carries no captured command output, so the titlebar
-// must not offer a Copy action for it — copying the same sentence already
-// visible in the pill (Titlebar.Status.tsx renders the Copy button only when
-// terminalCopyOutput is non-empty) tells the operator nothing they don't
-// already see.
 test('showTerminalError sets an error status with no copyable output', () => {
   const actions = collectDispatched(
     showTerminalError('no tenant given for open: pass a tenant explicitly'),
@@ -74,8 +69,6 @@ test('showTerminalError sets an error status with no copyable output', () => {
   );
 });
 
-// A caller that genuinely captured command output (a failed IDE launch, a
-// delete's namespace-cleanup warning) still gets to offer it.
 test('showTerminalFailure preserves genuinely captured output', () => {
   const actions = collectDispatched(
     showTerminalFailure(
@@ -92,12 +85,7 @@ test('showTerminalFailure preserves genuinely captured output', () => {
   assert.equal(copyAction.payload, 'Deleted team / dev. namespace cleanup failed');
 });
 
-// showNotification schedules its auto-dismiss via scheduleTransientDismiss
-// (window.setTimeout plus window/document focus tracking), so these tests
-// need a window/document shim whose timers are the (mockable) Node globals --
-// same pattern as terminalFocus.test.ts. The window here always reports
-// focused: the focus-pausing behavior itself is transientDismissTimer's own
-// unit test, not this thunk's.
+// Window shim using Node timers; it always reports focused.
 function installWindow(): void {
   const windowShim = {
     setTimeout: (handler: () => void, ms?: number) => setTimeout(handler, ms) as unknown as number,
@@ -163,17 +151,11 @@ test('showNotification stamps a fresh timestamp and dismissed: false on every en
   assert.equal(payload.dismissed, false);
 });
 
-// dismissNotification only marks the entry read -- see AppNotification's own
-// doc comment -- so the message centre dialog can still show it afterwards.
-// This locks the thunk's contract at the dispatch layer; notificationSlice's
-// own reducer test locks the actual state transition.
 test('dismissNotification dispatches the slice action for exactly the given id', () => {
   const actions = collectDispatched(dismissNotification('notification-7'));
   assert.deepEqual(actions, [{ type: dismissNotificationAction.type, payload: 'notification-7' }]);
 });
 
-// markAllNotificationsRead is dismissNotification's bulk counterpart -- same
-// mark-read-never-remove contract, scoped by filter instead of by id.
 test('markAllNotificationsRead dispatches the bulk slice action for the given filter', () => {
   const actions = collectDispatched(markAllNotificationsRead('error'));
   assert.deepEqual(actions, [{ type: dismissNotificationsAction.type, payload: 'error' }]);

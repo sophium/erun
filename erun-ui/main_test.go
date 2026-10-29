@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"net"
 	"os"
 	"os/exec"
@@ -10,13 +11,7 @@ import (
 	"testing"
 )
 
-// The bug: --help, -h, and an unrecognized flag all silently
-// launched the full desktop application -- orchestrator wiring, workspace
-// mirror syncs, and outbound network calls included -- instead of printing
-// usage or a clear error. These tests drive the real main() entry point in a
-// subprocess (via TestHelperProcess below) so they exercise exactly what a
-// user invoking the compiled `erun-app` binary would hit, including the
-// side effects the bug actually caused.
+// These drive the real main() in a subprocess to catch its side effects.
 
 func TestParseHeadlessFlagsRecognizesHelp(t *testing.T) {
 	for _, arg := range []string{"--help", "-help", "-h"} {
@@ -63,11 +58,7 @@ func TestParseHeadlessFlagsNoArgsIsAnOrdinaryRun(t *testing.T) {
 	}
 }
 
-// TestHelperProcess is not a real test. It is re-executed as a subprocess by
-// runERunAppMain below with GO_WANT_ERUN_APP_HELPER_PROCESS=1 set, so that
-// tests can drive the actual main() entry point -- and therefore its real
-// side effects -- under a throwaway HOME instead of just asserting on the
-// pure flag-parsing helper.
+// TestHelperProcess is not a real test; runERunAppMain re-executes it to run main().
 func TestHelperProcess(t *testing.T) {
 	if os.Getenv("GO_WANT_ERUN_APP_HELPER_PROCESS") != "1" {
 		return
@@ -83,12 +74,7 @@ func TestHelperProcess(t *testing.T) {
 	main()
 }
 
-// runERunAppMain re-executes the current test binary as a fresh process that
-// calls main() with the given CLI args, under an isolated, throwaway HOME so
-// nothing it does can touch the operator's real config. Returns the process's
-// stdout, stderr, and the home directory used, so a caller can assert on
-// exactly what a user invoking `erun-app` would see and on the filesystem
-// state such an invocation left behind.
+// runERunAppMain runs main() in a subprocess under a throwaway HOME.
 func runERunAppMain(t *testing.T, args ...string) (stdout, stderr string, exitCode int, home string) {
 	t.Helper()
 	home = t.TempDir()
@@ -109,7 +95,8 @@ func runERunAppMain(t *testing.T, args ...string) (stdout, stderr string, exitCo
 	err := cmd.Run()
 	exitCode = 0
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
 			exitCode = exitErr.ExitCode()
 		} else {
 			t.Fatalf("running erun-app helper process: %v", err)
@@ -118,18 +105,13 @@ func runERunAppMain(t *testing.T, args ...string) (stdout, stderr string, exitCo
 	return outBuf.String(), errBuf.String(), exitCode, home
 }
 
-// assertNoSideEffects fails the test if the help/error path left anything
-// behind under home -- no durable app log, no ERun config dir, nothing. This
-// is the assertion the bug report's own repro cared about most: a --help
-// probe must not be observably different from never having run the binary.
 func assertNoSideEffects(t *testing.T, home string) {
 	t.Helper()
 	var found []string
 	_ = filepath.WalkDir(home, func(path string, d os.DirEntry, err error) error {
-		if err != nil || path == home {
-			return nil
+		if err == nil && path != home {
+			found = append(found, strings.TrimPrefix(path, home))
 		}
-		found = append(found, strings.TrimPrefix(path, home))
 		return nil
 	})
 	if len(found) > 0 {
@@ -169,9 +151,6 @@ func TestUnknownFlagFailsExitsNonZeroAndHasNoSideEffects(t *testing.T) {
 	assertNoSideEffects(t, home)
 }
 
-// Help must short-circuit main wherever the flag sits, not only as the sole
-// argument: the binary is launched with its flags in any order, and a help
-// probe that slips past the check starts a whole desktop.
 func TestParseHeadlessFlagsRecognizesHelpInAnyPosition(t *testing.T) {
 	for _, args := range [][]string{
 		{"--help"},
@@ -197,8 +176,6 @@ func TestParseHeadlessFlagsRecognizesHelpInAnyPosition(t *testing.T) {
 	}
 }
 
-// cliUsage is the only thing the binary prints for a help probe, so a flag it
-// does not name is a flag an operator cannot discover.
 func TestCLIUsageDocumentsTheRealFlags(t *testing.T) {
 	for _, want := range []string{"--headless", "--port", "--help"} {
 		if !strings.Contains(cliUsage, want) {
@@ -207,12 +184,7 @@ func TestCLIUsageDocumentsTheRealFlags(t *testing.T) {
 	}
 }
 
-// The worker harness asks for a stable per-worker port and then serves the
-// address the backend announces, so a port another process already holds must
-// not be fatal: a probe-then-bind harness loses exactly that race and the
-// backend then dies at startup with "bind: address already in use" before any
-// test in that worker runs. Falling back to an OS-assigned port keeps the run
-// alive and leaves the announced address as the only one a caller may use.
+// The worker harness's probe-then-bind can lose its port to another process.
 func TestListenHeadlessFallsBackWhenTheRequestedPortIsHeld(t *testing.T) {
 	held, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -236,9 +208,6 @@ func TestListenHeadlessFallsBackWhenTheRequestedPortIsHeld(t *testing.T) {
 	_ = conn.Close()
 }
 
-// Every bind failure that is not address-in-use stays fatal: a caller that
-// cannot bind the address it was given must hear about it rather than be handed
-// a silently different one.
 func TestListenHeadlessKeepsNonAddressInUseFailuresFatal(t *testing.T) {
 	listener, err := listenHeadless("127.0.0.1:not-a-port")
 	if err == nil {
@@ -247,11 +216,8 @@ func TestListenHeadlessKeepsNonAddressInUseFailuresFatal(t *testing.T) {
 	}
 }
 
-// A headless backend kept importing the login shell's environment, which on
-// macOS replaced the PATH its caller supplied: the Playwright harness's inert
-// opener stubs fell off it, and a spec clicking a host path opened /etc/hosts
-// on the operator's desktop. Only a windowed launch -- launchd's minimal
-// Finder/Dock environment -- needs the import.
+// Only a windowed launch (launchd's minimal environment) needs the import;
+// headless must keep the caller's PATH stubs.
 func TestOnlyAWindowedLaunchImportsTheLoginShellEnvironment(t *testing.T) {
 	if !desktopDeps(true).skipLoginShellEnv {
 		t.Fatal("a headless backend must keep the environment its caller supplied")

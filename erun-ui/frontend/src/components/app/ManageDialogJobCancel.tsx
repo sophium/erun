@@ -9,15 +9,7 @@ import type { UISelection } from '@/types';
 
 import { CancelEnvironmentJob } from '../../../wailsjs/go/main/App';
 
-// Cancelling is destructive to work in flight, so it takes a deliberate second
-// press rather than a single click, and the confirm step says what will happen
-// to the job record -- it stays listed with its outcome instead of vanishing,
-// which is the part an operator cannot guess.
-//
-// The label is "Cancel job", not "Cancel": the dialog's own footer already has a
-// Cancel that closes it, and two buttons reading the same word while meaning
-// opposite things is ambiguous to anyone scanning and to a screen reader
-// listing the buttons.
+// Cancel takes a confirm step, and reads "Cancel job" to avoid clashing with the dialog footer's Cancel.
 export function JobCancelAction({
   job,
   selection,

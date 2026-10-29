@@ -17,8 +17,7 @@ import type { AgentOutputEntry } from '@/types';
 
 import { InlineAlert } from './InlineAlert';
 
-// OutputsDialog is the deliverables counterpart to the activity queue (which
-// tracks operations): the surface for the output files an agent left behind.
+// OutputsDialog lists the output files an agent left behind.
 export function OutputsDialog(): React.ReactElement {
   const dispatch = useAppDispatch();
   const {
@@ -119,11 +118,7 @@ function OutputsDialogBody({
     );
   }
   if (error) {
-    // Through the shared primitive rather than a hand-rolled red line: the
-    // message carries an upstream error, so it needs the icon (WCAG 1.4.1, not
-    // signalled by colour alone) and the wrapping that stops a long value
-    // widening the dialog. The wrapper keeps the body's own vertical rhythm,
-    // which the primitive's padding does not reproduce.
+    // The wrapper keeps the body's vertical rhythm, which the primitive's padding does not.
     return (
       <div className="py-4">
         <InlineAlert>{error}</InlineAlert>
@@ -224,16 +219,8 @@ function OutputRow({
   );
 }
 
-// isHostRunnableArtifact reports whether an artifact is a binary the host can
-// launch directly. For a pod-produced artifact that means Windows executable
-// suffixes — the primary case is a cross-built .exe from the Linux pod — so the
-// action stays inert for report/data outputs and on hosts that produce none.
-//
-// An orchestrator's outputs were produced on this host, so a native binary there
-// usually carries no suffix at all; requiring one would leave the action dead for
-// exactly the case it exists to serve. Data suffixes are excluded instead, which
-// is the safer direction to be wrong in: an unrunnable file simply fails to
-// launch, whereas a hidden button cannot be recovered from.
+// isHostRunnableArtifact: pod outputs need a Windows executable suffix; host outputs only exclude data suffixes,
+// since a native binary usually has none.
 function isHostRunnableArtifact(name: string, hostNative: boolean): boolean {
   const lower = name.toLowerCase();
   if (lower.endsWith('.exe') || lower.endsWith('.bat') || lower.endsWith('.cmd')) {

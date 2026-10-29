@@ -6,9 +6,7 @@ import (
 	"strings"
 )
 
-// The environment readers live apart from main.go because both the API server
-// and the oidc-bootstrap subcommand use them, and buildinfo_ldflags_test.go
-// compiles this package with main.go replaced by a stub.
+// Kept out of main.go: buildinfo_ldflags_test.go replaces main.go with a stub.
 
 func envOrDefault(name string, fallback string) string {
 	value := strings.TrimSpace(os.Getenv(name))

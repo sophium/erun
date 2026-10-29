@@ -11,24 +11,9 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-// End-to-end proof that erun_operations -- the role every retention policy in
-// erun-backend-db/retention/ runs as, via `SET ROLE erun_operations;` -- can
-// actually DELETE from every table a retention policy sweeps, against the
-// real migrated PostgreSQL testpg serves rather than a catalog-privilege
-// query. The ai_sessions retention design shipped with a gap it named but
-// did not close: the role had SELECT/INSERT/UPDATE/REFERENCES on ai_sessions
-// but no DELETE, so that policy could never delete a row. This locks that the
-// gap is closed, and that it was the only one: every other table under an
-// implemented or designed retention policy (the six-table sweep --
-// comments, releases, reviews, ai_sessions, invites, invite_requests -- plus
-// builds, which predate the sweep) grants DELETE too.
-//
-// A has_table_privilege() check can be satisfied by a GRANT that looks right
-// on paper while row-level security still blocks the statement, so every
-// assertion runs a real INSERT then DELETE inside a transaction that rolls
-// back. audit_events and usage_events are asserted the other way: they
-// withhold DELETE pending a compliance decision, so a
-// delete that succeeds there is a silent privilege escalation.
+// erun_operations must actually DELETE from every table a retention policy sweeps.
+// A real INSERT+DELETE in a rolled-back transaction is used because RLS can block a
+// statement has_table_privilege() approves. audit_events and usage_events must refuse DELETE.
 
 const (
 	retentionGrantsTenantID      = "00000000-0000-0000-0000-000000000001"
@@ -37,9 +22,6 @@ const (
 	retentionGrantsReviewID      = "00000000-0000-0000-0000-000000000004"
 )
 
-// retentionGrantsDatabase opens the package's migrated database (as the
-// superuser testpg's URL names) and seeds the shared fixtures every per-table
-// assertion FKs against, removing them again when the test ends.
 func retentionGrantsDatabase(t *testing.T) *sql.DB {
 	t.Helper()
 	db, err := sql.Open("pgx", testpg.URL(t))
@@ -74,9 +56,7 @@ func retentionGrantsDatabase(t *testing.T) *sql.DB {
 	return db
 }
 
-// retentionGrantsAsOperations runs fn inside a transaction that has switched
-// to erun_operations with SET LOCAL ROLE, and always rolls it back -- so no
-// case depends on ordering or leaves state for the next.
+// Always rolled back, so no case depends on ordering.
 func retentionGrantsAsOperations(t *testing.T, db *sql.DB, fn func(tx *sql.Tx) error) error {
 	t.Helper()
 	ctx := context.Background()
@@ -162,9 +142,7 @@ VALUES ('00000000-0000-0000-0000-000000000008', '00000000-0000-0000-0000-0000000
 			if err != nil {
 				t.Fatalf("erun_operations must be able to INSERT then DELETE a %s row (retention policy would fail at runtime otherwise): %v", tc.name, err)
 			}
-			// Stronger than the shell script, which only checked psql's exit
-			// status: a DELETE that row-level security silently filters to
-			// zero rows also leaves a retention policy deleting nothing.
+			// A DELETE that RLS filters to zero rows also leaves a policy deleting nothing.
 			if deleted != 1 {
 				t.Fatalf("erun_operations DELETE on %s removed %d rows, want 1 (row-level security filtering the delete?)", tc.name, deleted)
 			}
@@ -175,7 +153,7 @@ VALUES ('00000000-0000-0000-0000-000000000008', '00000000-0000-0000-0000-0000000
 func TestRetentionGrantsAppendOnlyTablesRefuseOperationsDelete(t *testing.T) {
 	db := retentionGrantsDatabase(t)
 
-	// Predating the sweep, deliberately append-only.
+	// Deliberately append-only.
 	cases := []retentionGrantsCase{
 		{
 			name: "audit_events",
@@ -193,14 +171,12 @@ VALUES ('00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-0000000
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			// The role keeps its normal write access...
 			if err := retentionGrantsAsOperations(t, db, func(tx *sql.Tx) error {
 				_, err := tx.Exec(tc.insert)
 				return err
 			}); err != nil {
 				t.Fatalf("erun_operations must still be able to INSERT a %s row: %v", tc.name, err)
 			}
-			// ...but its delete is refused with a permission error.
 			err := retentionGrantsAsOperations(t, db, func(tx *sql.Tx) error {
 				_, err := tx.Exec(tc.delete)
 				return err

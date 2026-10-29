@@ -3,12 +3,13 @@ package repository
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
+
+	"__MODULE_PATH__/internal/security"
 )
 
 type Dialect int
@@ -16,29 +17,6 @@ type Dialect int
 const (
 	DialectPostgres Dialect = iota
 )
-
-// SecurityContext is the subset of __MODULE__.Security that the
-// repository layer needs. It is populated by the API layer before
-// calling into repositories and read here without an import cycle.
-type SecurityContext struct {
-	TenantID     uuid.UUID
-	UserID       uuid.UUID
-	IsOperations bool
-}
-
-type securityContextKey struct{}
-
-func WithSecurityContext(ctx context.Context, sec SecurityContext) context.Context {
-	return context.WithValue(ctx, securityContextKey{}, sec)
-}
-
-func securityFromContext(ctx context.Context) (SecurityContext, error) {
-	v, ok := ctx.Value(securityContextKey{}).(SecurityContext)
-	if !ok {
-		return SecurityContext{}, errors.New("repository: missing security context (internal wiring error)")
-	}
-	return v, nil
-}
 
 type TxManager struct {
 	db *bun.DB
@@ -50,11 +28,12 @@ func NewTxManager(db *sql.DB, dialect Dialect) *TxManager {
 }
 
 // WithTx opens a transaction, sets the PostgreSQL security context from
-// the authenticated SecurityContext, and runs fn. The role and
+// the request's security.Context, and runs fn. The role and
 // erun.tenant_id are set transaction-locally via SELECT set_config(...)
-// so values do not leak through pooled connections.
+// so values do not leak through pooled connections. A missing security
+// context is an internal wiring error (security.ErrMissingContext).
 func (tm *TxManager) WithTx(ctx context.Context, fn func(context.Context, bun.Tx) error) error {
-	sec, err := securityFromContext(ctx)
+	sec, err := security.RequiredFromContext(ctx)
 	if err != nil {
 		return err
 	}

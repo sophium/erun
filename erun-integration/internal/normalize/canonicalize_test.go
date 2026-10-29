@@ -2,11 +2,8 @@ package normalize
 
 import "testing"
 
-// TestForwardSlashWindowsPaths locks that only unambiguous drive-letter Windows
-// paths are forward-slashed for golden parity, while backslash escape sequences
-// in traced script bodies (\n, \033) and bare-backslash paths (fixed at the erun
-// source, not here) are left untouched. Drives the transform directly so it runs
-// on every OS.
+// TestForwardSlashWindowsPaths: only drive-letter paths are forward-slashed;
+// escape sequences and bare-backslash paths are left alone.
 func TestForwardSlashWindowsPaths(t *testing.T) {
 	cases := []struct{ name, in, want string }{
 		{"drive path forward-slashed", `C:\Users\x\AppData\Local\Temp\T\v.yaml`, `C:/Users/x/AppData/Local/Temp/T/v.yaml`},

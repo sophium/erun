@@ -9,10 +9,6 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
-// fakeEnvironmentCreator is the narrow EnvironmentCreator dependency,
-// recording what it was asked to create and which tenant the context it
-// received was bound to, so a test can prove CreateForTenant persists
-// against the scoped context rather than the caller's own.
 type fakeEnvironmentCreator struct {
 	created  model.Environment
 	err      error
@@ -38,11 +34,7 @@ func (f *fakeEnvironmentCreator) Create(ctx context.Context, environment model.E
 	return created, nil
 }
 
-// fakeEnvironmentAdminAudit is the narrow EnvironmentAdminAuditLogger
-// dependency: tests that want "no audit logger configured" pass a literal
-// nil for the interface parameter, not a typed *fakeEnvironmentAdminAudit
-// nil (which would not compare equal to nil through the interface) —
-// mirroring fakeReviewAudit's own doc comment in reviews_test.go.
+// Tests wanting no audit logger pass a literal nil; a typed nil pointer is not nil through the interface.
 type fakeEnvironmentAdminAudit struct {
 	events []model.AuditEvent
 	err    error
@@ -108,9 +100,7 @@ func TestCreateForTenantRecordsWhichOperatorActedOnWhichTenantFromWhichHomeTenan
 		t.Fatalf("expected exactly one audit event, got %d", len(audit.events))
 	}
 	event := audit.events[0]
-	// The audit row's own tenant_id is the operator's home tenant, not the
-	// tenant the write landed in — that fact lives in APIParameters instead,
-	// since the write itself only ever records the target.
+	// The audit row is filed under the operator's home tenant.
 	if event.TenantID != "ops-tenant" {
 		t.Fatalf("audit TenantID = %q, want ops-tenant (the operator's home tenant)", event.TenantID)
 	}
@@ -129,10 +119,6 @@ func TestCreateForTenantRecordsWhichOperatorActedOnWhichTenantFromWhichHomeTenan
 	}
 }
 
-// TestCreateForTenantFailsClosedWithNoAuditLogger mirrors
-// OverrideAdvanceMergeQueue's own "a missing audit logger fails closed rather
-// than silently promoting anyway" contract in reviews.go: an unattributable
-// cross-tenant write must never happen quietly.
 func TestCreateForTenantFailsClosedWithNoAuditLogger(t *testing.T) {
 	environments := &fakeEnvironmentCreator{}
 	svc := NewEnvironmentAdminService(environments, nil)
@@ -146,9 +132,6 @@ func TestCreateForTenantFailsClosedWithNoAuditLogger(t *testing.T) {
 	}
 }
 
-// TestCreateForTenantFailsClosedWhenAuditWriteFails proves the audit-before-
-// create ordering actually holds: a failing audit write must leave no
-// environment row behind in the target tenant.
 func TestCreateForTenantFailsClosedWhenAuditWriteFails(t *testing.T) {
 	environments := &fakeEnvironmentCreator{}
 	audit := &fakeEnvironmentAdminAudit{err: context.DeadlineExceeded}

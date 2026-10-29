@@ -70,9 +70,6 @@ func TestCreateInviteForOwnTenantIsAllowedForAnyTenantType(t *testing.T) {
 	}
 }
 
-// TestCreateInviteForAnotherTenantRequiresOperations locks #1483 item 4's
-// coarse gate: a COMPANY-tenant caller cannot mint an invite for a tenant
-// other than their own.
 func TestCreateInviteForAnotherTenantRequiresOperations(t *testing.T) {
 	store := &stubInviteStore{}
 	routes := InviteRoutes{invites: store}
@@ -168,8 +165,6 @@ func TestInviteAcceptSucceeds(t *testing.T) {
 	}
 }
 
-// TestInviteAcceptReportsEachTokenStatePlainly locks #1483 item 7: a stale
-// or revoked link says exactly why, rather than a generic failure.
 func TestInviteAcceptReportsEachTokenStatePlainly(t *testing.T) {
 	cases := []struct {
 		name string
@@ -194,12 +189,7 @@ func TestInviteAcceptReportsEachTokenStatePlainly(t *testing.T) {
 	}
 }
 
-// TestInviteAcceptReportsATakenLoginNameAsUsernameTaken locks the second
-// entry point that claims USERNAME_TAKEN: acceptance creates the IdP identity
-// itself, so an invitee who chose a name their organization already holds
-// must be told which name to change rather than handed Zitadel's own
-// account-naming text. It is the case the token-state switch above must not
-// swallow, since it arrives on that switch's default branch.
+// The taken-name error arrives on the token-state switch's default branch.
 func TestInviteAcceptReportsATakenLoginNameAsUsernameTaken(t *testing.T) {
 	accepter := &stubInviteAccepter{err: fmt.Errorf("create identity provider user: %w",
 		&zitadel.UsernameTakenError{Username: "newbie"})}

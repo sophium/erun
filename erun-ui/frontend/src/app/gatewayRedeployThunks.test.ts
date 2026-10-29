@@ -37,8 +37,7 @@ beforeEach(() => {
 });
 
 describe('checkGatewayRedeploy', () => {
-  // The operator's report: switching the gateway off in ERun settings changed no
-  // running pod, and nothing said that a redeploy is what applies it.
+  // A gateway toggle changes no running pod until a redeploy applies it.
   it('offers the environments still on the old routing', async () => {
     bindings.LoadGatewayRoutingDrift.mockResolvedValue([stillOnTheGateway]);
     const { dispatched, dispatch, getState } = harness();

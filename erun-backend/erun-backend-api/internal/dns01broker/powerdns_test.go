@@ -11,8 +11,6 @@ import (
 	"github.com/miekg/dns"
 )
 
-// rrValue renders the one field the tests care about from a captured RR,
-// regardless of record type.
 func rrValue(rr dns.RR) string {
 	switch v := rr.(type) {
 	case *dns.TXT:
@@ -51,9 +49,7 @@ func (c *capturedUpdate) snapshot() capturedUpdate {
 	}
 }
 
-// startTSIGServer runs an in-process DNS server that requires the same TSIG key
-// and records the DNS UPDATE it receives, so the test verifies the writer builds
-// a correctly-signed, correctly-shaped update without a real PowerDNS.
+// startTSIGServer runs an in-process DNS server requiring the test TSIG key.
 func startTSIGServer(t *testing.T, captured *capturedUpdate) string {
 	t.Helper()
 	fqKey := dns.Fqdn(testTSIGKeyName)
@@ -64,8 +60,7 @@ func startTSIGServer(t *testing.T, captured *capturedUpdate) string {
 	server := &dns.Server{
 		Listener:   listener,
 		TsigSecret: map[string]string{fqKey: testTSIGSecret},
-		// The default accept func rejects the UPDATE opcode with NOTIMP before the
-		// handler runs; accept it so the test exercises the real update path.
+		// The default accept func rejects UPDATE with NOTIMP before the handler runs.
 		MsgAcceptFunc: func(dns.Header) dns.MsgAcceptAction { return dns.MsgAccept },
 		Handler: dns.HandlerFunc(func(w dns.ResponseWriter, req *dns.Msg) {
 			captured.mu.Lock()
@@ -76,8 +71,6 @@ func startTSIGServer(t *testing.T, captured *capturedUpdate) string {
 			for _, rr := range req.Ns {
 				switch rr.Header().Class {
 				case dns.ClassANY:
-					// RemoveRRset's "delete this whole rrset" directive: no
-					// rdata reaches the wire, only the name+type identify it.
 					captured.rrsetClears = append(captured.rrsetClears, fmt.Sprintf("%s %s", rr.Header().Name, dns.TypeToString[rr.Header().Rrtype]))
 				case dns.ClassNONE:
 					captured.removes = append(captured.removes, rr.Header().Name+"="+rrValue(rr))
@@ -133,8 +126,6 @@ func TestPowerDNSWriterPresentSignsAndShapesUpdate(t *testing.T) {
 	}
 }
 
-// wantExactly fails the test unless got holds exactly one entry, equal to
-// want. Factored out so the calling test's own branch count stays low.
 func wantExactly(t *testing.T, label string, got []string, want string) {
 	t.Helper()
 	if len(got) != 1 || got[0] != want {
@@ -159,12 +150,9 @@ func TestPowerDNSWriterUpsertAClearsThenInserts(t *testing.T) {
 	if !got.tsigOK {
 		t.Fatal("server did not accept the TSIG signature — the update was not properly signed")
 	}
-	// A replace must clear the existing rrset, not merge.
 	wantExactly(t, "rrsetClears", got.rrsetClears, dns.Fqdn(fqdn)+" A")
 	wantExactly(t, "inserts", got.inserts, dns.Fqdn(fqdn)+"=127.0.0.1")
 
-	// Re-pointing at a different IP must clear+insert again, never leaving the
-	// old value alongside the new one.
 	if err := writer.UpsertA(fqdn, "203.0.113.10"); err != nil {
 		t.Fatalf("upsert a (repoint): %v", err)
 	}

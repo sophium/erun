@@ -57,8 +57,6 @@ func TestClampRegistryScopesToTenant(t *testing.T) {
 		{Type: "repository", Name: "frs/hello", Actions: []string{"pull"}},
 		{Type: "repository", Name: "other-tenant", Actions: []string{"pull"}},
 		{Type: "repository", Name: "other-tenant/hello", Actions: []string{"pull"}},
-		// "frsking" merely starts with "frs" but is not the tenant's namespace —
-		// a naive strings.HasPrefix(name, tenant) would wrongly grant this.
 		{Type: "repository", Name: "frsking", Actions: []string{"pull"}},
 		{Type: "registry", Name: "catalog", Actions: []string{"*"}},
 	}
@@ -80,8 +78,6 @@ func TestClampRegistryScopesToTenantEmptyTenantGrantsNothing(t *testing.T) {
 }
 
 func TestClampRegistryScopesToTenantCrossTenantScopeGrantsNothing(t *testing.T) {
-	// The exact attack the issue calls out: a valid tenant-A token requesting
-	// tenant-B's repository scope must be granted nothing, not a narrowed scope.
 	requested := []RegistryAccessScope{{Type: "repository", Name: "tenant-b/secret", Actions: []string{"pull", "push"}}}
 	if got := ClampRegistryScopesToTenant("tenant-a", requested); len(got) != 0 {
 		t.Fatalf("ClampRegistryScopesToTenant(tenant-a, tenant-b scope) = %#v, want empty", got)

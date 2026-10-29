@@ -4,12 +4,7 @@ import * as React from 'react';
 
 import { ChooseLocalRepoPath } from '../../../wailsjs/go/main/App';
 
-// DirectoriesField lists the directories the orchestrator operates in itself.
-// They belong to no environment: no tenant, no pod, no cluster, no runtime
-// version or image, and no role — none of those describe a path the orchestrator
-// simply works in. Choosing one IS the whole interaction, which is why they are
-// not rows in the environments list above: there is no environment to register
-// and nothing to wire.
+// DirectoriesField lists directories the orchestrator works in that belong to no environment.
 export function DirectoriesField({
   directories,
   disabled,

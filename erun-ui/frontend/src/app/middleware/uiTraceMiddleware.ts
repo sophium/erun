@@ -2,9 +2,7 @@ import type { Middleware } from '@reduxjs/toolkit';
 
 import { recordUITraceEntry } from '../uiTraceBuffer';
 
-// uiTraceMiddleware feeds the Diagnostics console's "UI trace" tab. The
-// per-action slice comparison stays shallow because it runs on the hot
-// dispatch path.
+// Shallow comparison: this runs on the hot dispatch path.
 export const uiTraceMiddleware: Middleware = (storeApi) => (next) => (action) => {
   const before = storeApi.getState() as Record<string, unknown>;
   const result = next(action);

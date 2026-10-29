@@ -1,6 +1,4 @@
-// The generated Wails model types exitCode as a plain number because Go's
-// *int maps to one, but the wire value is null for every job without an
-// outcome. This is the shape the helpers actually receive.
+// The generated Wails model types exitCode as number, but the wire sends null for jobs without an outcome.
 export interface JobView {
   id: string;
   name: string;
@@ -15,9 +13,7 @@ export interface JobView {
   progress?: { activity?: string; lastMessage?: string; turns: number; toolsRun: number };
 }
 
-// How a job's outcome reads to an operator. A job that is gone without an
-// outcome is its own case: reporting it as success would be a lie, and
-// reporting it as failure would blame work that may well have finished.
+// A job gone without an outcome is neither success nor failure.
 export type JobOutcome =
   | 'running'
   | 'succeeded'
@@ -34,12 +30,7 @@ export function jobOutcome(job: JobView): JobOutcome {
   if (job.state === 'unknown') {
     return 'unknown';
   }
-  // These two are terminal without being verdicts, and the recorded exit code
-  // cannot speak for them: the process that exited cleanly is not the work. An
-  // abandoned job left processes running in its own group, and a gate-incomplete
-  // one ended while a job it started had not reached a verdict. Both are tested
-  // before the exit code arms below, which is what used to render an abandoned
-  // job's clean exit as Succeeded.
+  // Abandoned and gate-incomplete are terminal but not verdicts; their clean exit code does not speak for the work.
   if (job.state === 'abandoned') {
     return 'abandoned';
   }
@@ -52,8 +43,7 @@ export function jobOutcome(job: JobView): JobOutcome {
   if (job.exitCode === 0) {
     return 'succeeded';
   }
-  // The supervisor records -1 when the work was terminated by a signal, which
-  // is what a cancel produces -- distinct from work that ran and failed.
+  // -1 means terminated by a signal, which is what a cancel produces.
   return job.exitCode === -1 ? 'signalled' : 'failed';
 }
 
@@ -66,9 +56,6 @@ export function jobOutcomeLabel(job: JobView): string {
     case 'signalled':
       return 'Cancelled';
     case 'abandoned':
-      // The parenthetical carries the state's whole meaning: work this job
-      // started is still running in the pod and nothing will report on it
-      // again. Without it the row reads as a closed-out outcome.
       return 'Abandoned (work still running)';
     case 'gate-incomplete':
       return 'Gate incomplete (no verdict)';
@@ -79,8 +66,6 @@ export function jobOutcomeLabel(job: JobView): string {
   }
 }
 
-// A duration, not a formatted instant: what the operator wants to know about a
-// job is how long it has been going or how long it took.
 export function jobDurationLabel(job: JobView, nowUnix: number): string {
   if (!job.startedAtUnix) {
     return '';
@@ -114,10 +99,7 @@ function agentToolLabel(tool: string | undefined): string {
   return 'Agent';
 }
 
-// An agent job's argv is always the same tool invocation carrying the whole
-// prompt as an argument, so it is never shown -- the operator-readable answer
-// is what the agent is doing (its current activity, or its last reported
-// message), falling back to naming the tool when neither has arrived yet.
+// An agent job's argv carries the whole prompt, so show its activity instead.
 function agentJobDetailLine(job: JobView): string {
   if (job.progress?.activity) {
     return job.progress.activity;
@@ -128,7 +110,6 @@ function agentJobDetailLine(job: JobView): string {
   return `${agentToolLabel(job.agentTool)} agent`;
 }
 
-// What the row shows as the job's own description.
 export function jobDetailLine(job: JobView): string {
   if (job.kind === 'agent') {
     return agentJobDetailLine(job);

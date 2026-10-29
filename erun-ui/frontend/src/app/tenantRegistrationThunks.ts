@@ -1,9 +1,3 @@
-// tenantRegistrationThunks drives the Registration tab: creating a cloud
-// context, previewing hosted-environment provisioning, and registering /
-// deploying / stopping / deleting a hosted environment. Split out of
-// tenantDialogThunks.ts (mirroring tenantPlatformConnectThunks.ts's split)
-// to keep that file under eslint's 500-line cap.
-
 import type { UIPlatformContextOutcome, UIPlatformEnvironmentOutcome } from '@/types';
 
 import { tenantApi } from './api/tenantApi';
@@ -18,10 +12,7 @@ import {
   type RegistrationState,
 } from './tenantRegistrationState';
 
-// updateRegistrationDraft patches any subset of the Registration tab's form
-// drafts. Kept in Redux (not local component state) so switching to another
-// dashboard tab and back never loses an in-progress value (Nielsen #3),
-// matching connectApiUrlDraft/enrollUsernameDraft's existing precedent.
+// updateRegistrationDraft lives in Redux so drafts survive tab switches.
 export const updateRegistrationDraft =
   (values: Partial<RegistrationState>): AppThunk =>
   (dispatch, getState) => {
@@ -46,10 +37,6 @@ function patchEnvAction(
   );
 }
 
-// createPlatformContext registers a cloud context, or — with preview set —
-// only resolves its bootstrap plan (rule #3: a register action is preceded
-// by a preview, not skipped past). A quota/placement conflict renders as
-// createContextConflict, a recoverable state, never createContextError.
 export const createPlatformContext =
   (preview: boolean): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {
@@ -120,11 +107,8 @@ function handleCreateContextOutcome(
   dispatch(showNotification('success', `Created cloud context ${outcome.context?.name ?? ''}.`));
 }
 
-// environmentInputFromDraft builds the one field set Preview and Register
-// both submit, so the plan an operator previews can never diverge from what
-// register then does: adopt forbids contextId/runtimeVersion, matching the
-// platform's own adopt validation, so it never sends fields the current
-// draft's mode does not use.
+// environmentInputFromDraft is shared by Preview and Register so the previewed
+// plan matches the registration; adopt omits contextId/runtimeVersion.
 function environmentInputFromDraft(
   tenant: string,
   draft: RegistrationState,
@@ -148,11 +132,6 @@ function environmentInputFromDraft(
   };
 }
 
-// previewPlatformEnvironment resolves the full ordered plan (quota,
-// placement, namespace, register, deploy — or, for an adopt draft, the
-// no-deploy adopt plan) for the drafted environment without creating
-// anything — always a preview, shown before the register action that
-// follows it, over the exact fields register would submit.
 export const previewPlatformEnvironment =
   (): AppThunk<Promise<void>> => async (dispatch, getState) => {
     const tenant = getState().tenantDashboard.tenant;
@@ -181,11 +160,6 @@ export const previewPlatformEnvironment =
     }
   };
 
-// registerPlatformEnvironment registers a hosted environment, or — for an
-// adopt draft — records one that already exists without deploying
-// anything. A quota-cap refusal renders as envRegisterConflict, the
-// recoverable state (5): the operator's next action is deleting or stopping
-// another environment, not retrying blindly.
 export const registerPlatformEnvironment =
   (): AppThunk<Promise<void>> => async (dispatch, getState) => {
     const tenant = getState().tenantDashboard.tenant;
@@ -249,11 +223,7 @@ function handleRegisterOutcome(dispatch: AppDispatch, outcome: UIPlatformEnviron
   );
 }
 
-// prefillEnvironmentFromLocal loads the register-on-the-row affordance's
-// draft: the desktop already knows a local environment's name, type and
-// kubernetes context (RegistrationEnvironmentsSection's local-environments
-// list), so putting it on the platform starts from those values instead of
-// a blank form, in adopt mode with nothing to deploy.
+// prefillEnvironmentFromLocal seeds an adopt-mode draft from a local environment.
 export const prefillEnvironmentFromLocal =
   (local: { name: string; type?: string; kubernetesContext?: string }): AppThunk =>
   (dispatch) => {
@@ -291,11 +261,8 @@ function environmentActionSuccessMessage(
   }
 }
 
-// handleEnvironmentActionOutcome is Deploy/Stop/Delete's shared outcome
-// classification: "conflict" (a quota cap, or another deploy/delete already
-// in flight) and "unavailable" (no deploy executor configured) render
-// inline on the row as recoverable states, never as raw errors — mirroring
-// the console's DeployOutcome/feedbackRole pattern.
+// handleEnvironmentActionOutcome renders conflict/unavailable inline on the row
+// as recoverable states, not errors.
 async function handleEnvironmentActionOutcome(
   dispatch: AppDispatch,
   getState: () => RootState,
@@ -378,9 +345,7 @@ export const stopPlatformEnvironment =
     }
   };
 
-// deletePlatformEnvironment performs the actual delete — call it only after
-// confirmDeletePlatformEnvironment's confirmation step, the same cancel-
-// before-commitment boundary every other destructive dashboard action gets.
+// deletePlatformEnvironment runs only after confirmDeletePlatformEnvironment.
 export const deletePlatformEnvironment =
   (environmentId: string): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {
@@ -409,9 +374,6 @@ export const deletePlatformEnvironment =
     }
   };
 
-// confirmDeletePlatformEnvironment/cancelDeleteConfirmation back the
-// cancel-before-commitment step every other destructive dashboard action
-// gets (root AGENTS.md Design-Language Decision Record).
 export const confirmDeletePlatformEnvironment =
   (environmentId: string): AppThunk =>
   (dispatch) => {

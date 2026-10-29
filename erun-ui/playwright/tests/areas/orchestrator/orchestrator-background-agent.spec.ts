@@ -8,20 +8,10 @@ import {
   seedClaudeAgent,
 } from '../../../fixtures/seedRoot.js';
 
-// A persisted orchestrator runs as a Claude Code background agent named after
-// its orchestrator id, and the desktop's terminal only attaches to it, so the
-// agent -- not the desktop -- owns the conversation a `/clear` or a desktop
-// restart used to strand. The Go side owns every decision about the agent
-// (erun-ui/orchestrator_background_agent_test.go: the exact-name lookup, the
-// recreate on changed launch arguments, the post-clear reopen); what only the
-// rendered app can show is that opening the row lands on an agent named after
-// it, that Stop keeps that agent, and that an ambiguity the desktop must not
-// guess at reaches the operator with its remedy. The harness's claude stub
-// stands in for the background service (claudeAgentsPath in
-// fixtures/seedRoot.ts), so no real agent ever starts.
+// The Go side owns the agent lifecycle; this covers only what the rendered app
+// shows. The claude stub stands in for the background service.
 
-// The stub's agents file is shared by every spec in a worker, so a case that
-// stages agents of its own leaves the file as it found it.
+// The stub's agents file is shared across specs in a worker.
 function restoreAgentsFile(snapshot: string | undefined): void {
   if (snapshot === undefined) {
     fs.rmSync(claudeAgentsPath(), { force: true });
@@ -57,10 +47,8 @@ test.describe('an orchestrator runs as a background agent named after it', () =>
     await expect(app.sidebar.orchestratorStatusDot(SEED_ORCHESTRATOR, 'stopped')).toBeVisible();
     await expect.poll(() => named().map((kept) => kept.running)).toEqual([false]);
 
-    // Opening it again reuses that agent rather than making another. Only its
-    // identity is asserted: the harness's deterministic shell runs no command
-    // in the pane (resolveLocalShellCommand), so the stub never sees the
-    // `claude attach` that would mark the agent running again.
+    // Only identity is asserted: the harness shell runs no command in the pane, so
+    // the stub never sees the `claude attach`.
     await app.sidebar.openOrchestratorSession(SEED_ORCHESTRATOR);
     await expect(app.sidebar.orchestratorStatusDot(SEED_ORCHESTRATOR, 'running')).toBeVisible();
     await expect.poll(() => named().map((kept) => kept.id)).toEqual([agent?.id]);

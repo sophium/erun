@@ -7,16 +7,10 @@ import type { AppThunk } from './store';
 import { requireController } from './thunkExtra';
 import { selectionKey } from './versionSuggestions';
 
-// envRestoreThunks own the recovery path where a stopped cloud context
-// returns to Running after its env's AI/ERun tabs were already dropped.
-// Nothing re-creates those tabs on that transition, so without an
-// explicit restore they stay gone for the rest of the env's life. The
-// titlebar Play success path already covers the normal case; this
-// handles the alternate route where start errored but the instance
-// reached Running anyway.
+// Restores an env's default tabs when its stopped cloud context reaches Running
+// by a route other than the titlebar Play success path.
 
-// Safe to dispatch from the status poll on every tick: it no-ops once
-// the selected env already has its default tabs back.
+// Safe on every status poll tick: a no-op once the tabs are back.
 export const restoreEnvTabsAfterContextRunning =
   (selection: UISelection): AppThunk<Promise<void>> =>
   async (dispatch, getState, extra) => {
@@ -44,10 +38,7 @@ function isSameSelection(current: UISelection | null, target: UISelection): bool
   return current.tenant === target.tenant && current.environment === target.environment;
 }
 
-// hostEnv narrows what "all" means: a host environment has no pod, so only its
-// Local tab is ever created for it, and requiring the ERun and AI tabs would
-// make this guard never hold -- the restore would re-run on every status poll,
-// which is exactly what it exists to avoid.
+// A host env only ever has a Local tab, or this guard would never hold.
 function hasAllDefaultTabs(tabs: { kind: string }[], hostEnv: boolean): boolean {
   if (hostEnv) {
     return tabs.some((tab) => tab.kind === 'local');

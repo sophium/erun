@@ -16,11 +16,8 @@ export function ActivityQueueLauncher({
 }): React.ReactElement {
   const { entries } = useActivityQueue();
   const activeCount = entries.filter((entry) => entry.status === 'running').length;
-  // Radix's own "restore focus to whatever was focused before open" can't be
-  // trusted here: the trigger sits inside a Tooltip, whose own pointer/focus
-  // handling can leave document.activeElement on the trigger's ancestor by
-  // the time the dialog's FocusScope captures it. Hand the button down
-  // explicitly so the drawer can always return focus to it on close.
+  // Radix focus restore is unreliable inside a Tooltip, so the drawer is handed
+  // the trigger to return focus to.
   const launcherRef = React.useRef<HTMLButtonElement>(null);
   return (
     <>

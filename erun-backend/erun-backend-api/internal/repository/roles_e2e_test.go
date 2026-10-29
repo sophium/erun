@@ -16,10 +16,6 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-// Role assignment writes real transaction-local RLS role switches and reads
-// role_permissions through the same matcher Authorize enforces with, so it is
-// exercised against a real migrated PostgreSQL rather than a fake that agrees
-// with itself.
 func rolesDatabase(t *testing.T) (*sql.DB, string) {
 	t.Helper()
 	databaseURL := testpg.URL(t)
@@ -43,10 +39,6 @@ func rolesContext(tenantID, userID string) context.Context {
 	})
 }
 
-// TestRoleRepositoryCreateGrantAndListRoundTrip proves the whole assignment
-// path end to end: a role narrowed to one path can be created, granted to a
-// user, and read back both from the tenant's role list and from that user's
-// own roles.
 func TestRoleRepositoryCreateGrantAndListRoundTrip(t *testing.T) {
 	db, tenantID := rolesDatabase(t)
 	txs := NewTxManager(db, DialectPostgres)
@@ -78,8 +70,6 @@ func TestRoleRepositoryCreateGrantAndListRoundTrip(t *testing.T) {
 	}
 }
 
-// assertRoleListedWithPermission asserts roleID appears in roles with exactly
-// one permission matching the given exact method/path.
 func assertRoleListedWithPermission(t *testing.T, roles []model.Role, roleID, method, path string) {
 	t.Helper()
 	for _, r := range roles {
@@ -94,10 +84,6 @@ func assertRoleListedWithPermission(t *testing.T, roles []model.Role, roleID, me
 	t.Fatal("expected the created role in the tenant's role list")
 }
 
-// TestRoleRepositoryCustomRoleIsPermittedItsOwnPathAndRefusedEveryOther is the
-// permit-and-refuse property the feature exists to enable: a role narrowed to
-// one exact method/path must let a caller through to that path and refuse
-// every other path, checked against the real authorizer.
 func TestRoleRepositoryCustomRoleIsPermittedItsOwnPathAndRefusedEveryOther(t *testing.T) {
 	db, tenantID := rolesDatabase(t)
 	txs := NewTxManager(db, DialectPostgres)
@@ -131,10 +117,6 @@ func TestRoleRepositoryCustomRoleIsPermittedItsOwnPathAndRefusedEveryOther(t *te
 	}
 }
 
-// TestRoleRepositoryExistingReadAllWriteAllUserIsUnaffected proves the
-// assignment layer is purely additive: a user holding the predefined
-// ReadAll+WriteAll roles (the bootstrap shape) keeps exactly that access after
-// this feature is exercised alongside it.
 func TestRoleRepositoryExistingReadAllWriteAllUserIsUnaffected(t *testing.T) {
 	db, tenantID := rolesDatabase(t)
 	txs := NewTxManager(db, DialectPostgres)
@@ -159,9 +141,6 @@ func TestRoleRepositoryExistingReadAllWriteAllUserIsUnaffected(t *testing.T) {
 	}
 }
 
-// TestRoleRepositoryRevokeRefusesLastGrantCapableRole is the lockout guard
-// the feature must make impossible: revoking the tenant's only role that can
-// grant roles is refused, and the assignment is left exactly as it was.
 func TestRoleRepositoryRevokeRefusesLastGrantCapableRole(t *testing.T) {
 	db, tenantID := rolesDatabase(t)
 	txs := NewTxManager(db, DialectPostgres)
@@ -191,9 +170,6 @@ func TestRoleRepositoryRevokeRefusesLastGrantCapableRole(t *testing.T) {
 	}
 }
 
-// TestRoleRepositoryRevokeSucceedsWhenAnotherGrantCapableUserRemains is the
-// other side of the same guard: revoking is fine as long as the tenant is not
-// left with zero grant-capable users.
 func TestRoleRepositoryRevokeSucceedsWhenAnotherGrantCapableUserRemains(t *testing.T) {
 	db, tenantID := rolesDatabase(t)
 	txs := NewTxManager(db, DialectPostgres)
@@ -216,21 +192,12 @@ func TestRoleRepositoryRevokeSucceedsWhenAnotherGrantCapableUserRemains(t *testi
 	}
 }
 
-// TestRoleRepositoryRevokeGuardCountsOnlyTheTargetTenant is the guard's
-// cross-tenant half. erun_operations bypasses RLS, so before the tenant filter
-// went in, both of Revoke's statements saw the whole platform: the delete would
-// remove a matching (user_id, role_id) row in whatever tenant it lived in, and
-// the lockout guard would pass as long as *some other* tenant still had a
-// grant-capable user. An operations caller could therefore take the last admin
-// role off a tenant and brick it — the exact state this guard exists to make
-// impossible, silently not held for the only caller who can reach across
-// tenants.
+// erun_operations bypasses RLS, so Revoke must filter by the target tenant.
 func TestRoleRepositoryRevokeGuardCountsOnlyTheTargetTenant(t *testing.T) {
 	db, tenantTarget := rolesDatabase(t)
 	txs := NewTxManager(db, DialectPostgres)
 	roles := &RoleRepository{txs: txs}
 
-	// The target tenant's sole grant-capable user.
 	soleAdmin := seedPermissionsUser(t, db, tenantTarget, "sole-admin")
 	grantRole(t, db, tenantTarget, soleAdmin, "WriteAll", []seededPermission{
 		{methodPattern: "^(POST|PUT|PATCH|DELETE)$", pathPattern: "^/.*$"},
@@ -240,8 +207,7 @@ func TestRoleRepositoryRevokeGuardCountsOnlyTheTargetTenant(t *testing.T) {
 		`SELECT role_id FROM roles WHERE tenant_id = $1 AND name = 'WriteAll'`, tenantTarget,
 	).Scan(&writeAllRoleID), "look up the target tenant's WriteAll role id")
 
-	// A second, unrelated tenant that also has one. This is the decoy the
-	// unfiltered guard counted.
+	// A decoy tenant with its own grant-capable user.
 	var tenantOther string
 	mustNoErr(t, db.QueryRow(
 		`INSERT INTO tenants (name, type) VALUES ($1, 'COMPANY') RETURNING tenant_id`,
@@ -281,9 +247,6 @@ func TestRoleRepositoryRevokeGuardCountsOnlyTheTargetTenant(t *testing.T) {
 	}
 }
 
-// TestRoleRepositoryRevokeFromOperationsUndoesACrossTenantGrant closes the loop
-// on the grant: whatever an operations caller can do to another tenant's roles,
-// it must be able to undo, or the recovery path creates its own dead end.
 func TestRoleRepositoryRevokeFromOperationsUndoesACrossTenantGrant(t *testing.T) {
 	db, tenantTarget := rolesDatabase(t)
 	txs := NewTxManager(db, DialectPostgres)
@@ -291,8 +254,6 @@ func TestRoleRepositoryRevokeFromOperationsUndoesACrossTenantGrant(t *testing.T)
 	adminTarget := seedPermissionsUser(t, db, tenantTarget, "admin-target")
 	member := seedPermissionsUser(t, db, tenantTarget, "member")
 
-	// The target tenant keeps a grant-capable user of its own, so the lockout
-	// guard has no reason to refuse the revoke below.
 	grantRole(t, db, tenantTarget, adminTarget, "WriteAll", []seededPermission{
 		{methodPattern: "^(POST|PUT|PATCH|DELETE)$", pathPattern: "^/.*$"},
 	})
@@ -327,10 +288,6 @@ func TestRoleRepositoryRevokeFromOperationsUndoesACrossTenantGrant(t *testing.T)
 	}
 }
 
-// TestRoleRepositoryGrantRejectsCrossTenantRole proves RLS, not application
-// code, is what stops a role from another tenant being granted: the role_id
-// is invisible to this tenant's transaction, so the insert's foreign key
-// fails and Grant reports it as not found.
 func TestRoleRepositoryGrantRejectsCrossTenantRole(t *testing.T) {
 	db, tenantA := rolesDatabase(t)
 	txs := NewTxManager(db, DialectPostgres)
@@ -357,11 +314,6 @@ func TestRoleRepositoryGrantRejectsCrossTenantRole(t *testing.T) {
 	}
 }
 
-// TestRoleRepositoryGrantFromOperationsFilesUnderTargetTenant is the recovery
-// path an operations caller uses when a tenant's only grant-capable user cannot
-// authenticate. erun_operations bypasses RLS, so without the explicit tenant
-// the row's tenant_id default would file the grant under the operations tenant
-// and the target tenant would still see nothing.
 func TestRoleRepositoryGrantFromOperationsFilesUnderTargetTenant(t *testing.T) {
 	db, tenantTarget := rolesDatabase(t)
 	txs := NewTxManager(db, DialectPostgres)
@@ -394,8 +346,6 @@ func TestRoleRepositoryGrantFromOperationsFilesUnderTargetTenant(t *testing.T) {
 		t.Fatalf("grant filed under tenant %q, want the target tenant %q", grant.TenantID, tenantTarget)
 	}
 
-	// And the target tenant itself can now see it, which is the whole point:
-	// a grant filed under operations would be invisible here.
 	assigned, err := roles.ForUser(rolesContext(tenantTarget, adminTarget), member)
 	mustNoErr(t, err, "list the member's roles as the target tenant")
 	found := false
@@ -442,18 +392,7 @@ func TestRoleRepositoryGrantRejectsDuplicateAssignment(t *testing.T) {
 	}
 }
 
-// TestRoleReconciliationRemovesAGrantNoLongerInTheDerivedSet reproduces the
-// gap that makes a route reclassified OUT of TenantUserClass keep its grant:
-// ensureNarrowerRolesExist only ever INSERTed ON CONFLICT DO NOTHING, and
-// nothing under internal/ ever ran a DELETE FROM role_permissions, so the
-// reseed re-inserted the current set while the stale row stayed. The
-// narrowing a reclassification is supposed to apply therefore never reached a
-// tenant that had already been seeded, which is every tenant that exists.
-//
-// The stale grant is inserted by hand rather than by reclassifying a real
-// route, because the production set is a compile-time map: what is under test
-// is reconciliation against the set as it stands, not the contents of any
-// particular revision of that map.
+// The stale grant is inserted by hand; the production set is a compile-time map.
 func TestRoleReconciliationRemovesAGrantNoLongerInTheDerivedSet(t *testing.T) {
 	db, tenantID := rolesDatabase(t)
 	txs := NewTxManager(db, DialectPostgres)
@@ -461,7 +400,7 @@ func TestRoleReconciliationRemovesAGrantNoLongerInTheDerivedSet(t *testing.T) {
 	admin := seedPermissionsUser(t, db, tenantID, "admin")
 	ctx := rolesContext(tenantID, admin)
 
-	// The first read is what creates TenantUser and seeds its grants.
+	// The first read creates TenantUser and seeds its grants.
 	if _, err := roles.List(ctx); err != nil {
 		t.Fatalf("seed narrower roles: %v", err)
 	}
@@ -471,9 +410,7 @@ func TestRoleReconciliationRemovesAGrantNoLongerInTheDerivedSet(t *testing.T) {
 		`SELECT role_id FROM roles WHERE tenant_id = $1 AND name = $2`, tenantID, tenantUserRoleName,
 	).Scan(&userRoleID), "find TenantUser role")
 
-	// DELETE /v1/tenants is OperationsOnly: never part of TenantUser's derived
-	// set, so a row granting it is exactly what a reclassification out of
-	// TenantUserClass leaves behind.
+	// DELETE /v1/tenants is never in TenantUser's derived set.
 	mustNoErr(t, func() error {
 		_, err := db.Exec(
 			`INSERT INTO role_permissions (tenant_id, role_id, api_method, api_path) VALUES ($1, $2, 'DELETE', '/v1/tenants')`,
@@ -495,8 +432,7 @@ func TestRoleReconciliationRemovesAGrantNoLongerInTheDerivedSet(t *testing.T) {
 		t.Fatalf("a grant outside TenantUser's derived set survived reconciliation: %d row(s) left", stale)
 	}
 
-	// Reconciliation must narrow, not empty: the routes TenantUserClass really
-	// grants still have to be there afterwards.
+	// Reconciliation must narrow, not empty.
 	var granted int
 	mustNoErr(t, db.QueryRow(
 		`SELECT count(*) FROM role_permissions WHERE tenant_id = $1 AND role_id = $2`, tenantID, userRoleID,
@@ -506,17 +442,7 @@ func TestRoleReconciliationRemovesAGrantNoLongerInTheDerivedSet(t *testing.T) {
 	}
 }
 
-// TestRoleReconciliationRemovesAPatternGrantTheDerivedSetCannotName is the
-// same narrowing proof one form over. An exact grant outside TenantUser's
-// derived set is removed by the (api_method, api_path) pair comparison; a
-// pattern grant stores both of those as NULL
-// (role_permissions_exact_or_pattern_check), so that comparison evaluates to
-// NULL rather than TRUE and the row survived reconciliation untouched. The
-// derived set is exact-only, so no pattern row can ever be one of its
-// members, and a seeded role that keeps one holds a grant the model does not
-// name — the same "the narrowing silently failed to apply" state this
-// reconciliation exists to prevent, reached through the other permission
-// form.
+// A pattern row's NULL method/path defeats a bare NOT IN comparison.
 func TestRoleReconciliationRemovesAPatternGrantTheDerivedSetCannotName(t *testing.T) {
 	db, tenantID := rolesDatabase(t)
 	txs := NewTxManager(db, DialectPostgres)
@@ -533,9 +459,6 @@ func TestRoleReconciliationRemovesAPatternGrantTheDerivedSetCannotName(t *testin
 		`SELECT role_id FROM roles WHERE tenant_id = $1 AND name = $2`, tenantID, tenantUserRoleName,
 	).Scan(&userRoleID), "find TenantUser role")
 
-	// A pattern row is the one shape the derived exact set can never name, so
-	// this is what a seeded role holding a grant outside the model looks like
-	// once it is written in the pattern form.
 	mustNoErr(t, func() error {
 		_, err := db.Exec(
 			`INSERT INTO role_permissions (tenant_id, role_id, api_method_pattern, api_path_pattern) VALUES ($1, $2, '.*', '^/v1/.*$')`,
@@ -544,8 +467,6 @@ func TestRoleReconciliationRemovesAPatternGrantTheDerivedSetCannotName(t *testin
 		return err
 	}(), "seed a pattern grant outside the derived set")
 
-	// The row has to be really there before reconciliation, or a pass below
-	// would only be proving the insert failed.
 	var seeded int
 	mustNoErr(t, db.QueryRow(
 		`SELECT count(*) FROM role_permissions WHERE tenant_id = $1 AND role_id = $2 AND api_method IS NULL`,
@@ -568,7 +489,6 @@ func TestRoleReconciliationRemovesAPatternGrantTheDerivedSetCannotName(t *testin
 		t.Fatalf("a pattern grant outside TenantUser's derived set survived reconciliation: %d row(s) left", stale)
 	}
 
-	// As in the exact-form case, reconciliation must narrow rather than empty.
 	var granted int
 	mustNoErr(t, db.QueryRow(
 		`SELECT count(*) FROM role_permissions WHERE tenant_id = $1 AND role_id = $2`, tenantID, userRoleID,
@@ -578,13 +498,6 @@ func TestRoleReconciliationRemovesAPatternGrantTheDerivedSetCannotName(t *testin
 	}
 }
 
-// TestSeededTenantAgentGrantsAreTheDerivedSubsetOfTenantUser pins the machine
-// role's contract at the database end: the role ensureNarrowerRolesExist
-// creates really carries TenantAgent's derived exact-route set -- no more, no
-// less -- and that set is a strict subset of TenantUser's. That containment is
-// the property the membership-set model exists to express; a single-valued
-// class per route could only ever have made the machine role a peer of
-// TenantUser, or narrowed TenantUser for every tenant already holding it.
 func TestSeededTenantAgentGrantsAreTheDerivedSubsetOfTenantUser(t *testing.T) {
 	db, tenantID := rolesDatabase(t)
 	txs := NewTxManager(db, DialectPostgres)
@@ -619,9 +532,7 @@ func TestSeededTenantAgentGrantsAreTheDerivedSubsetOfTenantUser(t *testing.T) {
 	if len(agentGrants) != len(routeroles.TenantAgentPermissions()) {
 		t.Errorf("TenantAgent holds %d grants, want the derived set's %d", len(agentGrants), len(routeroles.TenantAgentPermissions()))
 	}
-	// A tenant-wide build-history read is TenantUser's and deliberately not
-	// the machine role's: the containment has to be strict, or the two roles
-	// would be the same role under two names.
+	// The containment must be strict.
 	if agentGrants["GET /v1/builds"] {
 		t.Error("TenantAgent holds GET /v1/builds -- the machine role is meant to be strictly narrower than TenantUser")
 	}
@@ -630,7 +541,6 @@ func TestSeededTenantAgentGrantsAreTheDerivedSubsetOfTenantUser(t *testing.T) {
 	}
 }
 
-// rolePermissionPairs reads one role's exact grants as a "METHOD path" set.
 func rolePermissionPairs(t *testing.T, db *sql.DB, tenantID, roleID string) map[string]bool {
 	t.Helper()
 	rows, err := db.Query(

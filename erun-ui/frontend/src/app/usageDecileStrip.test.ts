@@ -4,19 +4,11 @@ import { test } from 'vitest';
 
 import { DECILE_COUNT, decileFillCount, decileIsAlert } from './usageDecileStrip';
 
-// The encoding contract the strip renders from. Two properties here are the
-// reason the module exists rather than an inline expression in the component:
-// a non-zero reading must never render as an empty strip, and a zero must. If
-// both of those collapse into "no filled segments", the card is back to being
-// unreadable at a glance, which is the whole point of the strip.
-
 test('a zero reading fills nothing', () => {
   assert.equal(decileFillCount(0), 0);
 });
 
 test('a non-zero reading always fills at least one segment', () => {
-  // The floor case the encoding must not round away: 0.1% CPU is busy-but-idle,
-  // and a strip that renders it identically to 0% is the defect.
   for (const percent of [0.1, 0.2, 0.4, 2.6, 9.9]) {
     assert.equal(decileFillCount(percent), 1, `${String(percent)}% should fill one segment`);
   }

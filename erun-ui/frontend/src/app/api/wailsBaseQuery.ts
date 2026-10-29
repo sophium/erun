@@ -6,9 +6,8 @@ export interface WailsQueryError {
   message: string;
 }
 
-// NoValue stands in for `void` in generic positions, which
-// @typescript-eslint/no-invalid-void-type forbids; the ReturnType wrapper
-// captures the one place the rule permits `void` so the alias itself is legal.
+// NoValue stands in for `void`, which no-invalid-void-type forbids in generic
+// positions; ReturnType is the one place the rule permits it.
 type _VoidReturning = () => void;
 export type NoValue = ReturnType<_VoidReturning>;
 
@@ -25,8 +24,7 @@ export function wailsQueryFn<Arg, Result>(call: WailsQueryFn<Arg, Result>) {
   };
 }
 
-// No shared HTTP transport exists: every endpoint supplies its own queryFn
-// wrapping a Wails Go binding, so this base query is only a fallback guard.
+// Every endpoint supplies its own queryFn; this is only a fallback guard.
 export const wailsBaseQuery: BaseQueryFn<void, unknown, WailsQueryError> = (): Promise<{
   error: WailsQueryError;
 }> =>

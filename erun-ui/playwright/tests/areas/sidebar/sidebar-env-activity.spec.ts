@@ -2,26 +2,10 @@ import type { Locator, Page } from '@playwright/test';
 
 import { expect, test } from '../../../fixtures/erunApp.js';
 
-// An environment can be under continuous heavy use with nothing rendered for it:
-// work inside the pod produced no desktop signal, and an env opened from the CLI
-// had no tabs here, so its row stayed blank either way. These specs lock the two
-// halves of the fix — a row that reports busy (and with what), and a row that is
-// visible because the environment is reachable rather than because the desktop
-// opened it.
-//
-// Neither state can be staged headless: reachability needs a real port-forward
-// and a live MCP edge, and busy needs a pod doing work. So the specs drive the
-// same env-activity Wails event the Go poller emits. The observation itself is
-// owned by erun-ui/environment_activity_test.go (markers → busy + detail) and
-// erun-common's lease tests (what makes an env report busy at all); the
-// derivation these specs exercise is owned by
-// erun-ui/frontend/src/components/app/Sidebar.helpers.test.ts.
-//
-// The backend's own sweep runs on a timer against these inert envs and reports
-// them unreachable, which legitimately clears a simulated state. Every
-// assertion is therefore re-driven until it converges, bounded by the calling
-// test's own deadline rather than a second cap the step picked for itself —
-// a genuinely broken row never converges and the step still fails.
+// A row must report busy, and be visible when the env is reachable even if the desktop didn't open
+// it.
+// Neither state is stageable headless, so specs drive the env-activity event; the backend sweep can
+// clear it, so assertions re-drive until they converge.
 
 test.describe('sidebar env activity', () => {
   test('a reachable env shows a status light even though the desktop never opened it', async ({
@@ -39,8 +23,7 @@ test.describe('sidebar env activity', () => {
       { tenant, environment, reachable: true, observed: true, busy: false },
       async () => {
         await expect(dot).toHaveAttribute('data-env-state', 'running', { timeout: 1_000 });
-        // Not opened here means there is nothing to close, so the indicator is a
-        // passive light rather than a control that would do nothing.
+        // Not opened here, so the dot is a passive light, not a close control.
         await expect(dot).toHaveAttribute('data-env-opened', 'false', { timeout: 1_000 });
         await expect(dot).toHaveAccessibleName(
           new RegExp(`^${tenant} / ${environment} is running and in use elsewhere`),
@@ -49,7 +32,6 @@ test.describe('sidebar env activity', () => {
       },
     );
 
-    // And it goes back to blank when the environment stops answering.
     await emitEnvActivity(page, {
       tenant,
       environment,
@@ -65,18 +47,8 @@ test.describe('sidebar env activity', () => {
     page,
     seededEnv,
   }) => {
-    // The rarer shape. The environment's port-forward still holds its local
-    // port, so the desktop's reachability check keeps saying yes while nothing
-    // answers through it; the desktop re-established it, that did not help, and
-    // the only thing left is to say so. Rendered from reachable alone this is a
-    // green "in use elsewhere" light on an environment no client can talk to.
-    //
-    // The state needs a real port-forward with a dead far end, which the
-    // headless harness has no cluster to produce, so the spec drives the same
-    // env-activity event the Go sweep emits. The detection and the bounded
-    // repair behind the flag are owned by
-    // erun-ui/environment_forward_repair_test.go; the derivation is owned by
-    // erun-ui/frontend/src/components/app/Sidebar.helpers.test.ts.
+    // A port-forward that holds its port but answers nothing must not render as a green "in use
+    // elsewhere" light.
     const { tenant, environment } = seededEnv;
     const dot = app.sidebar.envOpenDot(tenant, environment);
     await driveEnvActivity(
@@ -91,7 +63,6 @@ test.describe('sidebar env activity', () => {
       },
     );
 
-    // And the hover card says it in prose, with the recovery attached.
     await driveEnvActivity(
       page,
       { tenant, environment, reachable: true, observed: false, outage: true, busy: false },
@@ -110,18 +81,8 @@ test.describe('sidebar env activity', () => {
     page,
     seededEnv,
   }) => {
-    // The ordinary shape, and the one with no other tell. A pod replacement
-    // makes kubectl exit, so the local port is free and every field except the
-    // diagnosis reads exactly like an environment nobody ever opened — which is
-    // how a row the operator had open went quiet instead of reporting an
-    // outage. Note reachable is false here: the row is carried by the outage
-    // alone, so a derivation that gated on reachable would render nothing.
-    //
-    // Same harness limitation as the sibling above: producing a real dropped
-    // forward needs a cluster, so the spec drives the env-activity event the Go
-    // sweep emits. The restart and its bound are owned by
-    // erun-ui/environment_forward_repair_test.go::TestDroppedForwardIsRestarted
-    // and ::TestUnrepairableForwardReportsInsteadOfLooping.
+    // A dropped forward frees the port, so reachable is false and the row is carried by the outage
+    // alone.
     const { tenant, environment } = seededEnv;
     const dot = app.sidebar.envOpenDot(tenant, environment);
     await driveEnvActivity(
@@ -156,8 +117,6 @@ test.describe('sidebar env activity', () => {
       );
     });
 
-    // The hover card is where the operator reads the same thing in prose, which
-    // is what tells them why auto-stop is being deferred.
     await driveEnvActivity(page, busy, async () => {
       await app.sidebar.hoverEnvironmentRow(tenant, environment);
       await expect(app.sidebar.envHoverCard(tenant, environment)).toContainText(
@@ -199,7 +158,7 @@ async function driveEnvActivity(
   }).toPass();
 }
 
-// Mirrors the env-activity event erun-ui/environment_activity.go emits per tick.
+// Mirrors the env-activity event erun-ui/internal/runtimeview/env_activity.go emits per tick.
 async function emitEnvActivity(page: Page, payload: EnvActivityEvent): Promise<void> {
   await page.evaluate((event) => {
     const runtime = (

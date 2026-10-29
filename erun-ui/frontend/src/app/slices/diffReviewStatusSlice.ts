@@ -3,10 +3,6 @@ import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 import type { UIDiffReviewStatus } from '@/types';
 
 // DiffReviewStatusSlot is one environment section's review-status chip state.
-// Keyed per environment like EnvDiffState (reviewSlice.ts): an orchestrator
-// session shows one chip per linked environment, each with its own branch
-// pair, so a single shared slot would let one environment's status bleed
-// into another's chip.
 export interface DiffReviewStatusSlot {
   loading: boolean;
   status: UIDiffReviewStatus;
@@ -59,9 +55,6 @@ const diffReviewStatusSlice = createSlice({
         error: action.payload.error,
       };
     },
-    // Drop sections for environments no longer in scope, mirroring
-    // reviewSlice's pruneEnvDiffs so a stale chip never survives switching
-    // from a two-env orchestrator to a single env tab.
     pruneDiffReviewStatuses(state, action: PayloadAction<string[]>) {
       const keep = new Set(action.payload);
       state.byEnv = Object.fromEntries(

@@ -6,7 +6,7 @@ import (
 	"regexp"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/uptrace/bun"
 )
 
@@ -41,17 +41,15 @@ func (a *PermissionAuthorizer) Authorize(ctx context.Context, method string, api
 	return err
 }
 
-// PermittedRoutes narrows candidates to the ones this caller may reach. It
-// reads the same rules through the same query as Authorize and decides each
-// candidate with the same matcher, so what a client renders from and what the
-// middleware enforces cannot drift.
-func (a *PermissionAuthorizer) PermittedRoutes(ctx context.Context, candidates []eruncommon.PlatformCapability) ([]eruncommon.PlatformCapability, error) {
+// PermittedRoutes narrows candidates to those the caller may reach, using the
+// same rules and matcher as Authorize so the two cannot drift.
+func (a *PermissionAuthorizer) PermittedRoutes(ctx context.Context, candidates []model.PlatformCapability) ([]model.PlatformCapability, error) {
 	securityContext, err := security.RequiredFromContext(ctx)
 	if err != nil {
 		return nil, ErrMissingSecurityContext
 	}
 
-	var permitted []eruncommon.PlatformCapability
+	var permitted []model.PlatformCapability
 	err = a.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		rules, err := userPermissionRules(ctx, tx, securityContext.ErunUserID)
 		if err != nil {
@@ -75,9 +73,7 @@ func (a *PermissionAuthorizer) PermittedRoutes(ctx context.Context, candidates [
 	return permitted, nil
 }
 
-// userPermissionRules reads every permission rule the user's roles carry. It is
-// the single query both the enforcement answer and the capability answer are
-// derived from.
+// userPermissionRules reads every permission rule the user's roles carry.
 func userPermissionRules(ctx context.Context, tx bun.Tx, erunUserID string) ([]permissionRule, error) {
 	var rules []permissionRule
 	if err := tx.NewRaw(`

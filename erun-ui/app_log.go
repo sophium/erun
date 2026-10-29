@@ -7,27 +7,17 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	activitysvc "github.com/sophium/erun/erun-ui/internal/activity"
 )
 
-// The desktop is normally launched via `open` (macOS) or the equivalent
-// detached launch on other platforms, which gives it no controlling terminal
-// -- its stderr goes nowhere. Every log.Printf in this module writes only to
-// the default logger's stderr output, so a partial-wiring skip logged that
-// way leaves no trace any later investigation can find. This gives
-// the default logger a second, durable destination: log.SetOutput is the one
-// place that has to change for every existing and future log.Printf call
-// site to survive.
+// The desktop is launched detached, so stderr goes nowhere; log.SetOutput also
+// writes every log.Printf to a durable file.
 
-// appLogFileName is the durable log every log.Printf call in this module ends
-// up writing to, beside the other per-install state under UserConfigDir()/ERun.
 const appLogFileName = "erun-app.log"
 
-// appLogMaxBytes bounds the log so a process that runs for weeks cannot grow
-// it without limit. Matches the cap erun-common's per-env trace log uses for
-// the same reason.
 const appLogMaxBytes = 5 * 1024 * 1024
 
-// appLogPath resolves the durable log file's path.
 func appLogPath() (string, error) {
 	configDir, err := os.UserConfigDir()
 	if err != nil {
@@ -36,10 +26,7 @@ func appLogPath() (string, error) {
 	return filepath.Join(configDir, "ERun", appLogFileName), nil
 }
 
-// boundedLogFile is an io.Writer over a size-capped file: once a write would
-// push it past maxBytes, the current file is rotated to a single ".1" backup
-// and a fresh one started, so the log never grows without bound across a
-// desktop process that can run for weeks.
+// boundedLogFile rotates to a single ".1" backup once a write would exceed maxBytes.
 type boundedLogFile struct {
 	mu       sync.Mutex
 	path     string
@@ -48,9 +35,7 @@ type boundedLogFile struct {
 	written  int64
 }
 
-// newBoundedLogFile opens path for append, creating its directory if needed,
-// and picks up the current size so rotation accounts for bytes a previous
-// process already wrote.
+// newBoundedLogFile opens path for append, counting bytes a previous process wrote.
 func newBoundedLogFile(path string, maxBytes int64) (*boundedLogFile, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
@@ -79,8 +64,7 @@ func (b *boundedLogFile) Write(p []byte) (int, error) {
 	return n, err
 }
 
-// rotate replaces the current file with a fresh one, keeping exactly one
-// backup -- the same one-backup-pair shape erun-common's env trace log uses.
+// rotate replaces the current file, keeping exactly one backup.
 func (b *boundedLogFile) rotate() error {
 	if err := b.file.Close(); err != nil {
 		return err
@@ -105,11 +89,8 @@ func (b *boundedLogFile) Close() error {
 	return b.file.Close()
 }
 
-// initDurableAppLog redirects the default logger so every log.Printf call in
-// this module writes to stderr AND the bounded durable log file. Best-effort:
-// if the file cannot be opened, the app still runs with stderr-only logging
-// rather than failing to start over a diagnostics nicety. The returned func
-// closes the file; call it on shutdown.
+// initDurableAppLog tees the default logger to the durable file, falling back to
+// stderr-only if it cannot be opened. The returned func closes the file.
 func initDurableAppLog() func() {
 	path, err := appLogPath()
 	if err != nil {
@@ -126,13 +107,9 @@ func initDurableAppLog() func() {
 	return func() { _ = file.Close() }
 }
 
-// appLogTailBytes bounds how much of the durable app log one Diagnostics
-// console read transfers, matching the env trace log's own cap.
 const appLogTailBytes = 64 * 1024
 
-// uiAppLog is the Diagnostics console's read model for the desktop's own
-// durable log: the natural evidence for an orchestrator or app-level fault,
-// neither of which has an env trace to fall back on.
+// uiAppLog is the Diagnostics console's view of the desktop's own log.
 type uiAppLog struct {
 	Available bool   `json:"available"`
 	Content   string `json:"content,omitempty"`
@@ -140,15 +117,14 @@ type uiAppLog struct {
 	Reason    string `json:"reason,omitempty"`
 }
 
-// LoadAppLog reads the tail of the desktop's own log for the Diagnostics
-// console's orchestrator and app contexts. Read-only, like LoadEnvTrace.
+// LoadAppLog reads the tail of the desktop's own log.
 func (a *App) LoadAppLog() (uiAppLog, error) {
 	path, err := appLogPath()
 	if err != nil {
 		return uiAppLog{}, err
 	}
 	result := uiAppLog{Path: path}
-	content, err := tailFile(path, appLogTailBytes)
+	content, err := activitysvc.TailFile(path, appLogTailBytes)
 	if err != nil {
 		if os.IsNotExist(err) {
 			result.Reason = "no log captured yet"

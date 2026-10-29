@@ -1,0 +1,7 @@
+# the orchestration entry points that pick between build, release and deploy
+# get their own package, so orchestration/ holds packages only.
+orchestration/execute orchestration/build_run.go
+orchestration/execute orchestration/build_empty_plan_test.go
+orchestration/execute orchestration/build_test_stage_test.go
+orchestration/execute orchestration/suite_main_test.go
+orchestration/build orchestration/*_test.go

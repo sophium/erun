@@ -1,7 +1,4 @@
-// Dark mode toggle for the console, using the same class-based `.dark`
-// mechanism erun-kit's theme.css ships (and erun-ui/frontend's token scale
-// already defines but has no toggle wired to yet) — so a future desktop
-// toggle would apply identically.
+// Class-based `.dark` toggle, the mechanism erun-kit's theme.css uses.
 
 export type ThemePreference = 'light' | 'dark';
 
@@ -13,9 +10,7 @@ function systemPrefersDark(): boolean {
     : false;
 }
 
-// initialTheme resolves a previously chosen preference before falling back to
-// the OS preference, so an operator's explicit choice survives a reload even
-// if their OS theme differs.
+// initialTheme prefers a stored choice over the OS preference.
 export function initialTheme(): ThemePreference {
   const stored = localStorage.getItem(STORAGE_KEY);
   if (stored === 'light' || stored === 'dark') {

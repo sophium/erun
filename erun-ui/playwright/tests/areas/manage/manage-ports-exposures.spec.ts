@@ -6,16 +6,8 @@ import { SEED_ENV_ALPHA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 import { expectFramesAllDistinct, holdResponse } from '../../../fixtures/visualFrames.js';
 import type { AppShell } from '../../../pages/index.js';
 
-// The Ports tab's public-exposure surface (issue #1351). The headless harness
-// has no real cluster and no project with a platform block (see
-// fixtures/seedRoot.ts's kubectl stub and AGENTS.md's "Isolated config root"
-// section), so:
-// - the "not applicable" state is exercised for real, against the seeded
-//   env's actual (unconfigured) project -- no stub needed;
-// - every other state (configured, populated, restricted, a genuine listing
-//   failure, in-flight create/remove) is staged by stubbing the three RPCs
-//   over /__erun_invoke, exactly as manage-environment-health.spec.ts and
-//   manage-delete-partial-failure.spec.ts already do for their own surfaces.
+// The harness has no cluster or platform block, so every state except "not
+// applicable" is staged by stubbing the RPCs.
 
 type RpcHandler = () => Record<string, unknown> | Promise<Record<string, unknown>>;
 
@@ -66,17 +58,7 @@ const PENDING_CERTIFICATE = {
   },
 };
 
-// ListEnvironmentServices powers the picker rendered inside the same form
-// (#1911) -- it shares UIExposureList's {configured, restricted, services}
-// shape by design, so NO_SERVICES doubles as its "nothing running" stub.
-// Every test below stubs it explicitly rather than falling through to the
-// real backend call: that fallthrough is exactly what let #1911 ship the
-// picker with these specs never actually exercising the paired read.
-// A round-trip failure, not a computed one. refreshManageExposures only ever
-// saw a pair rejection from a read whose RPC itself failed, so this stages the
-// bridge's { error } envelope rather than LOAD_FAILURE's computed
-// { configured, error } result: a computed failure resolves the promise, never
-// reaches the catch that blanked both panels, and so cannot reproduce #1934.
+// A round-trip failure: a computed { configured, error } never reaches the catch.
 const SERVICES_READ_FAILURE = { error: 'SERVICES_READ_FAILURE_MARKER' };
 
 const NO_SERVICES = { data: { configured: true, restricted: false, services: [] } };
@@ -88,22 +70,7 @@ const SERVICES_POPULATED = {
   },
 };
 
-// convergeOnPortsTab opens the Ports tab and settles the paired reads behind it
-// before anything inside is asserted on.
-//
-// Every assertion on this tab reads a value one of the two stubbed route
-// handlers owns, and `expect(...)` carries no timeout of its own: with no
-// explicit one it resolves to expect.timeout (playwright.config.ts sets 10s on
-// POSIX), which is independent of the 30s the test itself declared. A tab whose
-// read is merely slow under a loaded builder therefore reds the step with two
-// thirds of the test's own budget unspent -- the step is slow, not wrong.
-// `waitFor` is the idiom that defers to the test on its own (erun-ui/playwright/
-// AGENTS.md, "No flaky tests"), so the tab is waited to its resolved state here
-// and the assertions that follow read already-rendered DOM.
-//
-// `resolved` is the locator whose appearance means the ready state the test
-// cares about has rendered: the empty state, the populated row, the refusal, or
-// the failure -- whichever this test is about.
+// expect's 10s default is independent of the test's budget, so wait on the resolved state first.
 async function convergeOnPortsTab(app: AppShell, resolved: Locator): Promise<void> {
   await app.manageDialog.selectTab('Ports');
   await resolved.waitFor({ state: 'visible' });
@@ -115,8 +82,6 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
   }) => {
     await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
-    // Computed from the env's own project, not an RPC, but the tab still has to
-    // reach the state before the rest of the card is read.
     await convergeOnPortsTab(
       app,
       app.manageDialog.locator().getByText('Not available for this environment'),
@@ -128,8 +93,6 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     await expect(dialog.getByText('Nothing exposed yet')).toHaveCount(0);
     await expect(dialog.getByRole('button', { name: /Expose a service/ })).toHaveCount(0);
 
-    // The empty state must carry the action that resolves it, not just name
-    // the condition (root AGENTS.md "Smooth, Seamless, No Dead Ends").
     const docsLink = dialog.getByRole('button', { name: /View the platform: block reference/ });
     await expect(docsLink).toBeVisible();
 
@@ -138,8 +101,7 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     });
 
     const [popup] = await Promise.all([app.page.waitForEvent('popup'), docsLink.click()]);
-    // The browser normalizes a bare path to add a trailing slash before the
-    // fragment (mirrors sidebar-documentation-link.spec.ts's own '/' suffix).
+    // The browser adds a trailing slash before the fragment.
     await expect
       .poll(() => popup.url())
       .toBe('https://docs.erunpaas.com/reference/configuration/#platform-block');
@@ -164,8 +126,7 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
 
     await expect(dialog.getByText('Not available for this environment type')).toBeVisible();
     await expect(dialog.getByText(/no pod and no cluster/)).toBeVisible();
-    // Unlike the fixable "no platform block" case, there is nothing to fix
-    // here -- a host env can never be exposed, so no action is offered.
+    // A host env can never be exposed, so no action is offered.
     await expect(
       dialog.getByRole('button', { name: /View the platform: block reference/ }),
     ).toHaveCount(0);
@@ -226,8 +187,6 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     await dialog.screenshot({ path: artifactPath('test-results/1351-visual/ports-failed.png') });
 
     await retry.click();
-    // The retry's own listing is a second round trip through the stub, so the
-    // empty state it returns is waited to rather than raced on expect's clock.
     await dialog.getByText('Nothing exposed yet').waitFor({ state: 'visible' });
     expect(calls).toBe(2);
 
@@ -235,19 +194,8 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     await app.manageDialog.waitForClosed();
   });
 
-  // #1934's defect, in the only direction the DOM can show it. The two reads
-  // are paired, so a rejection from either used to land in
-  // refreshManageExposures' one catch and overwrite *both* panels with that
-  // error -- the exposure list included, discarding a listing that had already
-  // resolved. Every other case here stubs both reads to the same class of
-  // outcome (both succeed, or the failed one is the exposures read), so a list
-  // blanked by the picker's failure was indistinguishable from one that simply
-  // had nothing to show.
-  //
-  // The failure has to come from the services read specifically: when the
-  // *exposures* read fails, ExposuresBody returns its error state before
-  // reaching ExposeServiceForm, so no picker renders at all and the two states
-  // are observationally identical.
+  // Only a services-read failure renders the picker beside a resolved exposure list;
+  // it must not blank that list.
   test('a failed services read leaves the exposure list’s resolved addresses intact', async ({
     app,
     page,
@@ -258,22 +206,15 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     });
     await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
-    // The read that answered is this test's own subject, so the tab is waited to
-    // *its* resolution -- the address it returned -- rather than to the paired
-    // read that failed.
     await convergeOnPortsTab(
       app,
       app.manageDialog.locator().getByText('api.pw-alpha.services.test'),
     );
     const dialog = app.manageDialog.locator();
 
-    // The read that answered still renders what it answered ...
     await expect(dialog.getByText('api.pw-alpha.services.test')).toBeVisible();
-    // ... and is not wearing the failure of the read that did not.
     await expect(dialog.getByText("Couldn't load public addresses")).toHaveCount(0);
 
-    // The picker reports its own failure, so the form still names the way out
-    // rather than silently losing its options.
     const pickerFailure = dialog.getByText(/Could not read this environment's services/);
     await expect(pickerFailure).toBeVisible();
     await expect(pickerFailure).toContainText('SERVICES_READ_FAILURE_MARKER');
@@ -282,12 +223,7 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     await app.manageDialog.waitForClosed();
   });
 
-  // A certificate that has not issued yet is a distinct state from "exposed
-  // and working": the Ingress already carries a tls block -- cert-manager
-  // writes that before issuance completes -- so scheme alone would otherwise
-  // render this row identically to a service that is actually safe to open.
-  // Also exercises the manual refresh affordance a developer needs while
-  // waiting for the certificate to issue.
+  // cert-manager writes the tls block before issuance, so scheme alone can't tell pending from ready.
   test('a service exposed under a still-issuing certificate reads as pending, not ready', async ({
     app,
     page,
@@ -341,11 +277,7 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
       },
       ExposeEnvironmentService: async () => {
         exposeCalls++;
-        // A real expose round-trips DNS + an Ingress apply. Hold the response
-        // open until this spec has captured the in-flight frame below, rather
-        // than for a fixed interval: a sleep races the screenshot, and the
-        // capture that loses writes the settled render into the in-flight
-        // frame, making it byte-identical to ports-populated.png.
+        // Held until the in-flight frame is captured; a sleep would race the screenshot.
         await exposeGate.held;
         return {
           data: { service: 'api', hostname: 'api.pw-alpha.services.test', scheme: 'https' },
@@ -372,21 +304,14 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     await dialog.screenshot({
       path: artifactPath('test-results/1351-visual/ports-create-inflight.png'),
     });
-    // Only now let the stubbed call settle: the frame above is the evidence
-    // that the pending state renders, so it must be on disk before the
-    // response can reach the renderer.
     exposeGate.release();
 
-    // The expose round trip's own answer, once released -- so it is waited to
-    // rather than bounded by expect's 10s default.
     await dialog.getByText('api.pw-alpha.services.test').waitFor({ state: 'visible' });
     expect(exposeCalls).toBe(1);
     expect(listCalls).toBe(2);
 
     await dialog.screenshot({ path: artifactPath('test-results/1351-visual/ports-populated.png') });
-    // Every frame this test wrote must be a distinct file: a capture that
-    // settles early collapses into its settled sibling, and the bundle then
-    // documents a state the run never saw.
+    // A capture that settled early collapses into its settled sibling.
     await expectFramesAllDistinct([
       artifactPath('test-results/1351-visual/ports-empty-configured.png'),
       artifactPath('test-results/1351-visual/ports-create-inflight.png'),
@@ -403,10 +328,7 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     const copyReq = await clipboardWrite;
     expect(copyReq.postData() ?? '').toContain('https://api.pw-alpha.services.test');
 
-    // The hostname is a fake test domain with no real DNS, so stub it rather
-    // than let the popup hit the network and land on chrome-error:// --
-    // mirrors diagnostics-orchestrator-context.spec.ts's github.com stub for
-    // the same reason.
+    // Fake domain without DNS; stub it so the popup doesn't land on chrome-error://.
     await page
       .context()
       .route('https://api.pw-alpha.services.test/**', (route) =>
@@ -447,12 +369,6 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     await app.manageDialog.waitForClosed();
   });
 
-  // The picker (#1911) turns "type a Service name you already know" into
-  // "pick one of what's actually running", filling in the label (tenant
-  // prefix stripped) and the sole port, and threading the real Service name
-  // through as the Ingress backend rather than the <tenant>-<label>
-  // derivation -- see ManageDialogPortsServicePicker.tsx and
-  // exposeServicePickController.ts.
   test('picking a service fills the form and routes the expose call to its backend', async ({
     app,
     page,
@@ -475,8 +391,7 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     await picker.click();
     await page.getByRole('option', { name: /pw-web/ }).click();
 
-    // The tenant prefix ('pw-') is stripped for the label but kept for the
-    // backend Service name -- that split is the whole point of the picker.
+    // The tenant prefix is stripped for the label but kept for the backend Service name.
     await expect(dialog.locator('#expose-service-name')).toHaveValue('web');
     await expect(dialog.locator('#expose-port')).toHaveValue('8080');
 
@@ -509,9 +424,7 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
       },
       UnexposeEnvironment: async () => {
         unexposeCalls++;
-        // Same gate as the expose path: the removal round-trip a real cluster
-        // performs is held open until this spec has captured the in-flight
-        // frame, so the capture cannot land after the state has settled.
+        // Held until the in-flight frame is captured.
         await unexposeGate.held;
         return { data: { wildcardName: '*.pw-alpha.services.test' } };
       },
@@ -519,8 +432,6 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     });
     await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
-    // The populated listing is the ready state this test acts on: the remove
-    // control only exists once the exposures read has answered.
     await convergeOnPortsTab(
       app,
       app.manageDialog.locator().getByRole('button', { name: 'Remove public access' }),
@@ -531,7 +442,6 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     await expect(removeButton).toBeVisible();
     await removeButton.click();
 
-    // Step 1: a named warning, not an immediate delete.
     await expect(dialog.getByText(/removes the public address for every service/)).toBeVisible();
     const confirm = dialog.getByRole('button', { name: 'Confirm remove' });
     await expect(confirm).toBeVisible();
@@ -542,28 +452,20 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
       path: artifactPath('test-results/1351-visual/ports-remove-confirm.png'),
     });
 
-    // The negative names its effect rather than reusing the generic word: the
-    // dialog's own footer also renders a Cancel (opposite Save) that closes the
-    // dialog and discards unsaved edits, so two buttons reading "Cancel" a few
-    // pixels apart would do different things. Matches ManageDialogJobCancel's
-    // "Keep running".
+    // The dialog footer has its own Cancel, so this names its effect.
     const keepExposed = dialog.getByRole('button', { name: 'Keep exposed' });
     await expect(keepExposed).toBeVisible();
     await expect(dialog.getByRole('button', { name: 'Cancel', exact: true })).toBeVisible();
 
-    // Dismissing keeps every address and issues no write -- the behaviour the
-    // label now names.
     await keepExposed.click();
     await expect(dialog.getByRole('button', { name: 'Remove public access' })).toBeVisible();
     await expect(dialog.getByText('api.pw-alpha.services.test')).toBeVisible();
     expect(unexposeCalls).toBe(0);
 
-    // Re-open the confirm so the committing half of the flow below is unchanged.
     await removeButton.click();
     await expect(confirm).toBeVisible();
     await confirm.scrollIntoViewIfNeeded();
 
-    // Step 2: the separate explicit action that actually commits it.
     await confirm.click();
     await expect(dialog.getByRole('button', { name: 'Removing...' })).toBeVisible();
     await dialog.screenshot({
@@ -575,8 +477,6 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
       artifactPath('test-results/1351-visual/ports-remove-inflight.png'),
     ]);
 
-    // The removal's own refetch is a second listing, so the empty state it
-    // returns is waited to rather than raced on expect's clock.
     await dialog.getByText('Nothing exposed yet').waitFor({ state: 'visible' });
     expect(unexposeCalls).toBe(1);
     expect(listCalls).toBe(2);

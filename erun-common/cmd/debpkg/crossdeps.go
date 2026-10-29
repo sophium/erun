@@ -9,9 +9,7 @@ import (
 	"path/filepath"
 )
 
-// crossNoDocPath keeps the foreign architecture's documentation out: a
-// compressed man page that differs between two architectures' builds of one
-// package stops dpkg from installing them side by side.
+// crossNoDocPath excludes foreign docs: differing man pages block multiarch co-installation.
 const crossNoDocPath = "/etc/dpkg/dpkg.cfg.d/cross-nodoc"
 
 const crossNoDoc = "path-exclude=/usr/share/man/*\npath-exclude=/usr/share/doc/*\n"
@@ -34,8 +32,6 @@ func parseCrossDepsFlags(args []string) (string, []string, error) {
 	return arch, fs.Args(), nil
 }
 
-// crossDeps installs, for a foreign target, its C toolchain and each named
-// package built for that architecture. A native target needs neither.
 func (d debpkg) crossDeps(arch string, packages []string) error {
 	if arch == d.hostArch {
 		_, err := fmt.Fprintf(d.stdout, "native %s build: no cross toolchain needed\n", arch)

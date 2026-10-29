@@ -2,19 +2,9 @@ import { expect, test } from '@playwright/test';
 
 import { consoleRoot, missingCredentials, signIn } from './signIn';
 
-// A console session attaches to a live environment over its exposed MCP
-// edge: a real browser WebSocket at a different origin than the console,
-// over wss:// with the edge's real certificate, carrying the
-// subprotocol bearer token into a real dtach/PTY. The component tests only
-// ever exercise this against a mocked WebSocket.
-//
-// The environment is the deployment's own: one whose MCP edge is exposed and
-// that the e2e operator may attach to, named by the e2e_attach_environment
-// secret.
 const attachEnvironment = process.env.E2E_ATTACH_ENVIRONMENT ?? '';
 
-// One fixed session id, so repeated runs re-attach to the same dtach session
-// rather than leaving a new shell behind in the environment every time.
+// Fixed so repeated runs re-attach instead of leaving shells behind.
 const sessionId = 'erun-e2e-attach';
 
 function escapeRegExp(value: string): string {
@@ -39,20 +29,17 @@ test('an operator attaches to a live session over the exposed edge and drives a 
   await page.getByRole('combobox', { name: 'Environment' }).click();
   await page.getByRole('option', { name: attachEnvironment }).click();
 
-  // The attach form mints its own erun:attach token; any scope renders it.
   await page.getByRole('button', { name: 'Generate MCP token' }).click();
   await expect(
     page.getByText(new RegExp(`erun-mcp:[^/\\s]+/${escapeRegExp(attachEnvironment)}`)),
   ).toBeVisible();
 
-  // An exposed environment's edge hostname is discovered, not typed.
   await expect(page.getByLabel(/Environment edge hostname/)).not.toHaveValue('');
   await page.getByLabel(/Session id/).fill(sessionId);
   await page.getByRole('button', { name: 'Attach' }).click();
   await expect(page.getByRole('button', { name: 'Disconnect' })).toBeVisible();
 
-  // The shell evaluates the arithmetic, so the expected text appears only in
-  // the PTY's output, never in the echo of the line that was sent.
+  // Only the evaluated output, not the echoed input, contains the expected text.
   const run = Date.now().toString();
   await page.getByLabel('Send a line to the session').fill(`echo ATTACH_E2E_$((6*7))_${run}`);
   await page.getByRole('button', { name: 'Send' }).click();

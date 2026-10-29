@@ -11,23 +11,8 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/harnessexec"
 )
 
-// TestGeneratedPinHistoryDoesNotDirtyACleanCheckout is the reproduction for the
-// `-dirty` stamp on an untouched tree. erun-ui/build.sh and erun-cli/run.sh both
-// mark their build "-dirty" on any non-empty `git status --porcelain`, because a
-// build's stamp has to describe the artifact rather than the last commit — so a
-// generated file that is neither tracked nor ignored is indistinguishable there
-// from an uncommitted source change. `.erun/pin-history.json`, which a re-pin
-// writes beside the project config, was exactly that.
-//
-// The checkout is a temp directory seeded with this repo's real .gitignore
-// rather than the live one: the rule under test is the rule the repo ships, and
-// observing it by creating the generated file in the live tree would leave that
-// tree dirty when it passed and depend on run order when it failed.
-//
-// The second assertion is not symmetry for its own sake. The obvious wrong fix
-// is to ignore `.erun/` wholesale, which would take `.erun/config.yaml` with it —
-// that file is the per-project layer and has to stay trackable, or an onboarding
-// works on the one machine that wrote it and nowhere else.
+// TestGeneratedPinHistoryDoesNotDirtyACleanCheckout: build scripts stamp "-dirty" on any porcelain output,
+// so .erun/pin-history.json must be ignored while .erun/config.yaml stays trackable.
 func TestGeneratedPinHistoryDoesNotDirtyACleanCheckout(t *testing.T) {
 	t.Parallel()
 
@@ -43,13 +28,10 @@ func TestGeneratedPinHistoryDoesNotDirtyACleanCheckout(t *testing.T) {
 	mustWriteFile(t, filepath.Join(checkout, ".erun", "config.yaml"), "tenant: example\n")
 
 	mustGit(t, checkout, home, "init", "-q", "-b", "main")
-	// Repository-local, because the neutralized HOME above is what keeps this
-	// gate independent of the contributor's own git config.
 	mustGit(t, checkout, home, "config", "user.email", "test@example")
 	mustGit(t, checkout, home, "config", "user.name", "Test")
 
-	// Checked before the file is committed: git never reports a tracked path as
-	// ignored, so asking afterwards would pass even under a bare `.erun/` rule.
+	// Checked before committing: git never reports a tracked path as ignored.
 	if ignored, _ := git(t, checkout, home, "check-ignore", "-q", "--", ".erun/config.yaml"); ignored {
 		t.Fatalf("the repo's .gitignore excludes .erun/config.yaml: that file is the per-project layer " +
 			"(`paths.*`, `containerregistries`) and has to stay trackable, or the onboarding it carries works " +
@@ -59,7 +41,6 @@ func TestGeneratedPinHistoryDoesNotDirtyACleanCheckout(t *testing.T) {
 	mustGit(t, checkout, home, "add", "-A")
 	mustGit(t, checkout, home, "commit", "-q", "-m", "seed a clean tree carrying an onboarded project config")
 
-	// What a re-pin leaves behind on an otherwise untouched tree.
 	mustWriteFile(t, filepath.Join(checkout, ".erun", "pin-history.json"), "{\n  \"previous\": {}\n}\n")
 
 	_, status := git(t, checkout, home, "status", "--porcelain")
@@ -72,11 +53,7 @@ func TestGeneratedPinHistoryDoesNotDirtyACleanCheckout(t *testing.T) {
 	}
 }
 
-// git runs one git command in dir and returns whether it exited 0 along with its
-// combined output. The ambient git configuration is neutralized so that a
-// contributor's own ~/.gitconfig — a core.excludesFile, or
-// status.showUntrackedFiles=no — cannot make this gate pass for a reason the
-// repo's .gitignore did not cause.
+// git neutralizes the ambient git config so ~/.gitconfig cannot make the gate pass.
 func git(t testing.TB, dir, home string, args ...string) (bool, string) {
 	t.Helper()
 	cmd := harnessexec.Command("git", args...)
@@ -98,7 +75,6 @@ func git(t testing.TB, dir, home string, args ...string) (bool, string) {
 	return false, string(out)
 }
 
-// mustGit is git for the commands the scenario's own setup needs to succeed.
 func mustGit(t testing.TB, dir, home string, args ...string) {
 	t.Helper()
 	if ok, out := git(t, dir, home, args...); !ok {

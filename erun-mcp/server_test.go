@@ -8,117 +8,98 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 
-	"github.com/adrg/xdg"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-mcp/tools/shared/edgeauth"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 )
 
 type initInteractionStore struct{}
 
-func (initInteractionStore) LoadERunConfig() (eruncommon.ERunConfig, string, error) {
-	return eruncommon.ERunConfig{}, "", eruncommon.ErrNotInitialized
+func (initInteractionStore) LoadERunConfig() (configpkg.ERunConfig, string, error) {
+	return configpkg.ERunConfig{}, "", configpkg.ErrNotInitialized
 }
 
-func (initInteractionStore) SaveERunConfig(eruncommon.ERunConfig) error {
+func (initInteractionStore) SaveERunConfig(configpkg.ERunConfig) error {
 	return nil
 }
 
-func (initInteractionStore) ListTenantConfigs() ([]eruncommon.TenantConfig, error) {
+func (initInteractionStore) ListTenantConfigs() ([]model.TenantConfig, error) {
 	return nil, nil
 }
 
-func (initInteractionStore) LoadTenantConfig(string) (eruncommon.TenantConfig, string, error) {
-	return eruncommon.TenantConfig{}, "", eruncommon.ErrNotInitialized
+func (initInteractionStore) LoadTenantConfig(string) (model.TenantConfig, string, error) {
+	return model.TenantConfig{}, "", configpkg.ErrNotInitialized
 }
 
-func (initInteractionStore) SaveTenantConfig(eruncommon.TenantConfig) error {
+func (initInteractionStore) SaveTenantConfig(model.TenantConfig) error {
 	return nil
 }
 
-func (initInteractionStore) LoadEnvConfig(string, string) (eruncommon.EnvConfig, string, error) {
-	return eruncommon.EnvConfig{}, "", eruncommon.ErrNotInitialized
+func (initInteractionStore) LoadEnvConfig(string, string) (configpkg.EnvConfig, string, error) {
+	return configpkg.EnvConfig{}, "", configpkg.ErrNotInitialized
 }
 
-func (initInteractionStore) ListEnvConfigs(string) ([]eruncommon.EnvConfig, error) {
+func (initInteractionStore) ListEnvConfigs(string) ([]configpkg.EnvConfig, error) {
 	return nil, nil
 }
 
-func (initInteractionStore) SaveEnvConfig(string, eruncommon.EnvConfig) error {
+func (initInteractionStore) SaveEnvConfig(string, configpkg.EnvConfig) error {
 	return nil
 }
 
 type listToolStore struct {
 	initInteractionStore
-	toolConfig    eruncommon.ERunConfig
-	tenantConfigs map[string]eruncommon.TenantConfig
-	envConfigs    map[string]eruncommon.EnvConfig
-	envsByTenant  map[string][]eruncommon.EnvConfig
+	toolConfig    configpkg.ERunConfig
+	tenantConfigs map[string]model.TenantConfig
+	envConfigs    map[string]configpkg.EnvConfig
+	envsByTenant  map[string][]configpkg.EnvConfig
 }
 
-func (s listToolStore) LoadERunConfig() (eruncommon.ERunConfig, string, error) {
+func (s listToolStore) LoadERunConfig() (configpkg.ERunConfig, string, error) {
 	return s.toolConfig, "", nil
 }
 
-func (s listToolStore) LoadTenantConfig(tenant string) (eruncommon.TenantConfig, string, error) {
+func (s listToolStore) LoadTenantConfig(tenant string) (model.TenantConfig, string, error) {
 	config, ok := s.tenantConfigs[tenant]
 	if !ok {
-		return eruncommon.TenantConfig{}, "", eruncommon.ErrNotInitialized
+		return model.TenantConfig{}, "", configpkg.ErrNotInitialized
 	}
 	return config, "", nil
 }
 
-func (s listToolStore) ListTenantConfigs() ([]eruncommon.TenantConfig, error) {
-	tenants := make([]eruncommon.TenantConfig, 0, len(s.tenantConfigs))
+func (s listToolStore) ListTenantConfigs() ([]model.TenantConfig, error) {
+	tenants := make([]model.TenantConfig, 0, len(s.tenantConfigs))
 	for _, tenant := range s.tenantConfigs {
 		tenants = append(tenants, tenant)
 	}
 	return tenants, nil
 }
 
-func (s listToolStore) LoadEnvConfig(tenant, environment string) (eruncommon.EnvConfig, string, error) {
+func (s listToolStore) LoadEnvConfig(tenant, environment string) (configpkg.EnvConfig, string, error) {
 	config, ok := s.envConfigs[tenant+"/"+environment]
 	if !ok {
-		return eruncommon.EnvConfig{}, "", eruncommon.ErrNotInitialized
+		return configpkg.EnvConfig{}, "", configpkg.ErrNotInitialized
 	}
 	return config, "", nil
 }
 
-func (s listToolStore) SaveEnvConfig(tenant string, config eruncommon.EnvConfig) error {
+func (s listToolStore) SaveEnvConfig(tenant string, config configpkg.EnvConfig) error {
 	if s.envConfigs == nil {
-		s.envConfigs = make(map[string]eruncommon.EnvConfig)
+		s.envConfigs = make(map[string]configpkg.EnvConfig)
 	}
 	s.envConfigs[tenant+"/"+config.Name] = config
 	return nil
 }
 
-func (s listToolStore) ListEnvConfigs(tenant string) ([]eruncommon.EnvConfig, error) {
+func (s listToolStore) ListEnvConfigs(tenant string) ([]configpkg.EnvConfig, error) {
 	return s.envsByTenant[tenant], nil
-}
-
-func TestBuildVersionOutputDefaultsVersion(t *testing.T) {
-	got := buildVersionOutput(eruncommon.BuildInfo{})
-	if got.Version != "dev" || got.Commit != "" || got.Date != "" {
-		t.Fatalf("unexpected defaults: %+v", got)
-	}
-}
-
-func TestBuildVersionOutput(t *testing.T) {
-	got := buildVersionOutput(eruncommon.BuildInfo{
-		Version: "1.2.3",
-		Commit:  "abcdef",
-		Date:    "2024-01-01",
-	})
-	if got.Version != "1.2.3" || got.Commit != "abcdef" || got.Date != "2024-01-01" {
-		t.Fatalf("unexpected version output: %+v", got)
-	}
 }
 
 func TestNormalizeHTTPConfigDefaults(t *testing.T) {
@@ -144,18 +125,9 @@ func TestEndpointURL(t *testing.T) {
 	}
 }
 
-// wantRegisteredTools is this module's registered tool surface, asserted by
-// name in TestHTTPHandlerExposesVersionTool: a bare count cannot say which
-// tool appeared or vanished, and its failure message prints unreadable struct
-// pointers. Kept at package scope so the test function stays within funlen.
+// wantRegisteredTools is asserted by name so a failure says which tool changed.
 var wantRegisteredTools = []string{
-	// Sorted. The four exec_* names joined the surface with #1186's rename;
-	// diff/raw/write/commit remain as deprecated aliases for one release.
-	// job's five query verbs moved to exec_job_* (job_* remain as deprecated
-	// aliases for one release) and exec_agent joined the surface; job_start's
-	// capability split between exec_raw's wait:false mode and exec_agent, so
-	// it keeps a registered stub that fails, naming both, rather than
-	// disappearing outright.
+	// Sorted. Deprecated aliases and the job_start stub are part of the surface.
 	"activity_lease_list", "activity_lease_release", "activity_lease_take",
 	"ai_sessions",
 	"build", "build_profile", "cloud_clear_aws_credentials", "cloud_init_aws",
@@ -180,18 +152,15 @@ var wantRegisteredTools = []string{
 	"review_unresolve", "services", "terraform", "unexpose", "upgrade", "usage", "version", "whip", "write",
 }
 
-// connectTestMCPSession clears the ambient auth anchors (set when this test
-// runs inside an erun runtime pod, which would otherwise reject the
-// unauthenticated test client) and connects a client session to a freshly
-// built handler, so each caller gets a clean session without repeating the
-// setup and its own defer-cleanup.
-func connectTestMCPSession(t *testing.T, info eruncommon.BuildInfo, runtime RuntimeConfig) *mcp.ClientSession {
+// connectTestMCPSession clears ambient auth anchors, which inside a runtime pod
+// would reject the unauthenticated test client.
+func connectTestMCPSession(t *testing.T, info model.BuildInfo, runtime runtimecfg.RuntimeConfig) *mcp.ClientSession {
 	t.Helper()
-	for _, key := range []string{envMCPTrustedIssuers, envMCPTrustedIssuer, envMCPAudience, envTenant} {
+	for _, key := range []string{edgeauth.EnvMCPTrustedIssuers, edgeauth.EnvMCPTrustedIssuer, edgeauth.EnvMCPAudience, edgeauth.EnvTenant} {
 		t.Setenv(key, "")
 	}
 	cfg := HTTPConfig{Path: "/mcp"}
-	httpServer := httptest.NewServer(newHTTPHandler(info, cfg, runtime, nil))
+	httpServer := httptest.NewServer(newHTTPHandler(info, cfg, withStubRuntime(runtime), nil))
 	t.Cleanup(httpServer.Close)
 
 	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "v0.0.1"}, nil)
@@ -207,20 +176,16 @@ func connectTestMCPSession(t *testing.T, info eruncommon.BuildInfo, runtime Runt
 }
 
 func TestHTTPHandlerExposesVersionTool(t *testing.T) {
-	session := connectTestMCPSession(t, eruncommon.BuildInfo{
+	session := connectTestMCPSession(t, model.BuildInfo{
 		Version: "1.2.3",
 		Commit:  "abcdef",
 		Date:    "2024-01-01",
-	}, RuntimeConfig{})
+	}, runtimecfg.RuntimeConfig{})
 
 	tools, err := session.ListTools(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("ListTools failed: %v", err)
 	}
-	// The registered tool set is this module's public surface, so it is asserted
-	// by name against wantRegisteredTools: a bare count cannot say which tool
-	// appeared or vanished, and its failure message prints unreadable struct
-	// pointers.
 	gotTools := make([]string, 0, len(tools.Tools))
 	for _, tool := range tools.Tools {
 		gotTools = append(gotTools, tool.Name)
@@ -240,13 +205,10 @@ func TestHTTPHandlerExposesVersionTool(t *testing.T) {
 	}
 }
 
-// TestCallingARemovedToolNamesItsReplacement calls job_start over a real MCP
-// round trip: it is registered (TestHTTPHandlerExposesVersionTool's
-// wantRegisteredTools pins that) but has no working handler, so the call must
-// fail as a tool error naming its replacements, not as a protocol-level
-// "unknown tool" that names a problem and no action the caller can take.
+// job_start is a registered stub, so the call must fail as a tool error naming
+// its replacements, not as "unknown tool".
 func TestCallingARemovedToolNamesItsReplacement(t *testing.T) {
-	session := connectTestMCPSession(t, eruncommon.BuildInfo{}, RuntimeConfig{})
+	session := connectTestMCPSession(t, model.BuildInfo{}, runtimecfg.RuntimeConfig{})
 
 	removed, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name:      "job_start",
@@ -274,1061 +236,6 @@ func removedToolText(t *testing.T, result *mcp.CallToolResult) string {
 	return sb.String()
 }
 
-func TestCorsMiddlewareAnswersPreflightWithoutReachingTheWrappedHandler(t *testing.T) {
-	called := false
-	handler := corsMiddleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		called = true
-	}))
-	server := httptest.NewServer(handler)
-	defer server.Close()
-
-	req, err := http.NewRequest(http.MethodOptions, server.URL, nil)
-	if err != nil {
-		t.Fatalf("NewRequest failed: %v", err)
-	}
-	req.Header.Set("Origin", "https://console.example.com")
-	req.Header.Set("Access-Control-Request-Method", "POST")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("preflight status = %d, want 204", resp.StatusCode)
-	}
-	if called {
-		t.Fatalf("preflight must not reach the wrapped handler")
-	}
-	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "https://console.example.com" {
-		t.Fatalf("Access-Control-Allow-Origin = %q, want the reflected origin", got)
-	}
-	allowed := strings.ToLower(resp.Header.Get("Access-Control-Allow-Headers"))
-	for _, header := range []string{"authorization", "content-type", "mcp-session-id"} {
-		if !strings.Contains(allowed, header) {
-			t.Fatalf("Access-Control-Allow-Headers = %q, must permit %q", allowed, header)
-		}
-	}
-}
-
-// TestCorsMiddlewareExposesSessionIdOnRealRequest: fetch() hides response
-// headers from the caller's script unless the server lists them in
-// Access-Control-Expose-Headers, and the MCP handshake requires the client to
-// read Mcp-Session-Id off the initialize response.
-func TestCorsMiddlewareExposesSessionIdOnRealRequest(t *testing.T) {
-	handler := corsMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Mcp-Session-Id", "abc123")
-		w.WriteHeader(http.StatusOK)
-	}))
-	server := httptest.NewServer(handler)
-	defer server.Close()
-
-	req, err := http.NewRequest(http.MethodPost, server.URL, nil)
-	if err != nil {
-		t.Fatalf("NewRequest failed: %v", err)
-	}
-	req.Header.Set("Origin", "https://console.example.com")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "https://console.example.com" {
-		t.Fatalf("Access-Control-Allow-Origin = %q, want the reflected origin", got)
-	}
-	if got := resp.Header.Get("Access-Control-Expose-Headers"); !strings.Contains(got, "Mcp-Session-Id") {
-		t.Fatalf("Access-Control-Expose-Headers = %q, must list Mcp-Session-Id", got)
-	}
-}
-
-func TestCorsMiddlewareAddsNothingForNonBrowserCallers(t *testing.T) {
-	handler := corsMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	server := httptest.NewServer(handler)
-	defer server.Close()
-
-	resp, err := http.Post(server.URL, "application/json", nil) //nolint:noctx
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "" {
-		t.Fatalf("Access-Control-Allow-Origin = %q, want empty when the request carried no Origin header", got)
-	}
-}
-
-// TestNewHTTPHandlerAnswersPreflightEvenWhenAuthIsConfigured: a real preflight
-// never carries the Authorization header (that is the whole point of the
-// preflight), so CORS must sit outside auth or every cross-origin caller
-// would be rejected before its real request is ever sent. The real POST
-// behind it must still require the bearer token -- CORS widens who can reach
-// the server, never who is authorized.
-func TestNewHTTPHandlerAnswersPreflightEvenWhenAuthIsConfigured(t *testing.T) {
-	t.Setenv(envMCPTrustedIssuer, "file:///some/key.pub")
-	t.Setenv(envTenant, "acme")
-
-	cfg := HTTPConfig{Path: "/mcp"}
-	httpServer := httptest.NewServer(newHTTPHandler(eruncommon.BuildInfo{}, cfg, RuntimeConfig{}, nil))
-	defer httpServer.Close()
-
-	preflight, err := http.NewRequest(http.MethodOptions, httpServer.URL+cfg.Path, nil)
-	if err != nil {
-		t.Fatalf("NewRequest failed: %v", err)
-	}
-	preflight.Header.Set("Origin", "https://console.example.com")
-	resp, err := http.DefaultClient.Do(preflight)
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("preflight status = %d, want 204 even with auth configured", resp.StatusCode)
-	}
-
-	unauthenticated, err := http.NewRequest(http.MethodPost, httpServer.URL+cfg.Path, strings.NewReader("{}"))
-	if err != nil {
-		t.Fatalf("NewRequest failed: %v", err)
-	}
-	unauthenticated.Header.Set("Content-Type", "application/json")
-	postResp, err := http.DefaultClient.Do(unauthenticated)
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
-	defer func() { _ = postResp.Body.Close() }()
-	if postResp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("unauthenticated POST status = %d, want 401 (CORS must not weaken auth)", postResp.StatusCode)
-	}
-}
-
-func TestActivityHTTPMiddlewareSkipsRecordingForIdleProbe(t *testing.T) {
-	cacheDir := t.TempDir()
-	t.Setenv("XDG_CACHE_HOME", cacheDir)
-	xdg.Reload()
-
-	runtime := RuntimeConfig{Context: RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
-	handler := activityHTTPMiddleware(runtime, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	server := httptest.NewServer(handler)
-	defer server.Close()
-
-	req, err := http.NewRequest(http.MethodGet, server.URL, nil)
-	if err != nil {
-		t.Fatalf("NewRequest failed: %v", err)
-	}
-	req.Header.Set(eruncommon.MCPIdleProbeHeader, "true")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
-	_ = resp.Body.Close()
-
-	dir, err := eruncommon.EnvironmentActivityDir("tenant-a", "dev")
-	if err != nil {
-		t.Fatalf("EnvironmentActivityDir failed: %v", err)
-	}
-	for _, name := range []string{"mcp.json", "codex.json"} {
-		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
-			t.Fatalf("expected %s to be absent under probe header, stat err=%v", name, err)
-		}
-	}
-}
-
-func TestActivityHTTPMiddlewareRecordsWithoutIdleProbe(t *testing.T) {
-	cacheDir := t.TempDir()
-	t.Setenv("XDG_CACHE_HOME", cacheDir)
-	xdg.Reload()
-
-	runtime := RuntimeConfig{Context: RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
-	handler := activityHTTPMiddleware(runtime, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	server := httptest.NewServer(handler)
-	defer server.Close()
-
-	resp, err := http.Get(server.URL)
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
-	_ = resp.Body.Close()
-
-	dir, err := eruncommon.EnvironmentActivityDir("tenant-a", "dev")
-	if err != nil {
-		t.Fatalf("EnvironmentActivityDir failed: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "mcp.json")); err != nil {
-		t.Fatalf("expected mcp.json to exist without probe header: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "codex.json")); !os.IsNotExist(err) {
-		t.Fatalf("expected codex.json to be absent for non-codex user agent, stat err=%v", err)
-	}
-}
-
-func TestActivityHTTPMiddlewareRecordsCodexWhenUserAgentMatches(t *testing.T) {
-	cacheDir := t.TempDir()
-	t.Setenv("XDG_CACHE_HOME", cacheDir)
-	xdg.Reload()
-
-	runtime := RuntimeConfig{Context: RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
-	handler := activityHTTPMiddleware(runtime, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	server := httptest.NewServer(handler)
-	defer server.Close()
-
-	req, err := http.NewRequest(http.MethodGet, server.URL, nil)
-	if err != nil {
-		t.Fatalf("NewRequest failed: %v", err)
-	}
-	req.Header.Set("User-Agent", "codex-cli/0.1")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
-	_ = resp.Body.Close()
-
-	dir, err := eruncommon.EnvironmentActivityDir("tenant-a", "dev")
-	if err != nil {
-		t.Fatalf("EnvironmentActivityDir failed: %v", err)
-	}
-	for _, name := range []string{"mcp.json", "codex.json"} {
-		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
-			t.Fatalf("expected %s to exist for codex client: %v", name, err)
-		}
-	}
-}
-
-func TestCloudSetToolSetsEnvironmentAlias(t *testing.T) {
-	projectRoot := t.TempDir()
-	store := &listToolStore{
-		tenantConfigs: map[string]eruncommon.TenantConfig{
-			"frs": {Name: "frs", DefaultEnvironment: "dev"},
-		},
-		envConfigs: map[string]eruncommon.EnvConfig{
-			"frs/dev": {
-				Name:               "dev",
-				LocalRepoPath:      projectRoot,
-				KubernetesContext:  "cluster-dev",
-				CloudProviderAlias: "old-cloud",
-			},
-		},
-	}
-	handler := cloudSetTool(normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{Tenant: "frs", Environment: "dev"},
-		Store:   store,
-	}))
-
-	_, result, err := handler(context.Background(), nil, CloudSetInput{Alias: "team-cloud"})
-	if err != nil {
-		t.Fatalf("cloudSetTool failed: %v", err)
-	}
-	if result.Tenant != "frs" || result.Environment != "dev" || result.EnvConfig.CloudProviderAlias != "team-cloud" {
-		t.Fatalf("unexpected result: %+v", result)
-	}
-	if store.envConfigs["frs/dev"].CloudProviderAlias != "team-cloud" {
-		t.Fatalf("unexpected stored env: %+v", store.envConfigs["frs/dev"])
-	}
-}
-
-func TestDiffToolReturnsStructuredGitDiff(t *testing.T) {
-	projectRoot := t.TempDir()
-	runGitTestCommand(t, projectRoot, "init", "-b", "main")
-	runGitTestCommand(t, projectRoot, "config", "user.email", "codex@example.com")
-	runGitTestCommand(t, projectRoot, "config", "user.name", "Codex")
-	if err := os.WriteFile(filepath.Join(projectRoot, "app.txt"), []byte("old\nsame\n"), 0o644); err != nil {
-		t.Fatalf("write app.txt: %v", err)
-	}
-	runGitTestCommand(t, projectRoot, "add", ".")
-	runGitTestCommand(t, projectRoot, "commit", "-m", "initial")
-	if err := os.WriteFile(filepath.Join(projectRoot, "app.txt"), []byte("new\nsame\nadded\n"), 0o644); err != nil {
-		t.Fatalf("write app.txt: %v", err)
-	}
-
-	handler := diffTool(normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{RepoPath: projectRoot},
-	}))
-	_, output, err := handler(context.Background(), nil, DiffInput{})
-	if err != nil {
-		t.Fatalf("diffTool failed: %v", err)
-	}
-
-	assertStructuredDiffOutput(t, output, projectRoot)
-}
-
-func assertStructuredDiffOutput(t *testing.T, output eruncommon.DiffResult, projectRoot string) {
-	t.Helper()
-
-	if output.WorkingDirectory != projectRoot || output.RawDiff == "" {
-		t.Fatalf("unexpected output: %+v", output)
-	}
-	if output.Summary.FileCount != 1 || output.Summary.Additions != 2 || output.Summary.Deletions != 1 {
-		t.Fatalf("unexpected summary: %+v", output.Summary)
-	}
-	if len(output.Files) != 1 || output.Files[0].Path != "app.txt" {
-		t.Fatalf("unexpected files: %+v", output.Files)
-	}
-	if len(output.Tree) != 1 || output.Tree[0].Name != "app.txt" {
-		t.Fatalf("unexpected tree: %+v", output.Tree)
-	}
-}
-
-// dangerousExecContent carries the constructs a shell would reinterpret —
-// backticks, command substitution, embedded quotes, a trailing newline — so a
-// round trip through write/commit demonstrates the property that justifies
-// bypassing raw for these two operations: nothing here is ever shell-parsed.
-const dangerousExecContent = "line one\n`echo pwned` $(echo pwned) \"quoted\" 'quoted'\ntrailing\n\n"
-
-func TestWriteToolWritesContentByteIdenticallyAndRefusesOutsideRoot(t *testing.T) {
-	projectRoot := t.TempDir()
-
-	handler := writeTool(normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{RepoPath: projectRoot},
-	}))
-	_, output, err := handler(context.Background(), nil, WriteInput{Path: "config/values.yaml", Content: dangerousExecContent})
-	if err != nil {
-		t.Fatalf("writeTool failed: %v", err)
-	}
-	if output.Write == nil {
-		t.Fatalf("expected Write result, got %+v", output)
-	}
-	// Canonical, for the same reason exec_test.go compares canonical paths: on
-	// macOS t.TempDir() returns the TMPDIR spelling (/var/folders/...) while the
-	// tool reports the real one (/private/var/folders/...).
-	wantPath := filepath.Join(projectRoot, "config", "values.yaml")
-	if resolved, evalErr := filepath.EvalSymlinks(wantPath); evalErr == nil {
-		wantPath = resolved
-	}
-	if output.Write.Path != wantPath {
-		t.Fatalf("Path = %q, want %q", output.Write.Path, wantPath)
-	}
-	if output.Write.Bytes != int64(len(dangerousExecContent)) {
-		t.Fatalf("Bytes = %d, want %d", output.Write.Bytes, len(dangerousExecContent))
-	}
-	got, err := os.ReadFile(wantPath)
-	if err != nil {
-		t.Fatalf("read written file: %v", err)
-	}
-	if string(got) != dangerousExecContent {
-		t.Fatalf("written content = %q, want byte-identical %q", got, dangerousExecContent)
-	}
-
-	_, _, err = handler(context.Background(), nil, WriteInput{Path: "../escape.txt", Content: "x"})
-	if err == nil {
-		t.Fatalf("expected refusal for a path outside the repo root")
-	}
-	if _, statErr := os.Stat(filepath.Join(filepath.Dir(projectRoot), "escape.txt")); !os.IsNotExist(statErr) {
-		t.Fatalf("expected no file to land outside the repo root")
-	}
-}
-
-// TestWriteToolRefusesWriteThroughInTreeSymlink proves the write tool cannot
-// be pointed outside the repo root through a symlink planted inside it — a
-// lexical containment check alone does not follow symlinks, so this asserts
-// on the actual filesystem outcome, not just the handler's error, since the
-// whole defect is that a lexical check reports success incorrectly.
-func TestWriteToolRefusesWriteThroughInTreeSymlink(t *testing.T) {
-	projectRoot := t.TempDir()
-	outside := t.TempDir()
-	escapeTarget := filepath.Join(outside, "pwned.txt")
-	if err := os.Symlink(outside, filepath.Join(projectRoot, "escape")); err != nil {
-		t.Fatalf("symlink: %v", err)
-	}
-
-	handler := writeTool(normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{RepoPath: projectRoot},
-	}))
-	_, _, err := handler(context.Background(), nil, WriteInput{Path: "escape/pwned.txt", Content: "pwned"})
-	if err == nil {
-		t.Fatalf("expected refusal writing through a symlinked directory component")
-	}
-	if _, statErr := os.Stat(escapeTarget); !os.IsNotExist(statErr) {
-		t.Fatalf("expected no file to land outside the repo root through the symlink")
-	}
-}
-
-func TestCommitToolCommitsAndRefusesBranchMismatch(t *testing.T) {
-	projectRoot := t.TempDir()
-	runGitTestCommand(t, projectRoot, "init", "-b", "main")
-	runGitTestCommand(t, projectRoot, "config", "user.email", "codex@example.com")
-	runGitTestCommand(t, projectRoot, "config", "user.name", "Codex")
-	runGitTestCommand(t, projectRoot, "commit", "--allow-empty", "-m", "initial")
-	if err := os.WriteFile(filepath.Join(projectRoot, "app.txt"), []byte("new\n"), 0o644); err != nil {
-		t.Fatalf("write app.txt: %v", err)
-	}
-
-	handler := commitTool(normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{RepoPath: projectRoot},
-	}))
-
-	_, _, err := handler(context.Background(), nil, CommitInput{Branch: "not-main", Message: dangerousExecContent})
-	if err == nil {
-		t.Fatalf("expected refusal when the declared branch does not match the current branch")
-	}
-
-	_, output, err := handler(context.Background(), nil, CommitInput{Branch: "main", Message: dangerousExecContent})
-	if err != nil {
-		t.Fatalf("commitTool failed: %v", err)
-	}
-	assertCommitToolOutput(t, output, projectRoot)
-}
-
-func assertCommitToolOutput(t *testing.T, output JobEnvelopeOutput, projectRoot string) {
-	t.Helper()
-
-	if output.Commit == nil {
-		t.Fatalf("expected Commit result, got %+v", output)
-	}
-	if output.Commit.Branch != "main" || output.Commit.Commit == "" {
-		t.Fatalf("unexpected commit result: %+v", output.Commit)
-	}
-	if len(output.Commit.Files) != 1 || output.Commit.Files[0] != "app.txt" {
-		t.Fatalf("unexpected committed files: %+v", output.Commit.Files)
-	}
-
-	messageCmd := exec.Command("git", "log", "-1", "--format=%B")
-	messageCmd.Dir = projectRoot
-	messageOut, err := messageCmd.Output()
-	if err != nil {
-		t.Fatalf("read commit message: %v", err)
-	}
-	if !strings.Contains(string(messageOut), "`echo pwned` $(echo pwned) \"quoted\" 'quoted'") {
-		t.Fatalf("commit message lost dangerous content verbatim: %q", messageOut)
-	}
-}
-
-func gitStatusPorcelain(t *testing.T, dir string) string {
-	t.Helper()
-	cmd := exec.Command("git", "status", "--porcelain")
-	cmd.Dir = dir
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("git status: %v", err)
-	}
-	return string(out)
-}
-
-func mustWriteTestFile(t *testing.T, path, content string) {
-	t.Helper()
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatalf("write %s: %v", path, err)
-	}
-}
-
-// seedCommitToolScopedPathsRepo prepares the motivating scenario: the caller
-// wrote values.yaml and wants to commit only that, but the tree also carries
-// unrelated.txt from some other writer. Before path scoping existed, the tool
-// had no way to express "only these paths" at all, so `git add -A` would
-// have swept both in.
-func seedCommitToolScopedPathsRepo(t *testing.T) string {
-	t.Helper()
-	projectRoot := t.TempDir()
-	runGitTestCommand(t, projectRoot, "init", "-b", "main")
-	runGitTestCommand(t, projectRoot, "config", "user.email", "codex@example.com")
-	runGitTestCommand(t, projectRoot, "config", "user.name", "Codex")
-	runGitTestCommand(t, projectRoot, "commit", "--allow-empty", "-m", "initial")
-	mustWriteTestFile(t, filepath.Join(projectRoot, "values.yaml"), "typo: fixed\n")
-	mustWriteTestFile(t, filepath.Join(projectRoot, "unrelated.txt"), "someone else's in-flight work\n")
-	return projectRoot
-}
-
-func TestCommitToolScopedPathsRefusesUnrelatedDirtyFile(t *testing.T) {
-	projectRoot := seedCommitToolScopedPathsRepo(t)
-	handler := commitTool(normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{RepoPath: projectRoot},
-	}))
-
-	_, _, err := handler(context.Background(), nil, CommitInput{Branch: "main", Message: "fix the values typo", Paths: []string{"values.yaml"}})
-	if err == nil {
-		t.Fatalf("expected refusal when the tree has changes outside the declared paths")
-	}
-	if !strings.Contains(err.Error(), "unrelated.txt") {
-		t.Fatalf("expected the refusal to name the unrelated file, got: %v", err)
-	}
-	if strings.TrimSpace(gitStatusPorcelain(t, projectRoot)) == "" {
-		t.Fatalf("expected both files to remain uncommitted after refusal")
-	}
-}
-
-func TestCommitToolScopedPathsCommitsOnlyTheDeclaredFile(t *testing.T) {
-	projectRoot := seedCommitToolScopedPathsRepo(t)
-	if err := os.Remove(filepath.Join(projectRoot, "unrelated.txt")); err != nil {
-		t.Fatalf("remove unrelated.txt: %v", err)
-	}
-	handler := commitTool(normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{RepoPath: projectRoot},
-	}))
-
-	_, output, err := handler(context.Background(), nil, CommitInput{Branch: "main", Message: "fix the values typo", Paths: []string{"values.yaml"}})
-	if err != nil {
-		t.Fatalf("commitTool failed: %v", err)
-	}
-	if output.Commit == nil {
-		t.Fatalf("expected Commit result, got %+v", output)
-	}
-	if got := output.Commit.Files; len(got) != 1 || got[0] != "values.yaml" {
-		t.Fatalf("unexpected committed files: %+v", got)
-	}
-}
-
-// TestCommitToolRejectsBlankPathEntries proves a Paths list of only blank
-// strings is refused rather than silently degrading to the unscoped
-// "commit everything" behavior — the exact failure path scoping (#1155)
-// exists to prevent, reintroduced through a caller passing blanks instead of
-// omitting Paths entirely.
-func TestCommitToolRejectsBlankPathEntries(t *testing.T) {
-	projectRoot := seedCommitToolScopedPathsRepo(t)
-	handler := commitTool(normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{RepoPath: projectRoot},
-	}))
-
-	_, _, err := handler(context.Background(), nil, CommitInput{Branch: "main", Message: "fix the values typo", Paths: []string{"", ""}})
-	if err == nil {
-		t.Fatalf("expected refusal for a paths list of blank entries")
-	}
-	if strings.TrimSpace(gitStatusPorcelain(t, projectRoot)) == "" {
-		t.Fatalf("expected both files to remain uncommitted after refusal")
-	}
-}
-
-func TestListToolReturnsConfiguredTenantsAndEffectiveTarget(t *testing.T) {
-	projectRoot := t.TempDir()
-	handler := listTool(normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{
-			Tenant:      "tenant-a",
-			Environment: "dev",
-			RepoPath:    projectRoot,
-		},
-		Store: listToolStore{
-			toolConfig: eruncommon.ERunConfig{DefaultTenant: "tenant-a"},
-			tenantConfigs: map[string]eruncommon.TenantConfig{
-				"tenant-a": {
-					Name:               "tenant-a",
-					DefaultEnvironment: "dev",
-				},
-			},
-			envConfigs: map[string]eruncommon.EnvConfig{
-				"tenant-a/dev": {
-					Name:              "dev",
-					LocalRepoPath:     projectRoot,
-					KubernetesContext: "cluster-dev",
-				},
-			},
-			envsByTenant: map[string][]eruncommon.EnvConfig{
-				"tenant-a": {{
-					Name:              "dev",
-					LocalRepoPath:     projectRoot,
-					KubernetesContext: "cluster-dev",
-				}},
-			},
-		},
-	}))
-
-	_, output, err := handler(context.Background(), nil, ListInput{})
-	if err != nil {
-		t.Fatalf("listTool failed: %v", err)
-	}
-
-	assertListToolOutput(t, output)
-}
-
-func assertListToolOutput(t *testing.T, output ListToolResult) {
-	t.Helper()
-
-	if output.Defaults.Tenant != "tenant-a" || output.Defaults.Environment != "dev" {
-		t.Fatalf("unexpected defaults: %+v", output.Defaults)
-	}
-	if output.CurrentDirectory.Effective == nil {
-		t.Fatalf("expected effective target, got %+v", output.CurrentDirectory)
-	}
-	assertListEffectiveTarget(t, *output.CurrentDirectory.Effective)
-	if len(output.Tenants) != 1 || output.Tenants[0].Name != "tenant-a" {
-		t.Fatalf("unexpected tenants: %+v", output.Tenants)
-	}
-	if output.Tenants[0].Environments[0].LocalPorts.RangeEnd != 17099 {
-		t.Fatalf("unexpected environment local ports: %+v", output.Tenants[0].Environments[0].LocalPorts)
-	}
-}
-
-func assertListEffectiveTarget(t *testing.T, target eruncommon.ListEffectiveTargetResult) {
-	t.Helper()
-
-	if target.Tenant != "tenant-a" || target.Environment != "dev" {
-		t.Fatalf("unexpected effective target: %+v", target)
-	}
-	if target.LocalPorts.RangeStart != 17000 || target.LocalPorts.SSH != 17022 {
-		t.Fatalf("unexpected effective local ports: %+v", target.LocalPorts)
-	}
-}
-
-func TestReleaseToolPreview(t *testing.T) {
-	// Resolving the release plan checks whether each image's fingerprint tag
-	// already exists locally (DockerImageExists), even in preview -- a stub
-	// that exits non-zero is read as "not cached yet", the same outcome a real
-	// docker with no cached tag would report.
-	t.Setenv("ERUN_DOCKER_BIN", "false")
-	projectRoot := createReleaseRuntimeRepo(t, "develop")
-	if err := eruncommon.SaveProjectConfig(projectRoot, eruncommon.ProjectConfig{}); err != nil {
-		t.Fatalf("SaveProjectConfig failed: %v", err)
-	}
-
-	handler := releaseTool(normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{
-			RepoPath: projectRoot,
-		},
-	}))
-
-	_, output, err := handler(context.Background(), nil, ReleaseInput{Preview: true, Verbosity: 1})
-	if err != nil {
-		t.Fatalf("releaseTool failed: %v", err)
-	}
-
-	if output.Executed {
-		t.Fatalf("expected preview output, got %+v", output)
-	}
-	if output.Spec.Mode != eruncommon.ReleaseModeCandidate || output.Spec.Version == "" || len(output.Spec.Stages) == 0 {
-		t.Fatalf("unexpected release output: %+v", output)
-	}
-	if len(output.Spec.DockerImages) != 1 || output.Spec.DockerImages[0].Tag == "" {
-		t.Fatalf("unexpected docker images: %+v", output.Spec.DockerImages)
-	}
-}
-
-func createReleaseRuntimeRepo(t *testing.T, branch string) string {
-	t.Helper()
-
-	projectRoot := t.TempDir()
-	releaseRoot := filepath.Join(projectRoot, "erun-devops")
-	for _, dir := range []string{
-		filepath.Join(releaseRoot, "k8s", "api"),
-		filepath.Join(releaseRoot, "docker", "api"),
-		filepath.Join(releaseRoot, "docker", "base"),
-	} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatalf("mkdir %s: %v", dir, err)
-		}
-	}
-	if err := os.WriteFile(filepath.Join(releaseRoot, "VERSION"), []byte("1.4.2\n"), 0o644); err != nil {
-		t.Fatalf("write VERSION: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(releaseRoot, "k8s", "api", "Chart.yaml"), []byte("apiVersion: v2\nname: api\nversion: 0.1.0\nappVersion: 0.1.0\n"), 0o644); err != nil {
-		t.Fatalf("write Chart.yaml: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(releaseRoot, "docker", "api", "Dockerfile"), []byte("FROM alpine:3.22\n"), 0o644); err != nil {
-		t.Fatalf("write Dockerfile: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(releaseRoot, "docker", "base", "Dockerfile"), []byte("FROM alpine:3.22\n"), 0o644); err != nil {
-		t.Fatalf("write other Dockerfile: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(releaseRoot, "docker", "base", "VERSION"), []byte("9.9.9\n"), 0o644); err != nil {
-		t.Fatalf("write other VERSION: %v", err)
-	}
-
-	runGitTestCommand(t, projectRoot, "init", "-b", branch)
-	runGitTestCommand(t, projectRoot, "config", "user.email", "codex@example.com")
-	runGitTestCommand(t, projectRoot, "config", "user.name", "Codex")
-	runGitTestCommand(t, projectRoot, "add", ".")
-	runGitTestCommand(t, projectRoot, "commit", "-m", "initial")
-	return projectRoot
-}
-
-func runGitTestCommand(t *testing.T, dir string, args ...string) {
-	t.Helper()
-
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %v failed: %v\n%s", args, err, output)
-	}
-}
-
-func TestPushToolRejectsRepoRootWithoutComponent(t *testing.T) {
-	projectRoot := t.TempDir()
-	moduleRoot := filepath.Join(projectRoot, "tenant-a-devops")
-	componentDir := filepath.Join(moduleRoot, "docker", "tenant-a-devops")
-	if err := os.MkdirAll(componentDir, 0o755); err != nil {
-		t.Fatalf("mkdir component dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(componentDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
-		t.Fatalf("write Dockerfile: %v", err)
-	}
-
-	handler := pushTool(normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{
-			Environment: eruncommon.DefaultEnvironment,
-			RepoPath:    projectRoot,
-		},
-	}))
-
-	// Pass a version so the version-required gate passes and the test reaches
-	// the repo-root-without-component rejection it actually covers.
-	_, _, err := handler(context.Background(), nil, PushInput{Version: "1.0.0"})
-	if err == nil {
-		t.Fatal("expected missing Dockerfile error")
-	}
-	if err.Error() != "dockerfile not found in current directory" {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-// TestPushToolRequiresVersion locks the version-required gate: push is a pure
-// primitive that publishes a built version and never mints one, so the tool
-// must fail before any work when no version is supplied (erun-mcp/AGENTS.md).
-func TestPushToolRequiresVersion(t *testing.T) {
-	handler := pushTool(normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{
-			Environment: eruncommon.DefaultEnvironment,
-			RepoPath:    t.TempDir(),
-		},
-	}))
-
-	if _, _, err := handler(context.Background(), nil, PushInput{}); err != errMissingPushVersion {
-		t.Fatalf("expected errMissingPushVersion, got %v", err)
-	}
-}
-
-func TestBuildToolRunsProjectBuildScriptWhenPresent(t *testing.T) {
-	projectRoot := t.TempDir()
-	scriptDir := filepath.Join(projectRoot, "scripts", "build")
-	if err := os.MkdirAll(scriptDir, 0o755); err != nil {
-		t.Fatalf("mkdir script dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(scriptDir, "build.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatalf("write build.sh: %v", err)
-	}
-
-	var called bool
-	handler := buildTool(normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{
-			Environment: "dev",
-			RepoPath:    projectRoot,
-		},
-		BuildScriptRunner: func(dir, path string, env []string, stdin io.Reader, stdout, stderr io.Writer) error {
-			called = true
-			if dir != scriptDir || path != "./build.sh" {
-				t.Fatalf("unexpected build script call: dir=%q path=%q", dir, path)
-			}
-			if len(env) != 0 {
-				t.Fatalf("unexpected build script env: %+v", env)
-			}
-			return nil
-		},
-		BuildDockerImage: func(eruncommon.DockerBuildSpec, io.Writer, io.Writer) error {
-			t.Fatal("unexpected docker build")
-			return nil
-		},
-	}))
-
-	_, output, err := handler(context.Background(), nil, BuildInput{})
-	if err != nil {
-		t.Fatalf("buildTool failed: %v", err)
-	}
-	if !output.Executed {
-		t.Fatalf("expected execution output, got %+v", output)
-	}
-	if !called {
-		t.Fatal("expected build script runner to be called")
-	}
-}
-
-// newComponentBuildFixture writes a project with a root build.sh (so the
-// environment's build script is not disabled) plus one component docker
-// context, for TestBuildToolBuildsComponentWithMultiPlatformSpec.
-func newComponentBuildFixture(t *testing.T) string {
-	t.Helper()
-	projectRoot := t.TempDir()
-	if err := os.WriteFile(filepath.Join(projectRoot, "build.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatalf("write build.sh: %v", err)
-	}
-	componentDir := filepath.Join(projectRoot, "acme-devops", "docker", "web")
-	if err := os.MkdirAll(componentDir, 0o755); err != nil {
-		t.Fatalf("mkdir component dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(componentDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
-		t.Fatalf("write Dockerfile: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectRoot, "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write VERSION: %v", err)
-	}
-	return projectRoot
-}
-
-// TestBuildToolBuildsComponentWithMultiPlatformSpec locks erun#1248: a
-// component build on an environment whose build script is not disabled must
-// still resolve a real, buildable docker spec (matching what the no-component
-// path resolves via newDockerBuildSpec) rather than a spec with no platforms,
-// which builds and pushes nothing while still reporting success.
-func TestBuildToolBuildsComponentWithMultiPlatformSpec(t *testing.T) {
-	projectRoot := newComponentBuildFixture(t)
-
-	var captured *eruncommon.DockerBuildSpec
-	handler := buildTool(normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{
-			Environment: "dev",
-			RepoPath:    projectRoot,
-		},
-		BuildScriptRunner: func(dir, path string, env []string, stdin io.Reader, stdout, stderr io.Writer) error {
-			t.Fatal("unexpected build script call: --component must resolve the docker context directly")
-			return nil
-		},
-		BuildDockerImage: func(spec eruncommon.DockerBuildSpec, stdout, stderr io.Writer) error {
-			captured = &spec
-			return nil
-		},
-	}))
-
-	_, output, err := handler(context.Background(), nil, BuildInput{Component: "web", NoIncremental: true})
-	if err != nil {
-		t.Fatalf("buildTool failed: %v", err)
-	}
-	if !output.Executed {
-		t.Fatalf("expected execution output, got %+v", output)
-	}
-	if captured == nil {
-		t.Fatal("expected the docker image builder to be invoked")
-	}
-	wantPlatforms := []string{"linux/amd64", "linux/arm64"}
-	if !slices.Equal(captured.Platforms, wantPlatforms) {
-		t.Fatalf("resolved component build spec has the wrong platforms, so it builds nothing real: got %v want %v", captured.Platforms, wantPlatforms)
-	}
-	if captured.DockerfilePath == "" {
-		t.Fatalf("expected a resolved Dockerfile path, got %+v", captured)
-	}
-}
-
-// TestBuildToolSurfacesInvalidDockerContext locks that a misconfigured
-// paths.dockercontext fails the MCP build tool loudly for a component build,
-// rather than being swallowed — the erun-common resolver's error must propagate
-// through the MCP transport. The shared behaviour is gated by the erun-cli
-// integration suite, which never enters this MCP wrapper, so the propagation is
-// covered here in the owning module.
-func TestBuildToolSurfacesInvalidDockerContext(t *testing.T) {
-	projectRoot := t.TempDir()
-	componentDir := filepath.Join(projectRoot, "acme-devops", "docker", "web")
-	if err := os.MkdirAll(componentDir, 0o755); err != nil {
-		t.Fatalf("mkdir component dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(componentDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
-		t.Fatalf("write Dockerfile: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectRoot, "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write VERSION: %v", err)
-	}
-	erunDir := filepath.Join(projectRoot, ".erun")
-	if err := os.MkdirAll(erunDir, 0o755); err != nil {
-		t.Fatalf("mkdir .erun: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(erunDir, "config.yaml"), []byte("paths:\n  dockercontext: bogus\n"), 0o644); err != nil {
-		t.Fatalf("write project config: %v", err)
-	}
-
-	handler := buildTool(normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{
-			Environment: "dev",
-			RepoPath:    projectRoot,
-		},
-		BuildDockerImage: func(eruncommon.DockerBuildSpec, io.Writer, io.Writer) error {
-			t.Fatal("unexpected docker build: resolution must fail before execution")
-			return nil
-		},
-	}))
-
-	_, _, err := handler(context.Background(), nil, BuildInput{Component: "web", Preview: true})
-	if err == nil {
-		t.Fatal("expected an error for an invalid paths.dockercontext value")
-	}
-	want := `invalid docker context "bogus" (.erun/config.yaml paths.dockercontext): expected "repo-root" or "component"`
-	if err.Error() != want {
-		t.Fatalf("unexpected error:\n got: %v\nwant: %s", err, want)
-	}
-}
-
-func TestInitToolReturnsInteractionWhenSharedInitNeedsInput(t *testing.T) {
-	projectRoot := t.TempDir()
-
-	handler := initTool(normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{
-			Tenant:   "tenant-a",
-			RepoPath: projectRoot,
-		},
-		Store: initInteractionStore{},
-	}))
-
-	_, output, err := handler(context.Background(), nil, InitInput{})
-	if err != nil {
-		t.Fatalf("initTool failed: %v", err)
-	}
-	if output.Interaction == nil && output.Executed {
-		t.Fatalf("expected interaction output, got %+v", output)
-	}
-	if output.Interaction == nil {
-		t.Fatalf("expected interaction output, got %+v", output)
-	}
-	if output.Interaction.Type != eruncommon.BootstrapInitInteractionConfirmTenant {
-		t.Fatalf("unexpected interaction: %+v", output.Interaction)
-	}
-	if output.Executed {
-		t.Fatalf("expected non-executed interaction output, got %+v", output)
-	}
-}
-
-// stubKubectlAlwaysSucceeds points the ERUN_KUBECTL_BIN seam (eruncommon.Command)
-// at a script that exits 0 unconditionally, so eruncommon.RunHelmDeploy's own
-// namespace-ensure — which runs before the pre-rollout secret applies and is not
-// reachable through RuntimeConfig.EnsureKubernetesNamespace (see
-// eruncommon.WrapHelmChartDeployerWithNamespaceEnsure and
-// TestRunHelmDeployEnsuresTheNamespaceBeforeApplyingSecrets) — never shells out to
-// a real cluster. Without it, these tests depend on the host's kubeconfig
-// happening to have a context named "cluster-remote"/"cluster-dev", which no real
-// machine does.
-//
-// `get secret ... -o json` is answered as NotFound rather than the same bare
-// success every other invocation gets: eruncommon's image-pull-secret refresh
-// (deploy_image_pull_secret.go's existingImagePullSecretAuths) reads a named
-// Secret back before merging into it, and a bare `exit 0` with no stdout is not
-// valid JSON, so it failed to parse. NotFound is exactly what a first deploy
-// into a fresh namespace sees, and it is the shape every other image-pull-secret
-// test already uses (see imagePullSecretKubectlStub in erun-common).
-func stubKubectlAlwaysSucceeds(t *testing.T) {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "kubectl")
-	script := "#!/bin/sh\ncase \"$*\" in\n  *\"get secret\"*\"-o json\"*)\n    echo 'Error from server (NotFound): secrets not found' >&2\n    exit 1\n    ;;\n  *)\n    exit 0\n    ;;\nesac\n"
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-		t.Fatalf("write kubectl stub: %v", err)
-	}
-	t.Setenv("ERUN_KUBECTL_BIN", path)
-}
-
-// stubGHCRDockerCredential points DOCKER_CONFIG at a fixture carrying a fake
-// ghcr.io credential, so eruncommon.resolveOCIRegistryBasicAuth resolves one
-// deterministically for these tests regardless of what the host machine
-// actually has logged in -- without this, a remote init's runtime deploy
-// (which defaults the tenant's own image onto ghcr.io) would take its
-// pull-secret decision from whatever real ~/.docker/config.json this test
-// happens to run next to, and fall back to a live, network-dependent
-// anonymous-pullability probe on any host with no cached credential.
-func stubGHCRDockerCredential(t *testing.T) {
-	t.Helper()
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"auths":{"ghcr.io":{"auth":"dGVzdDp0b2tlbg=="}}}`), 0o600); err != nil {
-		t.Fatalf("write docker config fixture: %v", err)
-	}
-	t.Setenv("DOCKER_CONFIG", dir)
-}
-
-// fakeRemoteRepositoryStateRunner fakes RunRemoteCommand for a remote-init
-// flow that reaches the repository-state script, answering the #1201
-// registry-credential-check script (identified by its own content, since
-// every remote-exec call shares this one seam) with "credential configured"
-// so these tests keep exercising repository interaction rather than tripping
-// the new check.
-func fakeRemoteRepositoryStateRunner(repositoryStateStdout string) func(eruncommon.ShellLaunchParams, string) (eruncommon.RemoteCommandResult, error) {
-	return func(_ eruncommon.ShellLaunchParams, script string) (eruncommon.RemoteCommandResult, error) {
-		if strings.Contains(script, ".docker/config.json") {
-			return eruncommon.RemoteCommandResult{Stdout: "1\n"}, nil
-		}
-		return eruncommon.RemoteCommandResult{Stdout: repositoryStateStdout}, nil
-	}
-}
-
-func TestInitToolReturnsRepositoryInteractionForRemoteInit(t *testing.T) {
-	stubKubectlAlwaysSucceeds(t)
-	stubGHCRDockerCredential(t)
-	// The remote init flow deploys the runtime chart, which now refuses rather
-	// than guess when no candidate is confirmed published; this test cares
-	// about the returned repository interaction, not registry resolution, so
-	// the seam confirms erun-devops published at every version instead of
-	// reaching a live registry.
-	t.Setenv("ERUN_PUBLISHED_CHART_PROBE_OVERRIDE", "erun-devops:*")
-	handler := initTool(normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{},
-		Store:   initInteractionStore{},
-		EnsureKubernetesNamespace: func(string, string) error {
-			return nil
-		},
-		DeployHelmChart: func(eruncommon.HelmDeployParams) error {
-			return nil
-		},
-		WaitForRemoteRuntime: func(eruncommon.ShellLaunchParams) error {
-			return nil
-		},
-		RunRemoteCommand: fakeRemoteRepositoryStateRunner("repo_missing\n__ERUN_REMOTE_PUBLIC_KEY__\nssh-ed25519 AAAATEST remote\n"),
-	}))
-
-	_, output, err := handler(context.Background(), nil, InitInput{
-		Tenant:             "frs",
-		Environment:        "dev",
-		Remote:             true,
-		KubernetesContext:  "cluster-remote",
-		ContainerRegistry:  eruncommon.DefaultContainerRegistry,
-		ConfirmTenant:      boolPtr(true),
-		ConfirmEnvironment: boolPtr(true),
-	})
-	if err != nil {
-		t.Fatalf("initTool failed: %v", err)
-	}
-	if output.Interaction == nil {
-		t.Fatalf("expected interaction output, got %+v", output)
-	}
-	if output.Interaction.Type != eruncommon.BootstrapInitInteractionRemoteRepository {
-		t.Fatalf("unexpected interaction: %+v", output.Interaction)
-	}
-}
-
-func TestInitToolUsesExplicitRuntimeVersionOverride(t *testing.T) {
-	stubKubectlAlwaysSucceeds(t)
-	stubGHCRDockerCredential(t)
-	// The remote init flow deploys the runtime chart, which now refuses rather
-	// than guess when no candidate is confirmed published; this test cares
-	// about the deployed version, not registry resolution, so the seam
-	// confirms erun-devops published at every version instead of reaching a
-	// live registry.
-	t.Setenv("ERUN_PUBLISHED_CHART_PROBE_OVERRIDE", "erun-devops:*")
-	var deployedVersion string
-	handler := initTool(normalizeRuntimeConfig(RuntimeConfig{
-		Context: RuntimeContext{},
-		Store:   initInteractionStore{},
-		EnsureKubernetesNamespace: func(string, string) error {
-			return nil
-		},
-		DeployHelmChart: func(params eruncommon.HelmDeployParams) error {
-			deployedVersion = params.Version
-			return nil
-		},
-		WaitForRemoteRuntime: func(eruncommon.ShellLaunchParams) error {
-			return nil
-		},
-		RunRemoteCommand: fakeRemoteRepositoryStateRunner("repo_exists\n__ERUN_REMOTE_PUBLIC_KEY__\nssh-ed25519 AAAATEST remote\n"),
-	}))
-
-	_, output, err := handler(context.Background(), nil, InitInput{
-		Tenant:             "tenanta",
-		Environment:        "dev",
-		Version:            "1.0.19-snapshot-20260418141901",
-		Remote:             true,
-		KubernetesContext:  "cluster-dev",
-		ContainerRegistry:  eruncommon.DefaultContainerRegistry,
-		ConfirmTenant:      boolPtr(true),
-		ConfirmEnvironment: boolPtr(true),
-	})
-	if err != nil {
-		t.Fatalf("initTool failed: %v", err)
-	}
-	if output.Interaction != nil {
-		t.Fatalf("unexpected interaction output: %+v", output)
-	}
-	if deployedVersion != "1.0.19-snapshot-20260418141901" {
-		t.Fatalf("unexpected deployed version %q", deployedVersion)
-	}
-}
-
-func boolPtr(value bool) *bool {
-	return &value
-}
-
 func decodeStructuredVersion(t *testing.T, content any) map[string]any {
 	t.Helper()
 
@@ -1347,8 +254,7 @@ func decodeStructuredVersion(t *testing.T, content any) map[string]any {
 	}
 }
 
-// lockedBuffer collects what a logger writes from whichever goroutine serves a
-// request, so a test can read it after the response without racing the write.
+// lockedBuffer is written from the goroutine serving the request.
 type lockedBuffer struct {
 	mu  sync.Mutex
 	buf bytes.Buffer
@@ -1366,19 +272,10 @@ func (b *lockedBuffer) String() string {
 	return b.buf.String()
 }
 
-// TestARefusedToolCallOnAnUnknownSessionIsLogged drives the real edge the way
-// the report did: a tools/call that arrives with no session the edge knows, so
-// the SDK's session-initialization guard refuses it. That refusal is a
-// JSON-RPC error on an HTTP 200, and it is exactly the shape whose absence
-// from a pod log was misread as "the call never arrived".
-//
-// The SDK's own logger has to say so, which is the whole point: with
-// ServerOptions.Logger nil the SDK writes to slog.DiscardHandler and the edge
-// is silent about every refusal it makes. The assertion is on the log line the
-// SDK emits, not on the response, because the response was always correct --
-// it is the visibility that was missing.
+// The refusal is a JSON-RPC error on HTTP 200, so the assertion is on the
+// SDK's log line, not the response.
 func TestARefusedToolCallOnAnUnknownSessionIsLogged(t *testing.T) {
-	for _, key := range []string{envMCPTrustedIssuers, envMCPTrustedIssuer, envMCPAudience, envTenant} {
+	for _, key := range []string{edgeauth.EnvMCPTrustedIssuers, edgeauth.EnvMCPTrustedIssuer, edgeauth.EnvMCPAudience, edgeauth.EnvTenant} {
 		t.Setenv(key, "")
 	}
 
@@ -1388,7 +285,7 @@ func TestARefusedToolCallOnAnUnknownSessionIsLogged(t *testing.T) {
 	t.Cleanup(func() { mcpServerLogger = previous })
 
 	cfg := HTTPConfig{Path: "/mcp"}
-	httpServer := httptest.NewServer(newHTTPHandler(eruncommon.BuildInfo{Version: "1.2.3"}, cfg, RuntimeConfig{}, nil))
+	httpServer := httptest.NewServer(newHTTPHandler(model.BuildInfo{Version: "1.2.3"}, cfg, withStubRuntime(runtimecfg.RuntimeConfig{}), nil))
 	t.Cleanup(httpServer.Close)
 
 	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"version","arguments":{}}}`

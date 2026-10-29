@@ -12,16 +12,11 @@ $$;
 
 GRANT USAGE ON SCHEMA public TO erun_tenant, erun_operations;
 
--- Root tenant resolution tables — tightly scoped grants. erun_tenant can
--- read its own tenant and update its issuer display name; erun_operations
--- has full access.
 GRANT SELECT ON tenants, tenant_issuers TO erun_tenant;
 GRANT UPDATE (name) ON tenant_issuers TO erun_tenant;
 GRANT SELECT, INSERT, UPDATE, DELETE, REFERENCES ON tenants, tenant_issuers TO erun_operations;
 
--- Tenant-owned tables — both roles get full CRUD; RLS policies enforce
--- the boundary. Add new tenant-owned tables to this list as they are
--- created.
+-- Tenant-owned tables (list new ones here): RLS policies enforce the boundary.
 GRANT SELECT, INSERT, UPDATE, DELETE, REFERENCES
   ON users, user_external_ids
   TO erun_tenant, erun_operations;

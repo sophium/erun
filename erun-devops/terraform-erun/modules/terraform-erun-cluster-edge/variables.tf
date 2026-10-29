@@ -133,13 +133,13 @@ variable "issuer_name" {
 }
 
 variable "cert_manager_chart_version" {
-  description = "Pinned cert-manager Helm chart version. Keep >= v1.17.2: earlier versions delete the DNS-01 _acme-challenge TXT with an empty Cloudflare zone id, orphaning records and wedging issuance/renewal."
+  description = "Pinned cert-manager Helm chart version. Defaults to v1.20.5, the first v1.20 release whose controller, webhook, cainjector, acmesolver and startupapicheck images carry no fixable advisory. Keep >= v1.17.2 in any case: earlier versions delete the DNS-01 _acme-challenge TXT with an empty Cloudflare zone id, orphaning records and wedging issuance/renewal."
   type        = string
   default     = null
 }
 
 variable "traefik_chart_version" {
-  description = "Pinned Traefik Helm chart version."
+  description = "Pinned Traefik Helm chart version. Defaults to 42.1.1 (Traefik v3.7.16), the first chart past every Traefik advisory and the Alpine and Go standard library findings of earlier images. Chart 42 requires Kubernetes >= 1.30: on an older cluster the apply is refused with \"chart requires kubeVersion: >=1.30.0-0\". Helm never upgrades a chart's CRDs, so when an existing release moves to a newer chart, apply that chart's CRDs first: helm show crds traefik --repo https://traefik.github.io/charts --version <version> | kubectl apply --server-side --force-conflicts -f -."
   type        = string
   default     = null
 }
@@ -250,10 +250,6 @@ variable "base_domain_name" {
     error_message = "base_domain_name must be a valid DNS domain such as \"example.com\"."
   }
 
-  # A server block for a cluster-internal zone would shadow CoreDNS's own
-  # kubernetes plugin and send every .svc.cluster.local lookup to a public
-  # resolver, killing in-cluster service discovery outright (#1165). The regex
-  # above happily accepts "cluster.local".
   validation {
     condition = var.base_domain_name == null || var.base_domain_name == "" || !contains(
       ["cluster.local", "localhost", "local", "in-addr.arpa", "ip6.arpa"],
@@ -273,24 +269,14 @@ variable "coredns_forward_upstreams" {
     error_message = "coredns_forward_upstreams must list at least one resolver."
   }
 
-  # Entries are interpolated straight into a CoreDNS `forward .` directive, so a
-  # malformed one writes a syntactically invalid *.server file. CoreDNS keeps
-  # serving from its already-loaded config, so nothing looks wrong until its next
-  # restart -- a node drain, an eviction, an upgrade -- at which point the
-  # cluster has no DNS at all and the cause is a terraform apply from days
-  # earlier (#1165). Validating here turns that into an apply-time error.
   validation {
     condition = var.coredns_forward_upstreams == null || alltrue([
       for upstream in var.coredns_forward_upstreams :
-      # IPv4, optionally with a port.
       can(regex("^([0-9]{1,3}\\.){3}[0-9]{1,3}(:[0-9]{1,5})?$", upstream)) ||
-      # IPv6, bracketed when it carries a port.
       can(regex("^\\[[0-9a-fA-F:]+\\](:[0-9]{1,5})?$", upstream)) ||
       can(regex("^[0-9a-fA-F]{0,4}(:[0-9a-fA-F]{0,4}){2,7}$", upstream)) ||
-      # A resolvable host, optionally with a port (CoreDNS accepts these, and
-      # tls:// upstreams are named this way).
       can(regex("^(tls://|dns://)?([a-z0-9]([a-z0-9-]*[a-z0-9])?\\.)+[a-z]{2,}(:[0-9]{1,5})?$", upstream)) ||
-      # A resolv.conf-style file, which is how you say "whatever the node uses".
+      # A resolv.conf path means "whatever the node uses".
       can(regex("^/[^[:space:]]+$", upstream))
     ])
     error_message = "Every coredns_forward_upstreams entry must be an IP address (optionally host:port, IPv6 bracketed when ported), a DNS name, or an absolute path such as /etc/resolv.conf. A malformed entry writes an invalid CoreDNS server block that only fails at CoreDNS's next restart, taking cluster DNS down with it."

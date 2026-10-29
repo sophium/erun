@@ -3,10 +3,7 @@ version: "2"
 run:
   timeout: 3m
   tests: true
-# The default uniq-by-line:true keys findings by file+line only, ignoring
-# column -- funlen/gocyclo/cyclop all anchor on the same func line, so it
-# silently drops all but one finding on a function that trips more than one
-# of them. Report everything found.
+# uniq-by-line would drop all but one of funlen/gocyclo/cyclop on the same func line.
 issues:
   uniq-by-line: false
   max-issues-per-linter: 0
@@ -21,7 +18,55 @@ linters:
     - funlen
     - gocyclo
     - cyclop
+    - revive
+    - errorlint
+    - bodyclose
+    - nilerr
+    - nilnil
+    - exhaustive
+    - gocritic
+    - forcetypeassert
+    - errchkjson
+    - predeclared
+    - errname
+    - unconvert
+    - copyloopvar
+    - usestdlibvars
+    - misspell
+    - wastedassign
+    - mirror
+    - nestif
+    - makezero
+    - durationcheck
+    - nakedret
+    - depguard
   settings:
+    revive:
+      rules:
+        - name: file-length-limit
+          arguments:
+            - max: 500
+              skipComments: true
+              skipBlankLines: true
+    # A command reaches another only through cmd/shared.
+    depguard:
+      rules:
+        commands:
+          list-mode: lax
+          files: ["**/erun-cli/cmd/*/*.go", "!**/erun-cli/cmd/shared/**"]
+          allow:
+            - github.com/sophium/erun/cmd/shared
+          deny:
+            - pkg: github.com/sophium/erun/cmd
+              desc: an erun-cli command package may import cmd/shared and cmd/shared/*, never the root command or another command
+        shared:
+          list-mode: lax
+          files: ["**/erun-cli/cmd/shared/**/*.go"]
+          allow:
+            - github.com/sophium/erun/cmd/shared
+          deny:
+            - pkg: github.com/sophium/erun/cmd
+              desc: cmd/shared sits below every command and imports none of them
     funlen:
       lines: 100
       statements: 50

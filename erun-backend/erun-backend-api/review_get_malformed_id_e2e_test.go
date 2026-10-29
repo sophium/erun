@@ -5,17 +5,8 @@ import (
 	"testing"
 )
 
-// TestGetReviewMalformedIDReturns400NotFoundForAbsentAndSuccessForValid is
-// the regression test for a malformed review id: GET /v1/reviews/{id} reported 500 for a
-// syntactically malformed id (the review_id column is UUID, and PostgreSQL
-// rejects "not-a-uuid" at parse time with SQLSTATE 22P02), reachable through
-// this package's real HTTP handler and routing exactly the way a live
-// deployment serves it, driven against a real migrated PostgreSQL. It fails
-// without the internal/repository/errors.go fix (normalizeNoRows previously
-// let that SQLSTATE fall through unclassified, so writeRepositoryError's
-// default case reported 500) and passes with it. The well-formed-but-absent
-// and valid cases are pinned alongside it so the fix cannot collapse either
-// of those two distinct outcomes into the new 400.
+// TestGetReviewMalformedIDReturns400NotFoundForAbsentAndSuccessForValid: review_id is UUID, so
+// PostgreSQL rejects a malformed id with SQLSTATE 22P02, which must map to 400, not 500.
 func TestGetReviewMalformedIDReturns400NotFoundForAbsentAndSuccessForValid(t *testing.T) {
 	config := mergeQueueE2EFromEnv(t)
 	srv := startMergeQueueAPI(t, config)

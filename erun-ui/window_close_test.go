@@ -6,6 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	activitysvc "github.com/sophium/erun/erun-ui/internal/activity"
+
+	"github.com/sophium/erun/erun-ui/internal/terminal"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
 func newTestAppForWindowClose(t *testing.T) *App {
@@ -18,28 +23,25 @@ func newTestAppForWindowClose(t *testing.T) *App {
 	return app
 }
 
-// TestBeforeCloseBlocksWithRunningWork pins the actual "Fix" erun#1214 asks
-// for: a running deploy must block the window from closing and name itself
-// to the operator, instead of the previous unconditional `return false`.
 func TestBeforeCloseBlocksWithRunningWork(t *testing.T) {
 	app := newTestAppForWindowClose(t)
 	emits := newCapturedEmits()
 	app.SetEmitter(emits.fn())
-	app.activityQueue.start(activityQueueEntry{
+	app.activity.Track(activitysvc.Entry{
 		ID:          "deploy-1",
 		Command:     "deploy",
 		Tenant:      "acme",
 		Environment: "prod",
-		Status:      activityQueueStatusRunning,
+		Status:      activitysvc.StatusRunning,
 	})
 
 	if prevent := app.beforeClose(context.Background()); !prevent {
 		t.Fatal("beforeClose must block the close while a deploy is running")
 	}
 
-	events := emits.events(appCloseGateEvent)
+	events := emits.events(uimodel.AppCloseGateEvent)
 	if len(events) != 1 {
-		t.Fatalf("expected one %s event, got %d", appCloseGateEvent, len(events))
+		t.Fatalf("expected one %s event, got %d", uimodel.AppCloseGateEvent, len(events))
 	}
 	gate, ok := events[0].(uiCloseGate)
 	if !ok {
@@ -54,8 +56,6 @@ func TestBeforeCloseBlocksWithRunningWork(t *testing.T) {
 	}
 }
 
-// TestBeforeCloseIdleQueueUnchanged is the no-op path from the issue's own
-// validation list: closing with an idle queue must not prompt.
 func TestBeforeCloseIdleQueueUnchanged(t *testing.T) {
 	app := newTestAppForWindowClose(t)
 	emits := newCapturedEmits()
@@ -64,7 +64,7 @@ func TestBeforeCloseIdleQueueUnchanged(t *testing.T) {
 	if prevent := app.beforeClose(context.Background()); prevent {
 		t.Fatal("beforeClose must not block the close when nothing is running")
 	}
-	if events := emits.events(appCloseGateEvent); len(events) != 0 {
+	if events := emits.events(uimodel.AppCloseGateEvent); len(events) != 0 {
 		t.Fatalf("expected no close-gate event on an idle queue, got %d", len(events))
 	}
 	if _, err := os.Stat(app.deps.windowStatePath); err != nil {
@@ -72,57 +72,52 @@ func TestBeforeCloseIdleQueueUnchanged(t *testing.T) {
 	}
 }
 
-// TestATabStillBeingEstablishedDoesNotBlockTheClose holds each gated tab kind
-// in its setup phase — started, but before its ready marker — exactly as every
-// launch does for the selected environment's tabs, and asks whether the window
-// may close. Setting up a terminal is not in-flight work: the idle path must not
-// prompt, while a deploy running beside the held tab still must.
 func TestATabStillBeingEstablishedDoesNotBlockTheClose(t *testing.T) {
-	for _, kind := range []gatedSessionKind{
-		gatedSessionKindOpen,
-		gatedSessionKindAI,
-		gatedSessionKindContributeERun,
-		gatedSessionKindContributeAI,
+	for _, kind := range []string{
+		activitysvc.GatedOpen,
+		activitysvc.GatedAI,
+		activitysvc.GatedContributeERun,
+		activitysvc.GatedContributeAI,
 	} {
-		t.Run(string(kind), func(t *testing.T) {
+		t.Run(kind, func(t *testing.T) {
 			assertTabSetupDoesNotBlockTheClose(t, kind)
 		})
 	}
 }
 
-func assertTabSetupDoesNotBlockTheClose(t *testing.T, kind gatedSessionKind) {
+func assertTabSetupDoesNotBlockTheClose(t *testing.T, kind string) {
 	t.Helper()
 	app := newTestAppForWindowClose(t)
-	t.Cleanup(app.stopActionRunners)
+	t.Cleanup(app.activity.StopActionRunners)
 	emits := newCapturedEmits()
 	app.SetEmitter(emits.fn())
-	selection := uiSelection{Tenant: "pw", Environment: "alpha"}
-	held := &managedTerminal{selection: selection}
-	t.Cleanup(func() { held.signalReady(nil) })
+	selection := uimodel.Selection{Tenant: "pw", Environment: "alpha"}
+	held := &terminal.Session{Selection: selection}
+	t.Cleanup(func() { held.SignalReady(nil) })
 
-	if _, err := app.enqueueGatedSession(selection, kind, func(context.Context) (startSessionResult, *managedTerminal, error) {
-		return startSessionResult{SessionID: 1, Selection: selection}, held, nil
-	}); err != nil {
-		t.Fatalf("enqueueGatedSession: %v", err)
+	if _, err := app.activity.EnqueueGatedSession(selection, kind, gatedStart(func(context.Context) (uimodel.StartSessionResult, *terminal.Session, error) {
+		return uimodel.StartSessionResult{SessionID: 1, Selection: selection}, held, nil
+	})); err != nil {
+		t.Fatalf("EnqueueGatedSession: %v", err)
 	}
 	setup := app.FindActiveDeployForSelection(selection)
-	if setup.Status != activityQueueStatusRunning || setup.ActionKind != string(kind) {
+	if setup.Status != activitysvc.StatusRunning || setup.ActionKind != kind {
 		t.Fatalf("expected the %s tab to be held running in setup, got %+v", kind, setup)
 	}
 
 	if gate := app.PrepareWindowClose(); gate.Blocked || len(gate.Running) != 0 {
 		t.Fatalf("a %s tab still being established must not block the close: %+v", kind, gate)
 	}
-	if events := emits.events(appCloseGateEvent); len(events) != 0 {
+	if events := emits.events(uimodel.AppCloseGateEvent); len(events) != 0 {
 		t.Fatalf("expected no close-gate event while only a tab is being established, got %d", len(events))
 	}
 
-	app.activityQueue.start(activityQueueEntry{
+	app.activity.Track(activitysvc.Entry{
 		ID:          "deploy-1",
 		Command:     "deploy",
 		Tenant:      "pw",
 		Environment: "alpha",
-		Status:      activityQueueStatusRunning,
+		Status:      activitysvc.StatusRunning,
 	})
 	gate := app.PrepareWindowClose()
 	if !gate.Blocked || len(gate.Running) != 1 || gate.Running[0].ID != "deploy-1" {
@@ -130,34 +125,29 @@ func assertTabSetupDoesNotBlockTheClose(t *testing.T, kind gatedSessionKind) {
 	}
 }
 
-// TestAnUnregisteredGatedSessionKindIsRefused keeps every entry
-// enqueueGatedSession creates recognisable to the close gate.
 func TestAnUnregisteredGatedSessionKindIsRefused(t *testing.T) {
 	app := newTestAppForWindowClose(t)
-	t.Cleanup(app.stopActionRunners)
+	t.Cleanup(app.activity.StopActionRunners)
 	started := false
-	_, err := app.enqueueGatedSession(uiSelection{Tenant: "pw", Environment: "alpha"}, gatedSessionKind("deploy"), func(context.Context) (startSessionResult, *managedTerminal, error) {
+	_, err := app.activity.EnqueueGatedSession(uimodel.Selection{Tenant: "pw", Environment: "alpha"}, "deploy", gatedStart(func(context.Context) (uimodel.StartSessionResult, *terminal.Session, error) {
 		started = true
-		return startSessionResult{}, nil, nil
-	})
+		return uimodel.StartSessionResult{}, nil, nil
+	}))
 	if err == nil || started {
 		t.Fatalf("expected an unregistered kind to be refused before starting, err=%v started=%v", err, started)
 	}
 }
 
-// TestConfirmWindowClosePersistsRecordThenQuits pins the second half of the
-// fix: confirming the close records what was running before anything is
-// killed, then quits without re-prompting.
 func TestConfirmWindowClosePersistsRecordThenQuits(t *testing.T) {
 	app := newTestAppForWindowClose(t)
 	quit := 0
 	app.deps.quitApp = func() { quit++ }
-	app.activityQueue.start(activityQueueEntry{
+	app.activity.Track(activitysvc.Entry{
 		ID:          "release-1",
 		Command:     "release",
 		Tenant:      "acme",
 		Environment: "prod",
-		Status:      activityQueueStatusRunning,
+		Status:      activitysvc.StatusRunning,
 	})
 
 	if err := app.ConfirmWindowClose(); err != nil {
@@ -171,7 +161,7 @@ func TestConfirmWindowClosePersistsRecordThenQuits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected an interrupted-activity record: %v", err)
 	}
-	var record interruptedActivityRecord
+	var record activitysvc.InterruptedRecord
 	if err := json.Unmarshal(data, &record); err != nil {
 		t.Fatalf("record was not valid JSON: %v", err)
 	}
@@ -179,21 +169,17 @@ func TestConfirmWindowClosePersistsRecordThenQuits(t *testing.T) {
 		t.Fatalf("unexpected recorded entries: %+v", record.Entries)
 	}
 
-	// The confirmation must survive into the Quit-driven beforeClose pass
-	// without re-prompting, or the dialog would reopen on its own confirm.
+	// Must not re-prompt, or the dialog would reopen on its own confirm.
 	emits := newCapturedEmits()
 	app.SetEmitter(emits.fn())
 	if prevent := app.beforeClose(context.Background()); prevent {
 		t.Fatal("beforeClose must not re-block after ConfirmWindowClose")
 	}
-	if events := emits.events(appCloseGateEvent); len(events) != 0 {
+	if events := emits.events(uimodel.AppCloseGateEvent); len(events) != 0 {
 		t.Fatalf("beforeClose must not re-emit the gate after confirmation, got %d", len(events))
 	}
 }
 
-// TestConfirmWindowCloseSkipsRecordWhenNothingIsRunning covers the race where
-// the running work finishes between the prompt and the confirm click: no
-// stale record should be written.
 func TestConfirmWindowCloseSkipsRecordWhenNothingIsRunning(t *testing.T) {
 	app := newTestAppForWindowClose(t)
 	app.deps.quitApp = func() {}
@@ -206,13 +192,9 @@ func TestConfirmWindowCloseSkipsRecordWhenNothingIsRunning(t *testing.T) {
 	}
 }
 
-// TestConfirmWindowCloseStillQuitsWhenRecordingFails: the operator already
-// confirmed closing despite the running work, so a disk error persisting the
-// courtesy record must not trap them in the window — it surfaces as a
-// returned error but the quit still happens.
 func TestConfirmWindowCloseStillQuitsWhenRecordingFails(t *testing.T) {
 	app := newTestAppForWindowClose(t)
-	// Point the record path's "directory" at a plain file, so MkdirAll fails.
+	// A plain file as the parent makes MkdirAll fail.
 	blocker := filepath.Join(t.TempDir(), "not-a-dir")
 	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
 		t.Fatalf("setup: %v", err)
@@ -220,10 +202,10 @@ func TestConfirmWindowCloseStillQuitsWhenRecordingFails(t *testing.T) {
 	app.deps.interruptedActivityPath = filepath.Join(blocker, "interrupted-activity.json")
 	quit := 0
 	app.deps.quitApp = func() { quit++ }
-	app.activityQueue.start(activityQueueEntry{
+	app.activity.Track(activitysvc.Entry{
 		ID:      "deploy-1",
 		Command: "deploy",
-		Status:  activityQueueStatusRunning,
+		Status:  activitysvc.StatusRunning,
 	})
 
 	if err := app.ConfirmWindowClose(); err == nil {

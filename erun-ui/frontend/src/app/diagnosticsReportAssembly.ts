@@ -12,15 +12,9 @@ import type { UIBuildDetails } from '@/types';
 
 import { LoadAppLog, LoadEnvTrace } from '../../wailsjs/go/main/App';
 
-// diagnosticsReportAssembly turns a DiagnosticsContext into the read-only
-// evidence formatDiagnosticsReport needs. It is the one place the Diagnostics
-// console's Copy report and Report an erun issue actions both read from, so
-// the two can never drift into carrying different evidence for the same
-// context.
+// Shared by Copy report and Report an erun issue so they carry the same evidence.
 
-// useLinkedEnvironments reads the real-status label for each of an
-// orchestrator's linked environments, so its report and title reflect an
-// actual failure rather than only the orchestrator's own running/stopped bit.
+// useLinkedEnvironments reads each linked env's real status for the report.
 export function useLinkedEnvironments(
   orchestrator: OrchestratorInfo | null,
 ): DiagnosticsLinkedEnv[] {

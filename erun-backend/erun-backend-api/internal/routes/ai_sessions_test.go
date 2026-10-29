@@ -55,12 +55,6 @@ func postAISessionEvent(t *testing.T, sessions *stubAISessionRepository, environ
 	return rec
 }
 
-// TestReportAISessionEventRefusesAnEnvironmentTheCallerCannotSee is the
-// refusal proof this route needs: an environment id that does not resolve
-// for the caller's tenant (repository.Get is RLS-scoped, so a cross-tenant id
-// reads as not-found exactly like every other environment sub-route) must be
-// refused before any session data is ever written, not merely rendered
-// differently to the caller.
 func TestReportAISessionEventRefusesAnEnvironmentTheCallerCannotSee(t *testing.T) {
 	sessions := &stubAISessionRepository{}
 	environments := stubEnvironmentGetter{err: repository.ErrNotFound}
@@ -98,9 +92,6 @@ func TestReportAISessionEventRejectsInvalidInput(t *testing.T) {
 	}
 }
 
-// TestReportAISessionEventCarriesForwardTheEnvironmentID confirms the
-// environment id comes from the path, never trusted from the body, mirroring
-// every other environment sub-route.
 func TestReportAISessionEventCarriesForwardTheEnvironmentID(t *testing.T) {
 	sessions := &stubAISessionRepository{}
 	environments := stubEnvironmentGetter{environment: model.Environment{EnvironmentID: "env-1"}}
@@ -118,11 +109,6 @@ func TestReportAISessionEventCarriesForwardTheEnvironmentID(t *testing.T) {
 	}
 }
 
-// TestReportAISessionEventResolvesTheSameStatesLocalCallersSee proves the
-// response uses eruncommon's own resolution (never a second, drifting
-// implementation of busy/idle/awaiting-input): a turn-end event resolves to
-// awaiting-input, and an exit event resolves to exited, exactly as
-// eruncommon.ResolveAISessionStatus documents.
 func TestReportAISessionEventResolvesTheSameStatesLocalCallersSee(t *testing.T) {
 	cases := map[string]struct {
 		body  string
@@ -166,10 +152,6 @@ func getAISessions(t *testing.T, sessions AISessionRepository, environments Envi
 	return rec
 }
 
-// TestListAISessionsRefusesAnEnvironmentTheCallerCannotSee mirrors the same
-// refusal proof the write side has: a cross-tenant environment id must read
-// as not-found, the same as every other environment sub-route, before the
-// session repository is ever consulted.
 func TestListAISessionsRefusesAnEnvironmentTheCallerCannotSee(t *testing.T) {
 	sessions := &stubAISessionRepository{listed: []model.AISessionEvent{{SessionID: "ai"}}}
 	environments := stubEnvironmentGetter{err: repository.ErrNotFound}
@@ -180,9 +162,6 @@ func TestListAISessionsRefusesAnEnvironmentTheCallerCannotSee(t *testing.T) {
 	}
 }
 
-// TestListAISessionsReturnsEmptyArrayNotNull confirms an environment with no
-// reported sessions reads as `[]`, not `null` — a caller ranging over the
-// body must not need a null check.
 func TestListAISessionsReturnsEmptyArrayNotNull(t *testing.T) {
 	sessions := &stubAISessionRepository{}
 	environments := stubEnvironmentGetter{environment: model.Environment{EnvironmentID: "env-1"}}
@@ -196,9 +175,6 @@ func TestListAISessionsReturnsEmptyArrayNotNull(t *testing.T) {
 	}
 }
 
-// TestListAISessionsResolvesTheSameStatesLocalCallersSee proves the read
-// route reuses reportAISessionEvent's own resolution, never a second,
-// drifting implementation.
 func TestListAISessionsResolvesTheSameStatesLocalCallersSee(t *testing.T) {
 	sessions := &stubAISessionRepository{listed: []model.AISessionEvent{
 		{SessionID: "ai", Tool: "claude", Event: "turn-end"},

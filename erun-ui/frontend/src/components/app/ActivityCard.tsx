@@ -48,8 +48,7 @@ export interface ActivityCardProps {
   onKillSession?: (sessionId: number) => Promise<boolean>;
 }
 
-// Per-card ticking clock so a running card re-renders once a second on its own,
-// rather than a parent tick cascading a re-render into every card each second.
+// Per-card clock, so a parent tick does not re-render every card each second.
 function useTickingNow(active: boolean): number {
   const [now, setNow] = React.useState(() => Date.now());
   React.useEffect(() => {
@@ -147,8 +146,6 @@ export const ActivityCard = React.memo(function ActivityCard({
   );
 });
 
-// The copy-report button stays available even on a fast failure that captured
-// no output, because the report carries context the user would otherwise retype.
 function FailureDetails({ entry }: { entry: ActivityQueueEntry }): React.ReactElement {
   const dispatch = useAppDispatch();
   const [expanded, setExpanded] = React.useState<boolean>(false);
@@ -235,8 +232,6 @@ function FailureDetails({ entry }: { entry: ActivityQueueEntry }): React.ReactEl
   );
 }
 
-// "Run doctor" is the primary action because troubleshooting is the safe first
-// step before the heavier rebuild/redeploy; all three are explicit, never auto-run.
 function FailedDeployActions({
   entry,
   onRecoverPendingHelm,
@@ -246,8 +241,7 @@ function FailedDeployActions({
 }): React.ReactElement | null {
   const dispatch = useAppDispatch();
   const [running, setRunning] = React.useState<boolean>(false);
-  // Each action pipes `erun …` into the shared Local shell; without this guard
-  // repeated clicks would pile commands into that one shell.
+  // Guards against repeated clicks piling commands into the shared Local shell.
   const runAction = React.useCallback(
     (action: () => Promise<unknown>) => {
       if (running) return;
@@ -352,14 +346,8 @@ function RecoveryActionRow({
   );
 }
 
-// InviteApprovalLinkAction is the invite link's copyable, durable home:
-// the desktop signs the requester in automatically, but the link stays
-// visible here as the transferable artefact for a different
-// machine, a colleague, or the manual fallback if that automatic step ever
-// fails. Mirrors TenantPlatformState.tsx's CopyCommandButton's
-// ClipboardSetText + toast pattern. Its own branch on entry.origin/
-// entry.inviteLink is kept out of ActivityCard's render body so that
-// function's own complexity doesn't grow with every entry-kind addition.
+// InviteApprovalLinkAction keeps the invite link copyable as a fallback to the
+// automatic sign-in.
 function InviteApprovalLinkAction({
   entry,
 }: {
@@ -426,9 +414,7 @@ function ActivityStatusIcon({
   }
 }
 
-// The icon alone is aria-hidden and its color is the only other signal, so
-// screen-reader and low-vision users saw nothing distinguishing a card's
-// status (WCAG 1.4.1). This adds the same text visibly for everyone.
+// Visible status text, since the icon is aria-hidden and colour alone is not enough.
 function ActivityStatusIndicator({
   status,
 }: {

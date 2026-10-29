@@ -12,9 +12,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 )
 
-// EnvironmentEventRepository is the persistence access EnvironmentEventRoutes
-// needs: appending one reported event, and reading the log forward from a
-// cursor.
+// EnvironmentEventRepository appends events and reads the log from a cursor.
 type EnvironmentEventRepository interface {
 	Append(ctx context.Context, event model.EnvironmentEvent) (model.EnvironmentEvent, error)
 	Read(ctx context.Context, filter repository.EnvironmentEventFilter) (repository.EnvironmentEventPage, error)
@@ -25,23 +23,16 @@ type EnvironmentEventRoutes struct {
 	environments EnvironmentGetter
 }
 
-// RegisterEnvironmentEventRoutes wires the sequenced environment-event log:
-// the append an environment's own reporter calls, and the cursor read a
-// client resumes a stream from. The read is tenant-wide rather than
-// per-environment because a resume position only means something relative to
-// the stream it came from -- the events this phase cares about (a deploy
-// finishing, an agent awaiting input) span a tenant's environments, so a
-// per-environment cursor would force one stream per environment and would
-// have no way to express "everything that happened while I was away".
+// RegisterEnvironmentEventRoutes wires the sequenced environment-event log. The
+// read is tenant-wide: a resume cursor must cover every environment's events.
 func RegisterEnvironmentEventRoutes(register ProtectedRouteRegistrar, events EnvironmentEventRepository, environments EnvironmentGetter) {
 	routes := EnvironmentEventRoutes{events: events, environments: environments}
 	register(http.MethodPost, "/v1/environments/{environment_id}/events", http.HandlerFunc(routes.appendEnvironmentEvent))
 	register(http.MethodGet, "/v1/events", http.HandlerFunc(routes.readEnvironmentEvents))
 }
 
-// validEnvironmentEventKinds mirrors the table's own CHECK constraint via the
-// model's exported constants, so an unrecognized kind is refused with a named
-// field error here rather than surfacing as an opaque constraint violation.
+// validEnvironmentEventKinds mirrors the table's CHECK constraint so an unknown
+// kind gets a named field error.
 var validEnvironmentEventKinds = map[model.EnvironmentEventKind]bool{
 	model.EnvironmentEventStatusChanged:        true,
 	model.EnvironmentEventSessionAwaitingInput: true,
@@ -50,12 +41,9 @@ var validEnvironmentEventKinds = map[model.EnvironmentEventKind]bool{
 
 type appendEnvironmentEventRequest struct {
 	Kind model.EnvironmentEventKind `json:"kind"`
-	// Detail is the event's payload, serialized by the reporter (compact JSON
-	// for structured input). The log stores it uninterpreted.
+	// Detail is stored uninterpreted.
 	Detail string `json:"detail,omitempty"`
-	// OccurredAt is when the reporter observed the event. Optional: omitting
-	// it records receipt time instead, which is what a reporter that only
-	// knows the event happened now has to offer.
+	// OccurredAt defaults to receipt time.
 	OccurredAt time.Time `json:"occurredAt,omitempty"`
 }
 
@@ -92,8 +80,7 @@ func (r EnvironmentEventRoutes) appendEnvironmentEvent(w http.ResponseWriter, re
 
 type environmentEventsResponse struct {
 	Events []model.EnvironmentEvent `json:"events"`
-	// NextCursor is the position to resume from, empty when this page reached
-	// the end of the log as it stood.
+	// NextCursor is empty when the page reached the end of the log.
 	NextCursor string `json:"nextCursor,omitempty"`
 }
 

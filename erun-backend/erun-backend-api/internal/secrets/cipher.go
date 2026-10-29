@@ -14,15 +14,13 @@ import (
 	"strings"
 )
 
-// Cipher is an AES-256-GCM cipher whose key also seeds DeriveToken's HMAC-KDF,
-// domain-separated so reusing one key for encryption and token derivation is safe.
+// Cipher is AES-256-GCM; its key also seeds DeriveToken's domain-separated HMAC-KDF.
 type Cipher struct {
 	aead cipher.AEAD
 	key  []byte
 }
 
-// NewCipher builds a Cipher from the deployment's base64-encoded 32-byte key;
-// there is no plaintext fallback, so a missing or invalid key is fatal.
+// NewCipher has no plaintext fallback: a missing or invalid key is fatal.
 func NewCipher(keyBase64 string) (*Cipher, error) {
 	keyBase64 = strings.TrimSpace(keyBase64)
 	if keyBase64 == "" {
@@ -46,10 +44,7 @@ func NewCipher(keyBase64 string) (*Cipher, error) {
 	return &Cipher{aead: aead, key: key}, nil
 }
 
-// DeriveToken returns a deterministic, high-entropy token for a label: the same
-// (key, label) always yields the same token, so a provisioning workflow resuming
-// after a crash re-derives the SAME k3s admin token instead of minting a fresh
-// one — making credential custody idempotent without checkpointing the secret.
+// DeriveToken is deterministic per (key, label), so a resumed provisioning re-derives the same k3s token.
 func (c *Cipher) DeriveToken(label string) string {
 	extract := hmac.New(sha256.New, c.key)
 	extract.Write([]byte("erun-token-derivation-v1"))
@@ -68,8 +63,7 @@ func (c *Cipher) Encrypt(plaintext []byte) ([]byte, error) {
 	return c.aead.Seal(nonce, nonce, plaintext, nil), nil
 }
 
-// Decrypt is the inverse of Encrypt; it fails on a truncated value or a bad
-// authentication tag (tampering or wrong key).
+// Decrypt fails on a truncated value or bad authentication tag.
 func (c *Cipher) Decrypt(sealed []byte) ([]byte, error) {
 	nonceSize := c.aead.NonceSize()
 	if len(sealed) < nonceSize {

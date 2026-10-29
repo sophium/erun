@@ -8,36 +8,19 @@ import type { AppShell } from '../../../pages/index.js';
 import { captureInvokes, type InvokeCall, parseInvoke } from '../../../pages/index.js';
 import type { Page } from '@playwright/test';
 
-// #1354: nothing in the terminal was clickable. These specs drive real xterm
-// output through the link providers TerminalController now registers and
-// assert the observable outcome -- a real browser popup for a URL, or the
-// exact Wails call the desktop makes to open a host file -- rather than that
-// a handler is merely registered.
-
 function osc8(uri: string, text: string): string {
   return `\x1b]8;;${uri}\x07${text}\x1b]8;;\x07`;
 }
 
-// Prints text at the top of a freshly cleared screen and waits for it to
-// render. The OSC 8 wrapper bytes never render, so the visible-text
-// assertion strips them.
+// The OSC 8 wrapper bytes never render, so the visible-text check strips them.
 async function printLine(app: AppShell, sessionId: number, text: string): Promise<void> {
   await app.terminalPane.printOnlyLine(sessionId, text);
   const visible = text.replace(/\x1b\][^\x07]*\x07/g, '');
   await expect(app.terminalPane.rows()).toContainText(visible);
 }
 
-// Every activatable link -- OSC 8, plain-URL pattern matching, and the custom
-// path provider alike -- decorates the terminal with the pointer cursor once
-// xterm resolves it (xterm defaults undecorated links to pointerCursor: true,
-// and the path provider sets it explicitly). Waiting for that decoration
-// rather than assuming a given provider resolves synchronously keeps this
-// deterministic even for providers that happen to resolve in the same tick
-// today (OSC 8, URL matching) -- relying on that implicitly would silently
-// turn into a race the moment either became asynchronous. A single hover can
-// still be dropped under load (see TerminalPane.hoverFirstRow), so the whole
-// hover-and-check step retries, re-hovering each attempt -- the same
-// convergence Sidebar.hoverEnvironmentRow uses for the hover card.
+// Waits for the pointer-cursor decoration rather than assuming synchronous
+// resolution, and re-hovers on retry since a hover can be dropped under load.
 async function hoverAndClickDecoratedLink(app: AppShell): Promise<void> {
   await expect(async () => {
     await app.terminalPane.hoverFirstRow();
@@ -48,17 +31,8 @@ async function hoverAndClickDecoratedLink(app: AppShell): Promise<void> {
   await app.terminalPane.clickFirstRow();
 }
 
-// An unresolved pod path is deliberately decorated as plain text (no pointer
-// cursor), so there is no decoration to wait on -- the backend round trip its
-// own resolution makes is the only observable completion signal.
-//
-// That signal is also a dropped hover's only recovery, and a dropped hover is
-// the one failure this step has to tolerate: the same one hoverAndClickDecoratedLink
-// above re-drives for, and for the same reason. Left single-shot, a hover the
-// page never resolved waits on a response that will never come for the whole
-// 30s test budget and reports the failure against the test's own declaration
-// line rather than against the hover. Each attempt is bounded well inside
-// that, so a dropped hover costs one re-hover instead of the spec.
+// An unresolved pod path gets no decoration, so the backend round trip is the
+// only signal; each attempt is bounded so a dropped hover can be re-driven.
 async function hoverAndClickAfterBackendResolve(app: AppShell, page: Page): Promise<void> {
   await expect(async () => {
     const resolved = page.waitForResponse(
@@ -94,8 +68,7 @@ test.describe('clickable terminal links (#1354)', () => {
     await popup.close();
   });
 
-  // OSC 8 is honoured in preference to pattern matching: the visible text
-  // differs from the URI actually opened.
+  // OSC 8 wins over pattern matching: the display text differs from the URI.
   test('an OSC 8 hyperlink opens its URI, not its display text', async ({
     app,
     page,
@@ -114,10 +87,7 @@ test.describe('clickable terminal links (#1354)', () => {
     await popup.close();
   });
 
-  // The red case the scheme allowlist exists for: a terminal renders
-  // untrusted output, and an OSC 8 hyperlink lets that output declare ANY
-  // scheme, including one that would run script or read a local file. Quoted
-  // both ways: an http(s) OSC 8 link (above) opens, this one must not.
+  // Terminal output is untrusted, so OSC 8 schemes are allowlisted.
   test('an OSC 8 hyperlink with a javascript: URI is never activated', async ({
     app,
     page,
@@ -132,9 +102,7 @@ test.describe('clickable terminal links (#1354)', () => {
     });
     await printLine(app, sessionId, osc8('javascript:alert(1)', 'click here'));
     await hoverAndClickDecoratedLink(app);
-    // Bound the negative on a real round-trip rather than a delay: print a
-    // second, known-good line and wait for it, so the window covers whatever
-    // time a (wrongly) fired popup would have needed.
+    // Bound the negative with a round trip: print and await a second line.
     await printLine(app, sessionId, 'erun-after-javascript-click');
     expect(popupFired).toBe(false);
   });
@@ -162,11 +130,8 @@ test.describe('clickable terminal links (#1354)', () => {
     }
   });
 
-  // The regression #1354 exists to prevent, quoted both ways: a path printed
-  // by the environment's OWN pod-side tab must resolve through
-  // ResolveEnvironmentHostPath, never open the host's own file directly --
-  // even though /etc/hosts genuinely exists on this machine and a naive
-  // "just os.Stat the path" implementation would happily open it.
+  // A path from the pod-side tab must resolve via ResolveEnvironmentHostPath,
+  // even though /etc/hosts exists on the host.
   test('an in-pod path never opens the same-named host file', async ({ app, page, seededEnv }) => {
     await app.sidebar.openEnvironment(SEED_TENANT, seededEnv.environment);
     const erunTab = app.tabStrip.tab('ERun');
@@ -180,13 +145,10 @@ test.describe('clickable terminal links (#1354)', () => {
     await hoverAndClickAfterBackendResolve(app, page);
 
     expect(resolveEnvironmentHostPathCalls(invokes).length).toBeGreaterThan(0);
-    // The regression itself: never opened directly against the host.
     expect(openHostPathCalls(invokes)).not.toContain('/etc/hosts');
   });
 
-  // The other half of the same case: the identical text, printed in a
-  // HOST-side tab, is a real host path and must open directly -- proving the
-  // distinction is made by the tab's origin, not by refusing every path.
+  // The same text in a host-side tab opens directly: origin decides, not the path.
   test('the same path text in the Local tab opens directly (contrast case)', async ({
     app,
     page,
@@ -201,9 +163,7 @@ test.describe('clickable terminal links (#1354)', () => {
 
     await expect.poll(() => openHostPathCalls(invokes)).toContain('/etc/hosts');
     expect(resolveEnvironmentHostPathCalls(invokes)).toHaveLength(0);
-    // The open must land on the harness's inert opener, never the operator's
-    // own: on macOS a backend that re-imported its login shell's PATH ran the
-    // real `open` here and put /etc/hosts on the operator's screen.
+    // Must hit the harness's inert opener, never the real `open`.
     await expect.poll(() => openerCalls()).toContain('/etc/hosts');
   });
 });

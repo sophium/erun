@@ -16,19 +16,14 @@ import (
 
 	jose "github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
-
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/mcpauth"
 )
 
 type mockOIDCProvider struct {
 	server *httptest.Server
 	key    *rsa.PrivateKey
 	keyID  string
-	// tokenEndpoint is the path -- registered by newMockOIDCProviderWithRoutes'
-	// extraRoutes hook -- the discovery document advertises as this issuer's
-	// token endpoint. Empty means this provider serves no token endpoint, and
-	// the document says so by omission rather than by naming one it would not
-	// answer at.
+	// tokenEndpoint is advertised in discovery; empty omits it.
 	tokenEndpoint string
 }
 
@@ -37,12 +32,7 @@ func newMockOIDCProvider(t *testing.T) *mockOIDCProvider {
 	return newMockOIDCProviderWithRoutes(t, nil)
 }
 
-// newMockOIDCProviderWithRoutes is newMockOIDCProvider plus a hook to register
-// routes on the provider's own mux before it starts serving, so a test that
-// needs the issuer to do more than discovery-and-keys -- a token endpoint, say
-// -- extends this provider instead of standing up a second one beside it. The
-// provider is passed rather than only its mux because an added route usually
-// also has to be advertised in the discovery document.
+// newMockOIDCProviderWithRoutes registers extra routes before the provider serves.
 func newMockOIDCProviderWithRoutes(t *testing.T, extraRoutes func(*mockOIDCProvider, *http.ServeMux)) *mockOIDCProvider {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -89,9 +79,7 @@ func (p *mockOIDCProvider) sign(t *testing.T, claims map[string]any) string {
 	return token
 }
 
-// signClaims is sign for a caller that is not the test goroutine. An
-// http.Handler minting a token per request cannot call t.Fatalf, so it needs
-// the error rather than the failure.
+// signClaims returns the error for use off the test goroutine.
 func (p *mockOIDCProvider) signClaims(claims map[string]any) (string, error) {
 	signer, err := jose.NewSigner(
 		jose.SigningKey{Algorithm: jose.RS256, Key: p.key},
@@ -107,8 +95,8 @@ func (p *mockOIDCProvider) signClaims(claims map[string]any) (string, error) {
 	return token, nil
 }
 
-// signWithUntrustedKey signs claims with a fresh key while keeping the provider's
-// kid, so the JWKS lookup succeeds but the signature cannot verify against it.
+// signWithUntrustedKey keeps the provider's kid so JWKS lookup succeeds but the
+// signature does not verify.
 func (p *mockOIDCProvider) signWithUntrustedKey(t *testing.T, claims map[string]any) string {
 	t.Helper()
 	otherKey, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -131,10 +119,11 @@ func (p *mockOIDCProvider) signWithUntrustedKey(t *testing.T, claims map[string]
 
 func writeOIDCJSON(w http.ResponseWriter, value any) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(value)
+	if err := json.NewEncoder(w).Encode(value); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
-// mustVerify returns the claims of a token the verifier must accept.
 func mustVerify(t *testing.T, verifier *BearerTokenVerifier, token string) Claims {
 	t.Helper()
 	claims, err := verifier.VerifyBearerToken(context.Background(), token)
@@ -144,7 +133,6 @@ func mustVerify(t *testing.T, verifier *BearerTokenVerifier, token string) Claim
 	return claims
 }
 
-// mustReject fails with why unless the verifier rejects the token.
 func mustReject(t *testing.T, verifier *BearerTokenVerifier, token string, why string) {
 	t.Helper()
 	if _, err := verifier.VerifyBearerToken(context.Background(), token); err == nil {
@@ -170,8 +158,6 @@ func TestVerifyBearerTokenDelegatesToSharedVerifier(t *testing.T) {
 		if claims.Issuer != provider.issuer() || claims.Subject != "user-1" || claims.Username != "user@example" {
 			t.Fatalf("claims = %+v", claims)
 		}
-		// The raw map is preserved so the identity resolver can read a per-issuer
-		// org claim whose name is not known to the verifier.
 		if claims.Raw["org_id"] != "org-7" {
 			t.Fatalf("raw org_id = %v", claims.Raw["org_id"])
 		}
@@ -215,10 +201,6 @@ func TestVerifyBearerTokenDelegatesToSharedVerifier(t *testing.T) {
 	})
 }
 
-// mustRejectWith fails unless the verifier rejects the token with an error
-// mentioning every want. The rejection has to name the audience the token
-// carried and the ones configured, or an operator is left guessing at a
-// one-line config problem.
 func mustRejectWith(t *testing.T, verifier *BearerTokenVerifier, token string, wants ...string) {
 	t.Helper()
 	_, err := verifier.VerifyBearerToken(context.Background(), token)
@@ -232,10 +214,6 @@ func mustRejectWith(t *testing.T, verifier *BearerTokenVerifier, token string, w
 	}
 }
 
-// TestVerifyBearerTokenOIDCAudience exercises the audience policy on the OIDC
-// path. The issuer allow-list cannot tell two clients of one IdP apart, so
-// without this a token that issuer minted for any of its clients authenticates
-// against the API.
 func TestVerifyBearerTokenOIDCAudience(t *testing.T) {
 	provider := newMockOIDCProvider(t)
 	now := time.Now()
@@ -278,8 +256,6 @@ func TestVerifyBearerTokenOIDCAudience(t *testing.T) {
 		mustRejectWith(t, verifier, token("some-other-client"), "some-other-client", "console-client", "cli-client")
 	})
 
-	// Fail closed: an explicit allow-list is a statement about which audiences
-	// may call, and a token naming none cannot satisfy it.
 	t.Run("a token with no aud claim is rejected once an allow-list is configured", func(t *testing.T) {
 		verifier := NewBearerTokenVerifier(BearerTokenVerifierOptions{
 			AllowedIssuers:   []string{provider.issuer()},
@@ -288,8 +264,6 @@ func TestVerifyBearerTokenOIDCAudience(t *testing.T) {
 		mustRejectWith(t, verifier, token(nil), "carries no audience", "console-client")
 	})
 
-	// Empty means any, matching the issuer allow-list beside it, so a deployment
-	// that has not established its client ids keeps working exactly as before.
 	t.Run("an unconfigured allow-list accepts any audience", func(t *testing.T) {
 		verifier := NewBearerTokenVerifier(BearerTokenVerifierOptions{AllowedIssuers: []string{provider.issuer()}})
 		mustVerify(t, verifier, token("some-other-client"))
@@ -297,20 +271,17 @@ func TestVerifyBearerTokenOIDCAudience(t *testing.T) {
 	})
 }
 
-// TestVerifyBearerTokenFileIssuer exercises the file:// desktop path: a
-// desktop-signed EdDSA token authenticates to the API with no live IdP,
-// the same auth the MCP edge uses, with the API audience enforced.
 func TestVerifyBearerTokenFileIssuer(t *testing.T) {
 	privatePEM, keyPath := newDesktopIdentity(t)
-	issuer := eruncommon.FileIssuer(keyPath)
+	issuer := mcpauth.FileIssuer(keyPath)
 	verifier := NewBearerTokenVerifier(BearerTokenVerifierOptions{DesktopPublicKeyPath: keyPath})
 	now := time.Now()
 
 	t.Run("valid desktop token authenticates", func(t *testing.T) {
-		token := signDesktopToken(t, privatePEM, eruncommon.MCPTokenClaims{
+		token := signDesktopToken(t, privatePEM, mcpauth.MCPTokenClaims{
 			Issuer:    issuer,
 			Subject:   "dev-user",
-			Audience:  eruncommon.APITokenAudience,
+			Audience:  mcpauth.APITokenAudience,
 			ExpiresAt: now.Add(time.Hour).Unix(),
 		})
 		claims := mustVerify(t, verifier, token)
@@ -320,10 +291,10 @@ func TestVerifyBearerTokenFileIssuer(t *testing.T) {
 	})
 
 	t.Run("a token minted for an MCP env audience is rejected against the API", func(t *testing.T) {
-		token := signDesktopToken(t, privatePEM, eruncommon.MCPTokenClaims{
+		token := signDesktopToken(t, privatePEM, mcpauth.MCPTokenClaims{
 			Issuer:    issuer,
 			Subject:   "dev-user",
-			Audience:  eruncommon.MCPTokenAudience("acme", "prod"),
+			Audience:  mcpauth.MCPTokenAudience("acme", "prod"),
 			ExpiresAt: now.Add(time.Hour).Unix(),
 		})
 		mustReject(t, verifier, token, "expected an MCP-audience token to be rejected against the API")
@@ -331,45 +302,40 @@ func TestVerifyBearerTokenFileIssuer(t *testing.T) {
 
 	t.Run("a token claiming the trusted issuer but signed by a different key is rejected", func(t *testing.T) {
 		attackerPrivate, _ := newDesktopIdentity(t)
-		token := signDesktopToken(t, attackerPrivate, eruncommon.MCPTokenClaims{
+		token := signDesktopToken(t, attackerPrivate, mcpauth.MCPTokenClaims{
 			Issuer:    issuer,
 			Subject:   "intruder",
-			Audience:  eruncommon.APITokenAudience,
+			Audience:  mcpauth.APITokenAudience,
 			ExpiresAt: now.Add(time.Hour).Unix(),
 		})
 		mustReject(t, verifier, token, "expected a token signed by a key other than the trusted public key to be rejected")
 	})
 
 	t.Run("expired token is rejected", func(t *testing.T) {
-		token := signDesktopToken(t, privatePEM, eruncommon.MCPTokenClaims{
+		token := signDesktopToken(t, privatePEM, mcpauth.MCPTokenClaims{
 			Issuer:    issuer,
 			Subject:   "dev-user",
-			Audience:  eruncommon.APITokenAudience,
+			Audience:  mcpauth.APITokenAudience,
 			ExpiresAt: now.Add(-time.Minute).Unix(),
 		})
 		mustReject(t, verifier, token, "expected an expired token to be rejected")
 	})
 
-	// The OIDC audience allow-list is policy for the hosted IdP's clients only.
-	// The desktop signs its own tokens and keeps being held to erun's own API
-	// audience, whatever that allow-list says.
 	t.Run("an OIDC audience allow-list leaves the desktop path's own audience check alone", func(t *testing.T) {
 		verifier := NewBearerTokenVerifier(BearerTokenVerifierOptions{
 			DesktopPublicKeyPath: keyPath,
 			AllowedAudiences:     []string{"console-client"},
 		})
-		accepted := signDesktopToken(t, privatePEM, eruncommon.MCPTokenClaims{
+		accepted := signDesktopToken(t, privatePEM, mcpauth.MCPTokenClaims{
 			Issuer:    issuer,
 			Subject:   "dev-user",
-			Audience:  eruncommon.APITokenAudience,
+			Audience:  mcpauth.APITokenAudience,
 			ExpiresAt: now.Add(time.Hour).Unix(),
 		})
 		mustVerify(t, verifier, accepted)
 
-		// Neither the desktop's own MCP audience nor the OIDC allow-list's
-		// entry is an API audience for a desktop-signed token.
-		for _, audience := range []string{eruncommon.MCPTokenAudience("acme", "prod"), "console-client"} {
-			rejected := signDesktopToken(t, privatePEM, eruncommon.MCPTokenClaims{
+		for _, audience := range []string{mcpauth.MCPTokenAudience("acme", "prod"), "console-client"} {
+			rejected := signDesktopToken(t, privatePEM, mcpauth.MCPTokenClaims{
 				Issuer:    issuer,
 				Subject:   "dev-user",
 				Audience:  audience,
@@ -381,21 +347,19 @@ func TestVerifyBearerTokenFileIssuer(t *testing.T) {
 
 	t.Run("a desktop token from an untrusted file issuer is rejected", func(t *testing.T) {
 		otherPrivate, otherPath := newDesktopIdentity(t)
-		token := signDesktopToken(t, otherPrivate, eruncommon.MCPTokenClaims{
-			Issuer:    eruncommon.FileIssuer(otherPath),
+		token := signDesktopToken(t, otherPrivate, mcpauth.MCPTokenClaims{
+			Issuer:    mcpauth.FileIssuer(otherPath),
 			Subject:   "intruder",
-			Audience:  eruncommon.APITokenAudience,
+			Audience:  mcpauth.APITokenAudience,
 			ExpiresAt: now.Add(time.Hour).Unix(),
 		})
 		mustReject(t, verifier, token, "expected a token from a non-configured file issuer to be rejected")
 	})
 }
 
-// newDesktopIdentity mints a desktop identity and writes its public key where a
-// file:// issuer resolves it, returning the private key and that path.
 func newDesktopIdentity(t *testing.T) (privatePEM []byte, keyPath string) {
 	t.Helper()
-	privatePEM, publicPEM, err := eruncommon.GenerateDesktopIdentity()
+	privatePEM, publicPEM, err := mcpauth.GenerateDesktopIdentity()
 	if err != nil {
 		t.Fatalf("generate desktop identity: %v", err)
 	}
@@ -406,9 +370,9 @@ func newDesktopIdentity(t *testing.T) (privatePEM []byte, keyPath string) {
 	return privatePEM, keyPath
 }
 
-func signDesktopToken(t *testing.T, privateKey []byte, claims eruncommon.MCPTokenClaims) string {
+func signDesktopToken(t *testing.T, privateKey []byte, claims mcpauth.MCPTokenClaims) string {
 	t.Helper()
-	token, err := eruncommon.SignMCPToken(privateKey, claims)
+	token, err := mcpauth.SignMCPToken(privateKey, claims)
 	if err != nil {
 		t.Fatalf("sign token: %v", err)
 	}

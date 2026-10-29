@@ -1,0 +1,366 @@
+# 173 bound methods
+AddReviewer(S6352e5242a) (S6cec89cb67, error)
+AdvanceMergeQueue(S666b04c207) (Sf6c65a634e, error)
+ApplyPinVersion(S47452a445a, string) (Sfb62737d4d, error)
+ApproveTenantInviteRequest(Sa24d6f5693) (Sffd1c6222c, error)
+CancelEnvironmentJob(S52d64d239c) (Sabe8b14e21, error)
+CancelPendingIdleStop(S47452a445a) (error)
+CancelWaitingAction(string) (bool)
+CheckEnvironmentHealth(S47452a445a) (Sdb9538124f, error)
+CheckHostedDefinitionDrift(string, string) (Sf1ab96caf8, error)
+ChooseLocalRepoPath(string) (string, error)
+ChooseWorkspaceSyncLocalFolder(S47452a445a, string) (string, error)
+ClearGatewayCredential() (S706820ae70, error)
+CloseEnvironmentSessions(S47452a445a) ([]int, error)
+CloseReview(Sea29d670ba) (Sf6c65a634e, error)
+CloseSession(int) (error)
+ConfirmWindowClose() (error)
+ConnectERunPlatform(S0fd231874b) (S19aabe44f5, error)
+ConsumeInterruptedActivityNotice() ([]Sae1059ee48)
+CreateOrchestrator(string, []S2fe116f949, []string, string, S0c27181f39) (S548f559dbc, error)
+CreatePlatformContext(Sd3429f91e9) (S0bad0efcc5, error)
+CreateReview(Sf25019fa96) (Sf6c65a634e, error)
+CreateReviewComment(Sa1968dec61) (S84ecead565, error)
+CreateReviewReply(S492947ef0e) (S84ecead565, error)
+DeclineTenantInviteRequest(S7c61c10fef) (Sffd1c6222c, error)
+DeleteEnvironment(S47452a445a, string) (S256ed43d4e, error)
+DeleteOrchestrator(string) (error)
+DeletePlatformEnvironment(S4919d823a0) (S8e5ba59283, error)
+DeployPlatformEnvironment(S4919d823a0) (S8e5ba59283, error)
+DescribeCloudContextApiStop(string) (S13b441e68c, error)
+DiffReviewStatus(Sdf5c4d7698) (S586969bd3c, error)
+DisableCloudContextApiStop(string) (S13b441e68c, error)
+DismissDeploy(string) (bool)
+DownloadAgentOutput(S47452a445a, string) (string, error)
+DownloadOrchestratorOutput(string, string) (string, error)
+EnableCloudContextApiStop(string) (S13b441e68c, error)
+EndAISessions(S47452a445a) (bool, error)
+EnrollERunPlatformUser(Sa7efbebd1f) (S4688f56906, error)
+EnvironmentWorkingIssue(S47452a445a) (Sf82cc642f6, error)
+ExecCommit(S47452a445a, S0cd1fd207a) (See795e818e, error)
+ExecPush(S47452a445a, S61d55a0104) (S44a316a17a, error)
+ExposeEnvironmentService(S47452a445a, S414ef76273) (S871dc6c180, error)
+FindActiveDeployForSelection(S47452a445a) (Sae1059ee48)
+ForceDismissActivity(string) (bool)
+GetCloudProviderBearerToken(string) (Sb04b5df895, error)
+GetContributeMode(S47452a445a) (bool)
+GetDeploy(string) (Sae1059ee48)
+GetMyTenantInviteRequest(S1df8a2c893) (*Sffd1c6222c, error)
+InitAWSCloudProvider(S77b3352bc7) (S19aabe44f5, error)
+InitCloudContext(S608d387954) (S13b441e68c, error)
+InvestigateFailure(string, string, string, int, int) (S548f559dbc, error)
+IsContributeEligible(S47452a445a) (bool)
+KillSession(int) (bool)
+ListAgentOutputs(S47452a445a) (Sadddbdf731, error)
+ListDeploys() ([]Sae1059ee48)
+ListEnvironmentExposures(S47452a445a) (S5291c58d4f, error)
+ListEnvironmentServices(S47452a445a) (S5cb452a38a, error)
+ListHostArtifacts(S47452a445a) ([]See48ade463, error)
+ListOrchestratorAliasChoices() ([]string, error)
+ListOrchestratorEnvCandidates() ([]S124a59f381, error)
+ListOrchestratorLaunchChoices() (Sd29f74933a, error)
+ListOrchestratorOutputs(string) (Sadddbdf731, error)
+ListOrchestrators() ([]S548f559dbc)
+ListPinnableVersions(S47452a445a) ([]string, error)
+ListRemoteAppSessions(S47452a445a) ([]string)
+ListTenantPlatformEnrollmentStatuses(S48e45e225c) ([]Sc77e324b09)
+LoadAppLog() (S926e05c7f3, error)
+LoadCloudContextStatuses() ([]S13b441e68c, error)
+LoadCloudProviderStatuses() ([]S19aabe44f5, error)
+LoadClusterRegistry(S9dbe6a2edc) (S95ee0fd6fe, error)
+LoadDeployComponents(S47452a445a) (S4603b9d465, error)
+LoadDiff(S47452a445a, S235cabda24) (S6a6d9d61ed, error)
+LoadDirectoryDiff(string, S235cabda24) (S6a6d9d61ed, error)
+LoadERunConfig() (S2680327028, error)
+LoadEnvTrace(S47452a445a) (S6f93eab7ef, error)
+LoadEnvironmentConfig(S47452a445a) (S9abd6debf2, error)
+LoadEnvironmentGatewayRouting(S47452a445a) (S5484b542a0, error)
+LoadEnvironmentJobs(string, string) ([]Sabe8b14e21, error)
+LoadGatewayCredentialStatus() (S706820ae70, error)
+LoadGatewayModels(string) ([]Sf8382731a5, error)
+LoadGatewayRoutingDrift() ([]S5484b542a0, error)
+LoadHostDiff(S47452a445a, S235cabda24) (S6a6d9d61ed, error)
+LoadHostGatewayDefaults() (Saf5d24504a, error)
+LoadHostedRegistry() (S99f311250a, error)
+LoadIdleStatus(S47452a445a) (Sbf0c027a0d, error)
+LoadKubernetesContexts() ([]string, error)
+LoadReviewDetail(Sea29d670ba) (S76a8e3cb42, error)
+LoadRuntimeActivity(S47452a445a) (S0f825bf6bc, error)
+LoadRuntimeResourceStatus(S9dbe6a2edc) (S873fdfcd54, error)
+LoadRuntimeRunState(S47452a445a) (Sc121e1bdda, error)
+LoadRuntimeSizing(S47452a445a) (S6d00571f66, error)
+LoadRuntimeUsage(S47452a445a) (S417cfa1576, error)
+LoadState() (Sd0461257d8, error)
+LoadStopHistory(S47452a445a) ([]Sa86f5caf3a, error)
+LoadTenantConfig(string) (S50ec0dbbef, error)
+LoadTenantDashboard(S032b6b196c) (Sf93165ecbb, error)
+LoadVersionSuggestions(S47452a445a) (S7d9733ed5c, error)
+LoginCloudProvider(string) (S19aabe44f5, error)
+LogoutCloudProvider(string) (S19aabe44f5, error)
+OpenHostIDE(S47452a445a, string) (error)
+OpenHostPath(string) (error)
+OpenIDE(S47452a445a, string) (error)
+OrchestratorGuidancePaths(string) (S4a885b6930)
+OverrideAdvanceMergeQueue(Sbef7ffbf2c) (Sf6c65a634e, error)
+PinRepoCheckoutStatus(S47452a445a) (Sdadba8f2a7, error)
+PrepareWindowClose() (Sb98e8ecf2b)
+PreviewPinVersion(S47452a445a, string) (Sfb62737d4d, error)
+PreviewPlatformEnvironment(Scb3a981584) (S51f2e08636, error)
+ReadEnvironmentJobOutput(S103dd54f85) (S5fa43bea22, error)
+ReclaimRuntimeResources(S1fc2c81b9b) (S562dd1b9c0, error)
+ReconnectMCP(S47452a445a) (error)
+RecoverPendingHelmRelease(string) (S6ea227096a)
+RegisterPlatformEnvironment(Scb3a981584) (S8e5ba59283, error)
+RemoveReviewer(S6352e5242a) (error)
+RepaintSession(int) (error)
+ReportBugFailure(string, string, string, int, int) (S94c0049798, error)
+ResetEnvironmentActivityObservations() ()
+ResetEnvironmentUsageObservations() ()
+ResizeRuntimeToRecommendation(S47452a445a, bool) (S6d00571f66, error)
+ResizeSession(int, int, int) (error)
+ResolveEnvironmentHostPath(S47452a445a, string) (Sfb76ffa2df, error)
+ResolveOrchestratorToReopen() (S9eac9ed938)
+ResolveReviewComment(S0de17dc682) (S84ecead565, error)
+ResolveUpgradePlan() (Sd32351f053, error)
+RestartApp(string) (error)
+RestartOrchestrator(string, int, int) (S548f559dbc, error)
+RevealHostPath(string) (error)
+RevealOrchestratorGuidance(string, string, string) (error)
+RevertPinVersion(S47452a445a) (Sfb62737d4d, error)
+RunHostArtifact(S47452a445a, string) (error)
+RunOrchestratorOutputOnHost(string, string) (error)
+SaveAWSCloudProviderAlias(S77b3352bc7) (S19aabe44f5, error)
+SaveERunConfig(S2680327028) (S2680327028, error)
+SaveEnvironmentConfig(S47452a445a, S9abd6debf2) (S9abd6debf2, error)
+SaveGatewayCredential(string) (S706820ae70, error)
+SavePastedFile(int, S86e51e8cae) (Sca59d9e6cd, error)
+SaveTenantConfig(S50ec0dbbef) (S50ec0dbbef, error)
+SendSessionInput(int, string) (error)
+SetContributeMode(S47452a445a, bool) (S9b12e6f7a4, error)
+SetEmitter(func(string, ...any) ()) ()
+SetEnvironmentAutoStart(S47452a445a, string) (S9abd6debf2, error)
+SetupCloudProviderOIDC(string) (S19aabe44f5, error)
+StartAISession(S47452a445a, int, int, int, bool) (S9357dc5663, error)
+StartCloudContext(string) (S13b441e68c, error)
+StartCloudInitAWSSession(int, int) (S9357dc5663, error)
+StartCloudInitCloudflareSession(int, int) (S9357dc5663, error)
+StartContributeAISession(S47452a445a, int, int, int) (S9357dc5663, error)
+StartContributeApp(S47452a445a) (Seff0c25e82, error)
+StartContributeSession(S47452a445a, int, int, int) (S9357dc5663, error)
+StartCreateVersionSession(S47452a445a, int, int) (S9357dc5663, error)
+StartDeploySession(S47452a445a, int, int) (S9357dc5663, error)
+StartDoctorSession(S47452a445a, int, int) (S9357dc5663, error)
+StartForceDeploySession(S47452a445a, int, int) (S9357dc5663, error)
+StartInitSession(S47452a445a, int, int) (S9357dc5663, error)
+StartInitialDeploySession(S47452a445a, int, int) (S9357dc5663, error)
+StartLocalSession(S47452a445a, int, int, int) (S9357dc5663, error)
+StartOrchestrator(string, int, int) (S548f559dbc, error)
+StartSSHDInitSession(S47452a445a, int, int) (S9357dc5663, error)
+StartSession(S47452a445a, int, int, int) (S9357dc5663, error)
+StartUpgradeEnvironmentSession(S47452a445a, int, int) (S9357dc5663, error)
+StopCloudContext(string) (S13b441e68c, error)
+StopEnvironment(S47452a445a) (S37d7dc8983, error)
+StopOrchestrator(string) (error)
+StopPlatformEnvironment(S4919d823a0) (S8e5ba59283, error)
+SubmitTenantInviteRequest(S62289b649b) (Sdfe4d17359, error)
+SwitchCloudProviderIdentity(string) (S19aabe44f5, error)
+TenantReviewCreateCapability(string) (Seeb4957507, error)
+TriggerEnvironmentActivitySweep() ()
+UnexposeEnvironment(S47452a445a) (S959766d007, error)
+UnresolveReviewComment(S0de17dc682) (S84ecead565, error)
+UpdateOrchestrator(string, string, []S2fe116f949, []string, string, S0c27181f39) (S548f559dbc, error)
+UploadHostedDefinition(string, string) (Sbcb6935e22, error)
+WhipNow([]Sc05b3e87d2) (S42598a99b1, error)
+WhipTargets() (S252c090f6b, error)
+
+# struct shapes
+S018cbfc211 = {retryAfterSeconds: int}
+S032b6b196c = {tenant: string, environment,omitempty: string, mcpUrl,omitempty: string, kubernetesContext,omitempty: string, platformAlias,omitempty: string, reviewFilterMine,omitempty: bool, reviewFilterWaitingOnMe,omitempty: bool}
+S05f33aceb5 = {total: float64, used: float64, free: float64, unit: string, formatted: string, floored: bool}
+S088e6b7c93 = {cpuMilli,omitempty: int64, memoryBytes,omitempty: int64, cpu,omitempty: string, memory,omitempty: string}
+S0bad0efcc5 = {kind: string, context,omitempty: *Sb250f0bf40, plan,omitempty: []string, message,omitempty: string}
+S0c27181f39 = {useGateway: bool, model: string, effort: string}
+S0cd1fd207a = {branch: string, message: string}
+S0de17dc682 = {tenant: string, reviewId: string, commentId: string}
+S0f825bf6bc = {tenant: string, environment: string, available: bool, message,omitempty: string, sessionsRunning: int, sessions,omitempty: []S33f5ebd4c5, processes,omitempty: []S89a72c5b87, memoryHeld,omitempty: string, memoryHeldMiB,omitempty: int64}
+S0fd231874b = {apiUrl: string, tenant,omitempty: string}
+S103dd54f85 = {tenant: string, environment: string, id: string, offset: int64, maxBytes: int64}
+S124a59f381 = {tenant: string, environment: string, environmentType: string, eligible: bool, defaultDirectory: string, mirrored: bool, requiredRole,omitempty: string, ineligibleReason: string}
+S13b441e68c = {name: string, provider: string, cloudProviderAlias: string, region: string, instanceId,omitempty: string, publicIp,omitempty: string, instanceType: string, diskType: string, diskSizeGb: int, kubernetesContext: string, status: string, message,omitempty: string, stopProtection,omitempty: bool, stopProtectionKnown,omitempty: bool}
+S1483965ea7 = {provider: string, alias: string, options: []string}
+S19aabe44f5 = {alias: string, provider: string, username,omitempty: string, accountId,omitempty: string, profile,omitempty: string, oidcIssuerUrl,omitempty: string, status: string, message,omitempty: string}
+S1ad88e899c = {name: string, path: string, parentPath,omitempty: string, type: string, depth: int, status,omitempty: string, additions,omitempty: int, deletions,omitempty: int}
+S1c55980374 = {service: string, namespace: string, port: int, insecure: bool, label: string}
+S1df8a2c893 = {tenant: string}
+S1fc2c81b9b = {tenant: string, environment: string, action: string}
+S235cabda24 = {scope,omitempty: string, selectedCommit,omitempty: string, target,omitempty: string}
+S252c090f6b = {environments: []Scccce9fa75, orchestrators: []Sd0b4f0b197}
+S256ed43d4e = {tenant: string, environment: string, namespace,omitempty: string, kubernetesContext,omitempty: string, namespaceDeleteError,omitempty: string, cloudContextStopError,omitempty: string}
+S265a79a85b = {name,omitempty: string, port: int}
+S2680327028 = {defaultTenant: string, cloudProviders,omitempty: []S19aabe44f5, cloudContexts,omitempty: []S13b441e68c, openRouter,omitempty: *Sd0f71acdbe, openRouterDefaults,omitempty: *Saf5d24504a}
+S2897b99ae3 = {name: string, idle: bool, reason,omitempty: string, secondsIdleFor,omitempty: int64}
+S297792204a = {cpu: S05f33aceb5, memory: S05f33aceb5, message,omitempty: string, notice,omitempty: string}
+S2be8cbf540 = {available: bool, unavailable,omitempty: string, quotaCores,omitempty: float64, quota,omitempty: string, utilizationPercent,omitempty: float64, utilization,omitempty: string, usageUsec,omitempty: int64}
+S2fe116f949 = {tenant: string, environment: string, directory: string, role: string}
+S32df103215 = {branch,omitempty: string, commit,omitempty: string, shortCommit,omitempty: string}
+S3304609f5c = {address: string, bytes,omitempty: int64, secondsAgo,omitempty: int64}
+S33f5ebd4c5 = {id: string, running: bool, program,omitempty: string}
+S37d7dc8983 = {tenant: string, environment: string, release: string, namespace: string, alreadyStopped: bool, remainingComponents,omitempty: []string}
+S3a36592265 = {kind: string, id: string, name: string, outcome: string, reason,omitempty: string, error,omitempty: string}
+S3fb03327cf = {available: bool, unavailable,omitempty: string, cpuSeconds,omitempty: float64, cpuPercentOfQuota,omitempty: float64, throttledPeriods,omitempty: int64, totalPeriods,omitempty: int64, throttledSeconds,omitempty: float64, ioReadBytes,omitempty: int64, ioWriteBytes,omitempty: int64, peakMemoryBytes,omitempty: int64}
+S41342fe1dd = {type: string, actor,omitempty: string, action: string, createdAt,omitempty: string}
+S414ef76273 = {service: string, backendService,omitempty: string, targetIP: string, port,omitempty: int}
+S417cfa1576 = {tenant: string, environment: string, available: bool, message,omitempty: string, cpu: S2be8cbf540, memory: Sd4ba9913a5, disk,omitempty: []Sbd42d202e8, warnings,omitempty: []string, excludesBuilds,omitempty: bool, dind,omitempty: *S5bbaf19b29, requests,omitempty: *Scdd7870c0f}
+S42598a99b1 = {results: []S3a36592265}
+S42b02dc1b5 = {name: string, durationSeconds: float64, cgroup,omitempty: *S3fb03327cf}
+S44a316a17a = {branch: string, remote: string, commit: string}
+S4603b9d465 = {components: []Sc5b7a503e2, runtimeChart: Sa0cb3e3c60}
+S4688f56906 = {userId: string, tenantId: string, username: string}
+S4737020d77 = {enabled: bool, localPort: int, publicKeyPath: string, workspaceSyncEnabled: bool, workspaceSyncLocalPath,omitempty: string, workspaceSyncStatus,omitempty: string, workspaceSyncStatusMessage,omitempty: string}
+S47452a445a = {tenant: string, environment: string, version,omitempty: string, runtimeImage,omitempty: string, runtimeCpu,omitempty: string, runtimeMemory,omitempty: string, kubernetesContext,omitempty: string, containerRegistry,omitempty: string, clusterRegistry,omitempty: bool, erunRegistry,omitempty: bool, runtimeRegistry,omitempty: string, imagePullSecrets,omitempty: []string, type,omitempty: string, localRepoPath,omitempty: string, noGit,omitempty: bool, setDefaultTenant,omitempty: bool, components,omitempty: []string}
+S479ac22b62 = {orchestratorId: string}
+S48a7ecab1e = {name: string, type,omitempty: string, ports,omitempty: []S265a79a85b, hostname,omitempty: string, scheme,omitempty: string, exposedAs,omitempty: string}
+S48e45e225c = {tenants: []string}
+S4919d823a0 = {tenant: string, environmentId: string, version,omitempty: string}
+S492947ef0e = {tenant: string, reviewId: string, parentCommentId: string, commitId: string, filePath: string, line: int, body: string}
+S4a885b6930 = {role: string, shared: string}
+S50ec0dbbef = {name: string, defaultEnvironment: string, apiUrl: string, cloudProviderAliases,omitempty: []string, primaryCloudProviderAlias,omitempty: string, cloudProviders,omitempty: []S19aabe44f5}
+S51f2e08636 = {plan: []string, quotaOk: bool}
+S5291c58d4f = {configured: bool, restricted: bool, error,omitempty: string, services: []S871dc6c180, notConfiguredReason,omitempty: string}
+S52d64d239c = {tenant: string, environment: string, id: string, signal,omitempty: string}
+S5484b542a0 = {tenant: string, environment: string, deployed: string, wanted: string}
+S548f559dbc = {id: string, name: string, environments: []Saed1eb1753, tenants: []string, directories: []string, sessionId: int, status: string, busy: bool, busyAtUnix,omitempty: int64, transient: bool, shellRunning: bool, shellCommand,omitempty: string, shellStartedAtUnix,omitempty: int64, nudgeCount: int, nudgeCapped: bool, lastNudgeAtUnix,omitempty: int64, autoNudgeCount: int, lastAutoNudgeAtUnix,omitempty: int64, whipCount: int, lastWhipAtUnix,omitempty: int64, lastCappedAtUnix,omitempty: int64, nudgeHistoryUnreadable,omitempty: bool, pacingUnreachable,omitempty: bool, restartRequired: bool, roleChanged: bool, alias,omitempty: string, useGateway,omitempty: bool, model,omitempty: string, effort,omitempty: string, launchSettingsChanged: bool}
+S562dd1b9c0 = {action: string, message: string}
+S586969bd3c = {state: string, platformState,omitempty: string, reviewId,omitempty: string, name,omitempty: string, repository,omitempty: string, queuePosition,omitempty: int, unresolvedThreads,omitempty: *int, lastFailedBuildId,omitempty: string, lastMergedBuildId,omitempty: string, canAdvanceMergeQueue: bool}
+S5bbaf19b29 = {cpu: S2be8cbf540, memory: Sd4ba9913a5}
+S5cb452a38a = {configured: bool, restricted: bool, error,omitempty: string, services: []S48a7ecab1e, notConfiguredReason,omitempty: string}
+S5fa43bea22 = {job: Sabe8b14e21, offset: int64, nextOffset: int64, output: string, hasMore: bool, complete: bool}
+S608d387954 = {name,omitempty: string, cloudProviderAlias: string, region: string, instanceType: string, diskType: string, diskSizeGb: int}
+S61d55a0104 = {branch: string, remote,omitempty: string}
+S62289b649b = {tenant: string, kind: string, tenantName: string, environmentName,omitempty: string, note,omitempty: string}
+S6352e5242a = {tenant: string, reviewId: string, userId: string}
+S666b04c207 = {tenant: string, repository: string, targetBranch: string}
+S67942ff16e = {name: string, schedulable: S297792204a, schedulableComplete: bool, worstCase: S297792204a}
+S6895257fd8 = {tenantId: string, tenantName,omitempty: string, userId: string, username,omitempty: string, roles,omitempty: []string, issuer,omitempty: string, subject,omitempty: string, createdAt,omitempty: string, updatedAt,omitempty: string}
+S6a6d9d61ed = {workingDirectory,omitempty: string, rawDiff: string, summary: Sb0db297e80, files,omitempty: []Sa7be46e518, tree,omitempty: []S1ad88e899c, reviewBase,omitempty: S32df103215, reviewCommits,omitempty: []Sdef5af16cd, scope,omitempty: string, selectedCommit,omitempty: string, includesWorktree,omitempty: bool}
+S6cec89cb67 = {userId: string, username,omitempty: string}
+S6d00571f66 = {tenant: string, environment: string, available: bool, message,omitempty: string, noOp,omitempty: bool, actions,omitempty: []S93881728c0, verdicts,omitempty: []string, evidence,omitempty: string}
+S6d4d279623 = {kind: string, content: string, oldLine,omitempty: int, newLine,omitempty: int}
+S6ea227096a = {ok: bool, output: string, error,omitempty: string}
+S6f93eab7ef = {available: bool, content,omitempty: string, path: string, reason,omitempty: string, notice,omitempty: string}
+S706820ae70 = {ref: string, source,omitempty: string, hint,omitempty: string, hostEndpoint,omitempty: string}
+S7579ec965d = {environmentId: string, name: string, type: string, contextId,omitempty: string, kubernetesContext,omitempty: string, runtimeVersion,omitempty: string, status: string, provisionError,omitempty: string, deployedVersion,omitempty: string, deleteError,omitempty: string}
+S75d410954a = {recordedLine: string, observedLine: string}
+S76a8e3cb42 = {reviewId: string, apiError,omitempty: string, restricted,omitempty: string, accessRemedies,omitempty: map[string]Se83d28cfc2, error,omitempty: string, review,omitempty: *Sf6c65a634e, comments,omitempty: []S84ecead565, commentsRestricted,omitempty: string, commentsError,omitempty: string, builds,omitempty: []Sf9d6af8bc0, buildsRestricted,omitempty: string, buildsError,omitempty: string, queuePosition,omitempty: int, unresolvedThreads,omitempty: int, canComment: bool, canClose: bool, canResolveComments: bool, reviewers,omitempty: []S6cec89cb67, reviewersRestricted,omitempty: string, reviewersError,omitempty: string, canAssignReviewers: bool, canRemoveReviewers: bool, availableReviewers,omitempty: []S6cec89cb67}
+S77b3352bc7 = {alias,omitempty: string, username,omitempty: string, accountId,omitempty: string, profile,omitempty: string, ssoRegion,omitempty: string, ssoStartUrl,omitempty: string, oidcIssuerUrl,omitempty: string}
+S7adfb4b080 = {reviewId: string, repository,omitempty: string, name: string, targetBranch: string, sourceBranch: string, status: string}
+S7b89621037 = {usage: S417cfa1576, observedAtUnix: int64, staleAfterSeconds: int64}
+S7c61c10fef = {tenant: string, inviteRequestId: string, reason: string}
+S7d9733ed5c = {suggestions: []S9bb2832348, notices,omitempty: []Seb28dd8c1d}
+S84ecead565 = {commentId: string, creatorUserId,omitempty: string, creatorUsername,omitempty: string, status: string, parentCommentId,omitempty: string, commitId: string, filePath: string, line: int, body: string, createdAt,omitempty: string}
+S86e51e8cae = {data: string, mimeType,omitempty: string, name,omitempty: string}
+S871dc6c180 = {service: string, hostname: string, scheme: string, backendService,omitempty: string, tlsReady,omitempty: bool, tlsNotReadyReason,omitempty: string}
+S873fdfcd54 = {kubernetesContext: string, available: bool, message,omitempty: string, node,omitempty: string, schedulable: S297792204a, schedulableComplete: bool, worstCase: S297792204a, floored: bool, measuredUsage: bool, unmeasuredContainers,omitempty: int, unreadableRequests,omitempty: int, nodes,omitempty: []S67942ff16e}
+S8782341dca = {registry: string, cluster,omitempty: *S1c55980374, roles: []string}
+S88cb362ca6 = {name: string, label,omitempty: string, status: string}
+S896a750fe0 = {name: string, path: string, size: int64, modTime: marshaler(time.Time), isDir: bool}
+S89a72c5b87 = {id: string, label: string, count: int, memory: string, memoryMiB: int64, reclaim,omitempty: string, reclaimLabel,omitempty: string}
+S8e4977ed93 = {id: string, context,omitempty: int, requiresReasoningEcho,omitempty: bool}
+S8e5ba59283 = {kind: string, environment,omitempty: *S7579ec965d, message,omitempty: string}
+S920854c977 = {issueKey: string, issueRef,omitempty: string, issueRefSource,omitempty: string, rung: string, job,omitempty: *Sa8b20ca9fa, review,omitempty: *S7adfb4b080}
+S9233187f64 = {name: string, type,omitempty: string, mcpUrl,omitempty: string, apiUrl,omitempty: string, runtimeVersion,omitempty: string, runtimeVersionLine,omitempty: *Sfa5e516ee1, erunVersion,omitempty: *Sca748310ac, runtimeImageLineMismatch,omitempty: *S75d410954a, kubernetesContext,omitempty: string, isActive,omitempty: bool, sshdEnabled,omitempty: bool, autoStart,omitempty: *bool, activity,omitempty: *Sb7c450e61e, usage,omitempty: *S7b89621037, node,omitempty: *S88cb362ca6}
+S926e05c7f3 = {available: bool, content,omitempty: string, path: string, reason,omitempty: string}
+S9357dc5663 = {sessionId: int, selection: S47452a445a, slot,omitempty: int, kind,omitempty: string, orchestrated,omitempty: bool, occupancy,omitempty: []Scd81c7b72d}
+S93881728c0 = {resource: string, from: string, to: string}
+S94c0049798 = {orchestrator: S548f559dbc, admitted: bool, reason,omitempty: string, message,omitempty: string, existingId,omitempty: string}
+S959766d007 = {wildcardName: string}
+S95ee0fd6fe = {kubernetesContext: string, deployed: bool, service,omitempty: string, namespace,omitempty: string, port,omitempty: int, insecure: bool, message,omitempty: string}
+S994eb0f697 = {useMantle,omitempty: *bool, useBedrock,omitempty: *bool, useGateway,omitempty: *bool, models,omitempty: []string, maxOutputTokens,omitempty: *int, effort,omitempty: *string, defaultModel,omitempty: *string, verboseDebug,omitempty: bool}
+S99f311250a = {host: string, available: bool, reason,omitempty: string, recovery,omitempty: string}
+S9abd6debf2 = {name: string, type,omitempty: string, localRepoPath,omitempty: string, repoPath: string, kubernetesContext: string, containerRegistries: []S8782341dca, containerRegistriesInherited: bool, cloudProviderAlias: string, cloudProviderAliases,omitempty: []string, cloudAliasSlots,omitempty: []S1483965ea7, cloudContext,omitempty: *S13b441e68c, runtimeVersion: string, runtimeChart,omitempty: string, runtimeRegistry,omitempty: string, imagePullSecrets,omitempty: []string, runtimePod: Sd1d94bc333, sshd: S4737020d77, idle: Saaf1630fb1, claude: S994eb0f697, claudeDefaults: Sc06f882a09, aiTool,omitempty: string, aiLaunchSignature: string, localPorts: Sed26649625, autoStart,omitempty: *bool, remoteHostCredentials: bool, autoUpgrade: bool, upgradeChannel,omitempty: string, disableBuildScript: bool, platformAccount: bool, mountSource: bool, repoURL: string, deployComponents,omitempty: []string, hosted,omitempty: *Se53e16e081}
+S9b12e6f7a4 = {tenant: string, environment: string, enabled: bool}
+S9bb2832348 = {label: string, version: string, source,omitempty: string, image,omitempty: string}
+S9dbe6a2edc = {kubernetesContext: string, tenant,omitempty: string, environment,omitempty: string}
+S9eac9ed938 = {orchestratorId: string, alsoReopen,omitempty: []S479ac22b62}
+S9ed8e44bb6 = {name: string, idle: bool, reason,omitempty: string, secondsRemaining,omitempty: int64, clients,omitempty: []S3304609f5c}
+Sa0cb3e3c60 = {reference: string, version: string, chart: string, source: string, missing: bool, unknown: bool}
+Sa1968dec61 = {tenant: string, reviewId: string, commitId: string, filePath: string, line: int, body: string}
+Sa24d6f5693 = {tenant: string, inviteRequestId: string}
+Sa36fa0c370 = {version: string, registry,omitempty: string}
+Sa7be46e518 = {path: string, oldPath,omitempty: string, newPath,omitempty: string, status: string, additions: int, deletions: int, binary,omitempty: bool, hunks,omitempty: []Sc4314330a8}
+Sa7efbebd1f = {alias: string, username: string, issuer: string, subject: string}
+Sa86f5caf3a = {stoppedAt: string, armedAt,omitempty: string, graceSeconds: int64, source,omitempty: string, reason: string, cloudContextName,omitempty: string, policy,omitempty: *Saa6804f97d, markers,omitempty: []S2897b99ae3}
+Sa8b20ca9fa = {jobId: string, jobType: string, issueRef,omitempty: string, summary: string, status: string, actorKind: string, actorId: string, startedAt,omitempty: string, endedAt,omitempty: string}
+Sa8f11acd6e = {kind: string, label: string, current: string, target: string, aligned: bool}
+Saa6804f97d = {timeoutSeconds: int64, workingHours,omitempty: string, timezone,omitempty: string, idleTrafficBytes,omitempty: int64}
+Saaf1630fb1 = {timeout: string, workingHours: string, idleTrafficBytes: int64}
+Sabcee8e9bc = {activity,omitempty: string, lastMessage,omitempty: string, turns: int, toolsRun: int}
+Sabe8b14e21 = {id: string, name: string, state: string, kind,omitempty: string, agentTool,omitempty: string, command,omitempty: []string, dir,omitempty: string, exitCode: *int, startedAtUnix,omitempty: int64, endedAtUnix,omitempty: int64, progress,omitempty: *Sabcee8e9bc}
+Sadddbdf731 = {dir: string, entries: []S896a750fe0, total: int, truncated: bool}
+Sae1059ee48 = {id: string, command: string, tenant: string, environment: string, version,omitempty: string, release,omitempty: string, namespace,omitempty: string, kubernetesContext,omitempty: string, component,omitempty: string, image,omitempty: string, summary,omitempty: string, status: string, startedAt: marshaler(time.Time), endedAt,omitempty: marshaler(*time.Time), lastUpdated: marshaler(time.Time), containers,omitempty: []Sb6bd532229, error,omitempty: string, detail,omitempty: string, source,omitempty: string, sessionId,omitempty: string, actionKind,omitempty: string, enqueuedAt,omitempty: marshaler(*time.Time), startedRunningAt,omitempty: marshaler(*time.Time)}
+Saed1eb1753 = {tenant: string, environment: string, directory: string, role: string, activity,omitempty: *Sb7c450e61e, usage,omitempty: *S7b89621037}
+Saf5d24504a = {baseUrl,omitempty: string, model,omitempty: string, context,omitempty: int}
+Sb00f859cd2 = {available: bool, changed: bool, describe: string}
+Sb04b5df895 = {alias: string, issuer,omitempty: string, token: string, provider: S19aabe44f5}
+Sb0db297e80 = {fileCount: int, additions: int, deletions: int}
+Sb20a7b2732 = {version: string, commit,omitempty: string, date,omitempty: string}
+Sb250f0bf40 = {contextId: string, name: string, provider: string, cloudProviderAlias,omitempty: string, region,omitempty: string, instanceType,omitempty: string, kubernetesContext,omitempty: string, status: string, provisionError,omitempty: string}
+Sb6bd532229 = {name: string, image: string, phase: string, ready: bool, restarts: int, reason,omitempty: string, message,omitempty: string}
+Sb7c450e61e = {reachable: bool, observed: bool, outage: bool, checkFailed,omitempty: bool, busy: bool, detail,omitempty: string}
+Sb98e8ecf2b = {blocked: bool, running,omitempty: []Sae1059ee48}
+Sbc72086974 = {durationSeconds: float64, failed,omitempty: bool, cgroup,omitempty: *S3fb03327cf, topSteps,omitempty: []S42b02dc1b5, totalStepCount,omitempty: int, truncatedStepCount,omitempty: int}
+Sbcb0d82dc6 = {issueKey: string, items: []S920854c977}
+Sbcb6935e22 = {revision: int, describe: string, localChange: Sb00f859cd2}
+Sbd42d202e8 = {mount: string, available: bool, unavailable,omitempty: string, totalBytes,omitempty: int64, total,omitempty: string, usedBytes,omitempty: int64, used,omitempty: string, percentUsed,omitempty: float64, percent,omitempty: string}
+Sbef7ffbf2c = {tenant: string, repository: string, targetBranch: string, reason: string}
+Sbf0c027a0d = {timeoutSeconds: int64, secondsUntilStop: int64, stopEligible: bool, outsideWorkingHours: bool, managedCloud: bool, fromPod: bool, stopBlockedReason,omitempty: string, stopError,omitempty: string, cloudContextName,omitempty: string, cloudContextStatus,omitempty: string, cloudContextLabel,omitempty: string, markers,omitempty: []S9ed8e44bb6, leases,omitempty: []Scd81c7b72d, stopPendingSince,omitempty: string, secondsUntilForcedStop,omitempty: int64, gracePeriodSeconds,omitempty: int64}
+Sc0249851c8 = {id: string, status: string, title: string, detail: string, fix,omitempty: string}
+Sc05b3e87d2 = {kind: string, id: string}
+Sc06f882a09 = {useMantle: bool, useBedrock: bool, models: []string, maxOutputTokens: int, knownModels: []string, minTokens: int, maxTokens: int, effort: string, effortLevels: []string, gatewayConfigured: bool, gatewayModels: []string, gatewayDefaultModel: string}
+Sc121e1bdda = {tenant: string, environment: string, present: bool, desiredReplicas: int, readyReplicas: int, stopped: bool, remainingComponents,omitempty: []string, message,omitempty: string}
+Sc4314330a8 = {header: string, oldStart: int, oldLines: int, newStart: int, newLines: int, lines,omitempty: []S6d4d279623}
+Sc5b7a503e2 = {name: string, runtime: bool, source: string, selected: bool, publishedChart,omitempty: string}
+Sc77e324b09 = {tenant: string, state: string, declineReason,omitempty: string, platformHost,omitempty: string, platformTenant,omitempty: string}
+Sca59d9e6cd = {path: string}
+Sca748310ac = {version,omitempty: string, sameAsRuntimeVersion,omitempty: bool}
+Scb3a981584 = {tenant: string, name: string, type: string, contextId,omitempty: string, kubernetesContext,omitempty: string, runtimeVersion,omitempty: string, adopt,omitempty: bool}
+Scccce9fa75 = {id: string, tenant: string, environment: string}
+Scd81c7b72d = {name: string, secondsHeld,omitempty: int64, jobId,omitempty: string}
+Scdd7870c0f = {runtime: S088e6b7c93, unavailable,omitempty: string}
+Sd0461257d8 = {tenants: []Sd82958a870, selected,omitempty: *S47452a445a, message,omitempty: string, build: Sb20a7b2732, versionSuggestions,omitempty: []S9bb2832348, versionSuggestionNotices,omitempty: []Seb28dd8c1d, cloudProviders,omitempty: []S19aabe44f5, configUnreadable,omitempty: bool}
+Sd0b4f0b197 = {id: string, name: string}
+Sd0f71acdbe = {baseUrl,omitempty: string, authTokenRef,omitempty: string, defaultModel,omitempty: string, models,omitempty: []S8e4977ed93}
+Sd1d94bc333 = {cpu: string, memory: string}
+Sd29f74933a = {gatewayConfigured: bool, gatewayModels: []string, gatewayUndriveableModels: []string, gatewayDefaultModel: string, defaultModel: string, effortLevels: []string, defaultEffort: string}
+Sd32351f053 = {items: []Sf6bcb80816}
+Sd3429f91e9 = {tenant: string, name: string, cloudProviderAlias: string, region: string, instanceType,omitempty: string, diskType,omitempty: string, diskSizeGb,omitempty: int, preview,omitempty: bool}
+Sd4ba9913a5 = {available: bool, unavailable,omitempty: string, unlimited,omitempty: bool, currentBytes,omitempty: int64, current,omitempty: string, peakBytes,omitempty: int64, peak,omitempty: string, limitBytes,omitempty: int64, limit,omitempty: string, percentOfLimit,omitempty: float64, oomKills: int64}
+Sd82958a870 = {name: string, defaultEnvironment,omitempty: string, cloudProviderAliases,omitempty: []string, primaryCloudProviderAlias,omitempty: string, environments: []S9233187f64}
+Sdadba8f2a7 = {resolvable: bool, reason,omitempty: string}
+Sdb9538124f = {tenant: string, environment: string, healthy: bool, checks: []Sc0249851c8}
+Sdef5af16cd = {hash: string, shortHash: string, subject: string, author: string, date: string}
+Sdf5c4d7698 = {tenant: string, sourceBranch: string, targetBranch: string}
+Sdfe4d17359 = {request,omitempty: *Sffd1c6222c, rateLimited,omitempty: *S018cbfc211}
+Se1a7469be3 = {tab: string, restricted,omitempty: string, error,omitempty: string}
+Se53e16e081 = {describe: string, apiHost: string, tenantId: string, environmentId: string, definitionRevision: int, localChange: Sb00f859cd2, drift,omitempty: *Sf1ab96caf8}
+Se6c68812b3 = {available: bool, status: string}
+Se83d28cfc2 = {command,omitempty: string, roleName,omitempty: string}
+Sea29d670ba = {tenant: string, reviewId: string}
+Seb28dd8c1d = {image: string, kind: string}
+Sed26649625 = {rangeStart: int, rangeEnd: int, mcp: int, api: int, ssh: int, contributeApp: int, mcpStatus: Se6c68812b3, apiStatus: Se6c68812b3, sshStatus: Se6c68812b3, contributeAppStatus: Se6c68812b3}
+See48ade463 = {name: string, size: int64, modTime: string}
+See795e818e = {branch: string, commit: string, files: []string}
+Seeb4957507 = {canCreate: bool, restricted,omitempty: string, accessRemedy,omitempty: *Se83d28cfc2}
+Seff0c25e82 = {url: string, port: int}
+Sf1ab96caf8 = {localRevision: int, platformRevision: int, behind: bool, describe: string, error,omitempty: string}
+Sf25019fa96 = {tenant: string, repository: string, name: string, targetBranch: string, sourceBranch: string}
+Sf6bcb80816 = {tenant: string, environment: string, channel: string, current: string, target: string, lagging: bool, candidates,omitempty: []Sa36fa0c370, unresolvedReason,omitempty: string, isGate,omitempty: bool}
+Sf6c65a634e = {reviewId: string, tenantId: string, authorUserId,omitempty: string, authorUsername,omitempty: string, name: string, repository,omitempty: string, targetBranch: string, sourceBranch: string, status: string, unresolvedThreads,omitempty: *int, blocked,omitempty: bool, lastFailedBuildId,omitempty: string, lastReadyBuildId,omitempty: string, lastMergedBuildId,omitempty: string, createdAt,omitempty: string, updatedAt,omitempty: string}
+Sf82cc642f6 = {available: bool, branch,omitempty: string, issueNumber,omitempty: int, issueTitle,omitempty: string, reason,omitempty: string}
+Sf8382731a5 = {id: string, displayName,omitempty: string, description,omitempty: string, context,omitempty: int}
+Sf93165ecbb = {tenant: string, environment,omitempty: string, apiUrl,omitempty: string, apiError,omitempty: string, apiLog,omitempty: string, apiLogError,omitempty: string, platformState,omitempty: string, platformAliasChoices,omitempty: []string, platformAlias,omitempty: string, platformUrl,omitempty: string, platformIssuer,omitempty: string, platformSubject,omitempty: string, accessRemedies,omitempty: map[string]Se83d28cfc2, user,omitempty: *S6895257fd8, users,omitempty: []S6895257fd8, reviews,omitempty: []Sf6c65a634e, mergeQueue,omitempty: []Sf6c65a634e, builds,omitempty: []Sf9d6af8bc0, pipeline,omitempty: []Sbcb0d82dc6, auditEvents,omitempty: []S41342fe1dd, panels,omitempty: []Se1a7469be3, canCreateReview: bool, canAdvanceMergeQueue: bool, canOverrideMergeQueue: bool, mineReviewCount,omitempty: *int, waitingOnMeReviewCount,omitempty: *int, contexts,omitempty: []Sb250f0bf40, contextsRestricted,omitempty: string, contextsError,omitempty: string, environments,omitempty: []S7579ec965d, environmentsRestricted,omitempty: string, environmentsError,omitempty: string, canCreateContext: bool, canRegisterEnvironment: bool, canDeployEnvironment: bool, canStopEnvironment: bool, canDeleteEnvironment: bool, myInviteRequest,omitempty: *Sffd1c6222c, myInviteRequestError,omitempty: string, inviteRequests,omitempty: []Sffd1c6222c, pendingInviteRequestCount,omitempty: *int, canApproveInviteRequests: bool, canDeclineInviteRequests: bool, inviteRequestRateLimitWindowSeconds,omitempty: int}
+Sf9d6af8bc0 = {buildId: string, tenantId: string, reviewId,omitempty: string, reviewName,omitempty: string, environmentId,omitempty: string, environmentName,omitempty: string, successful: bool, commitId: string, version: string, profile,omitempty: *Sbc72086974, createdAt,omitempty: string, updatedAt,omitempty: string}
+Sfa5e516ee1 = {line,omitempty: string, image,omitempty: string, undetermined,omitempty: bool, disagrees,omitempty: bool}
+Sfb62737d4d = {tenant: string, environment: string, target: string, previous,omitempty: string, sites: []Sa8f11acd6e, skipped,omitempty: []string, changed: int, aligned: bool, available,omitempty: []string, notice,omitempty: *Seb28dd8c1d}
+Sfb76ffa2df = {kind: string, hostPath,omitempty: string, reason,omitempty: string}
+Sffd1c6222c = {inviteRequestId: string, issuer: string, subject: string, email,omitempty: string, displayName,omitempty: string, kind: string, tenantName: string, environmentName,omitempty: string, note,omitempty: string, status: string, declineReason,omitempty: string, mintedInviteToken,omitempty: string, createdAt,omitempty: string, updatedAt,omitempty: string}

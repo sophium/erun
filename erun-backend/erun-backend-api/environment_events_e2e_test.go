@@ -15,10 +15,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
-// The log's whole contract is positional -- the sequence is the resume
-// cursor, and the read is scoped by tenant in SQL rather than by RLS -- so it
-// is exercised against a real migrated PostgreSQL. A fake would agree with
-// itself about ordering and scoping, which is exactly what is under test.
+// Ordering and tenant scoping live in SQL, so these run against real PostgreSQL.
 func environmentEventDatabase(t *testing.T) (*repository.EnvironmentEventRepository, *sql.DB) {
 	t.Helper()
 	databaseURL := testpg.URL(t)
@@ -28,11 +25,7 @@ func environmentEventDatabase(t *testing.T) (*repository.EnvironmentEventReposit
 	return repository.NewEnvironmentEventRepository(repository.NewTxManager(db, repository.DialectPostgres)), db
 }
 
-// seedEnvironmentEventTenant creates a tenant, one of its users, and one
-// environment of its own, so a run never disturbs rows another tenant owns and
-// RLS is actually exercised. environment_events.tenant_id/environment_id
-// foreign-key the environment, so the environment row is required before any
-// event can be appended against it.
+// seedEnvironmentEventTenant creates an isolated tenant, user, and environment.
 func seedEnvironmentEventTenant(t *testing.T, db *sql.DB) (tenantID, userID, environmentID string) {
 	t.Helper()
 	stamp := time.Now().Format("20060102150405.000000")
@@ -52,8 +45,7 @@ func seedEnvironmentEventTenant(t *testing.T, db *sql.DB) (tenantID, userID, env
 	).Scan(&environmentID)
 	mustNoErr(t, err, "seed environment")
 	t.Cleanup(func() {
-		// environment_events cascades with its environment; the rest is
-		// removed explicitly so a run leaves nothing behind.
+		// environment_events cascades with its environment.
 		if _, err := db.Exec(`DELETE FROM environments WHERE tenant_id = $1`, tenantID); err != nil {
 			t.Logf("clearing the test tenant's environments: %v", err)
 		}
@@ -80,12 +72,7 @@ func appendEnvironmentEvent(t *testing.T, repo *repository.EnvironmentEventRepos
 	return event
 }
 
-// TestEnvironmentEventReadResumesStrictlyAfterTheCursor is the resume
-// contract itself: the position a reader hands back names the event it has
-// already seen, so the next page must start past it. An inclusive comparison
-// would redeliver that event on every reconnect forever -- a client that
-// resumed would never make progress, and the same event would be reported
-// twice.
+// An inclusive comparison would redeliver the cursor's event on every reconnect.
 func TestEnvironmentEventReadResumesStrictlyAfterTheCursor(t *testing.T) {
 	repo, db := environmentEventDatabase(t)
 	tenantID, userID, environmentID := seedEnvironmentEventTenant(t, db)
@@ -128,9 +115,6 @@ func TestEnvironmentEventReadResumesStrictlyAfterTheCursor(t *testing.T) {
 	}
 }
 
-// TestEnvironmentEventReadPaginatesWithAStableCursor pins the cursor a page
-// hands back: it names the last event the page delivered, so walking pages
-// with it reaches every event exactly once -- no skip, no repeat.
 func TestEnvironmentEventReadPaginatesWithAStableCursor(t *testing.T) {
 	repo, db := environmentEventDatabase(t)
 	tenantID, userID, environmentID := seedEnvironmentEventTenant(t, db)
@@ -160,9 +144,6 @@ func TestEnvironmentEventReadPaginatesWithAStableCursor(t *testing.T) {
 	}
 }
 
-// TestEnvironmentEventReadScopesToOneEnvironment pins the optional filter: a
-// tenant-wide stream narrowed to one environment must not carry another
-// environment's events.
 func TestEnvironmentEventReadScopesToOneEnvironment(t *testing.T) {
 	repo, db := environmentEventDatabase(t)
 	tenantID, userID, environmentID := seedEnvironmentEventTenant(t, db)
@@ -193,10 +174,7 @@ func TestEnvironmentEventReadScopesToOneEnvironment(t *testing.T) {
 	}
 }
 
-// TestEnvironmentEventReadDoesNotLeakAnotherTenantsLog pins the explicit
-// tenant_id predicate. RLS alone is not enough here: erun_operations' policy
-// is unconditional (USING (true)), so an OPERATIONS caller with no filter
-// would otherwise read every tenant's log.
+// erun_operations' RLS is unconditional, so only the tenant_id predicate scopes this.
 func TestEnvironmentEventReadDoesNotLeakAnotherTenantsLog(t *testing.T) {
 	repo, db := environmentEventDatabase(t)
 	strangerTenantID, strangerUserID, strangerEnvironmentID := seedEnvironmentEventTenant(t, db)
@@ -216,10 +194,6 @@ func TestEnvironmentEventReadDoesNotLeakAnotherTenantsLog(t *testing.T) {
 	}
 }
 
-// TestEnvironmentEventAppendTakesTheNextPosition pins that the sequence is
-// the database's to assign, never the caller's: an Append carrying a position
-// must still land at the end of the log rather than at the position it
-// claimed, or a caller could rewrite the order every other reader resumes by.
 func TestEnvironmentEventAppendTakesTheNextPosition(t *testing.T) {
 	repo, db := environmentEventDatabase(t)
 	tenantID, userID, environmentID := seedEnvironmentEventTenant(t, db)
@@ -238,9 +212,6 @@ func TestEnvironmentEventAppendTakesTheNextPosition(t *testing.T) {
 	}
 }
 
-// TestEnvironmentEventAppendRefusesAnUnknownKind pins the closed vocabulary
-// at the database, not only in the route: a kind nothing reports must not be
-// storable.
 func TestEnvironmentEventAppendRefusesAnUnknownKind(t *testing.T) {
 	repo, db := environmentEventDatabase(t)
 	tenantID, userID, environmentID := seedEnvironmentEventTenant(t, db)

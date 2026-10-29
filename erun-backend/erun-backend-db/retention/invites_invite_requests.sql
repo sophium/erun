@@ -1,20 +1,10 @@
--- Retention sweep for invites and invite_requests. See
--- erun-backend-db/AGENTS.md, "Invites And Invite Requests" for the design
--- these bounds implement.
---
--- Required variable: dry_run (true|false). Run via:
---   psql -v ON_ERROR_STOP=1 -v dry_run=true|false -f invites_invite_requests.sql "$ERUN_DATABASE_URL"
+-- Retention sweep for invites and invite_requests; see erun-backend-db/AGENTS.md,
+-- "Invites And Invite Requests". Requires psql variable dry_run (true|false).
 
 SET ROLE erun_operations;
 
--- invite_requests: 180-day age bound (on updated_at, i.e. when the request
--- was decided) or a 10,000-row platform-wide count cap, applied only to
--- APPROVED/DECLINED requests -- a PENDING request is exempt regardless of
--- age, the same "don't delete a live row" shape as comments' OPEN-thread
--- exemption. invite_requests has no tenant_id and no RLS (the submitter
--- isn't authenticated into any tenant yet), so the cap is platform-wide, not
--- per-tenant, and nothing references invite_requests, so no guard is needed
--- beyond the bound itself.
+-- invite_requests: 180-day age (since decision) or 10,000 cap, decided rows only. The cap is
+-- platform-wide because the table has no tenant_id.
 WITH decided_ranked AS (
   SELECT invite_request_id, updated_at,
          row_number() OVER (ORDER BY updated_at DESC) AS rn
@@ -25,13 +15,9 @@ SELECT 'invite_requests' AS table_name, count(*) AS eligible_for_deletion
 FROM decided_ranked
 WHERE rn > 10000 OR updated_at < now() - interval '180 days';
 
--- invites: two terminal populations, each bounded by its own age window but
--- sharing the same 10,000-most-recent-per-tenant count cap (one table, one
--- cap value, ranked separately per population so a flood of one kind cannot
--- evict the other's history). A live invite (not yet consumed, not yet
--- expired) is exempt regardless of age. Before deleting either population,
--- guard against invite_requests.minted_invite_id still pointing at the row
--- -- deleting the referenced invite first would violate that RESTRICT FK.
+-- invites: consumed and expired-unconsumed invites rank separately so one cannot evict the
+-- other's history; live invites are exempt. Rows invite_requests.minted_invite_id still
+-- references are skipped (RESTRICT FK).
 WITH consumed_ranked AS (
   SELECT invite_id, tenant_id, consumed_at,
          row_number() OVER (PARTITION BY tenant_id ORDER BY consumed_at DESC) AS rn
@@ -55,12 +41,8 @@ SELECT 'invites' AS table_name, count(*) AS eligible_for_deletion
 FROM invites_eligible i
 WHERE NOT EXISTS (SELECT 1 FROM invite_requests ir WHERE ir.minted_invite_id = i.invite_id);
 
--- Record the run: eligible counts for both tables, tagged with the dry_run
--- flag this invocation ran under. deleted_count is 0 for a dry run or the
--- same eligible count for a real run -- the delete below uses the identical
--- predicate, and retention.sh holds a session-scoped advisory lock for the
--- whole sweep, so nothing else can change eligibility between this count and
--- that delete.
+-- deleted_count equals eligible_count on a real run: the delete repeats this predicate under
+-- retention.sh's sweep-wide advisory lock.
 WITH decided_ranked AS (
   SELECT invite_request_id, updated_at,
          row_number() OVER (ORDER BY updated_at DESC) AS rn

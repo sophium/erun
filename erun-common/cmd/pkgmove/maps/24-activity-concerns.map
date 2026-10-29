@@ -1,0 +1,37 @@
+# Split the infra/activity hub into per-concern packages so an importer names only the
+# concerns it calls and an edit rebuilds only the packages that use that concern.
+infra/activity/idlestatus infra/activity/activity.go
+infra/activity infra/activity/activity.go:EnvironmentActivityDir
+infra/activity/records infra/activity/activity.go:environmentActivityKinds
+infra/activity/records infra/activity/activity.go:environmentActivityClientCap
+infra/activity/records infra/activity/activity.go:RecordEnvironmentActivity
+infra/activity/records infra/activity/activity.go:mergeEnvironmentActivityClients
+infra/activity/records infra/activity/activity.go:evictOldestEnvironmentActivityClients
+infra/activity/records infra/activity/activity.go:LoadEnvironmentActivity
+infra/activity/records infra/activity/activity.go:loadEnvironmentActivitySnapshot
+infra/activity/records infra/activity/activity.go:validEnvironmentActivityKind
+infra/activity/records infra/activity/activity_sample.go:ActivityKindProcess
+infra/activity/managedcloud infra/activity/activity.go:ManagedCloudEnvironment
+infra/activity/workinghours infra/activity/activity_working_hours.go
+infra/activity/workinghours infra/activity/working_hours_test.go
+infra/activity/idlestatus infra/activity/activity_working_hours.go:workingHoursReason
+infra/activity/idlestatus infra/activity/activity_working_hours.go:secondsRemaining
+infra/activity/activitylease infra/activity/activity_lease.go
+infra/activity/activitylease infra/activity/activity_lease_release.go
+infra/activity/activitylease infra/activity/activity_lease_test.go
+infra/activity/activitylease infra/activity/activity_lease_exclusive_publish_test.go
+infra/activity/activitylease infra/activity/process_liveness_test.go
+infra/activity/activitylease infra/activity/activity_replace_test.go
+infra/activity/idlestatus infra/activity/activity_lease.go:leaseIdleMarker
+infra/activity/idlestatus infra/activity/activity_lease.go:environmentActivityLeaseMarker
+infra/activity infra/activity/activity_lease_test.go:TestEnvironmentActivityDirDoesNotCreateDirectory
+infra/activity/idlestatus infra/activity/activity_lease_test.go:TestEnvironmentOperatorPresenceReason
+infra/activity/idlestatus infra/activity/activity_lease_test.go:TestReadOnlyCallersAreNeverBlockedByAHeldExclusiveLease
+infra/activity/records infra/activity/activity_replace_test.go:TestRecordEnvironmentActivityReplacesTheSnapshotRatherThanRewritingItInPlace
+infra/activity/versionskew infra/activity/activity_lease_version_skew.go
+infra/activity/idlestop infra/activity/idle_stop_pending.go
+infra/activity/sampling infra/activity/activity_sample.go
+infra/activity/aisession infra/activity/ai_session_status.go
+infra/activity/aisession infra/activity/activity_json_test.go
+infra/activity/remotesession infra/activity/session_heartbeat.go
+infra/activity/remotesession infra/activity/open.go

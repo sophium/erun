@@ -20,13 +20,9 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/zitadel"
 )
 
-// oidcBootstrapCommand is the subcommand the erun-zitadel chart runs: as the
-// oidc-bootstrap sidecar, and with --restore-pats as the restore-pats init
-// container.
+// oidcBootstrapCommand runs as the erun-zitadel sidecar and, with --restore-pats, its init container.
 const oidcBootstrapCommand = "oidc-bootstrap"
 
-// patPollInterval is how often the sidecar looks for the org-owner PAT core
-// writes at first-instance init.
 const patPollInterval = 2 * time.Second
 
 type oidcBootstrapConfig struct {
@@ -44,7 +40,6 @@ type oidcBootstrapConfig struct {
 	RestorePATs         bool
 }
 
-// resolveOIDCBootstrapConfig layers flags over the environment the chart sets.
 func resolveOIDCBootstrapConfig(args []string) (oidcBootstrapConfig, error) {
 	cfg := oidcBootstrapConfig{
 		CorePort:            intEnvOrDefault("CORE_PORT", 8080),
@@ -115,7 +110,6 @@ func (cfg oidcBootstrapConfig) validate() error {
 	return nil
 }
 
-// reconcilerConfig decodes the redirect lists into the reconciler's input.
 func (cfg oidcBootstrapConfig) reconcilerConfig() (oidcbootstrap.Config, error) {
 	console, err := parseURIList("console redirect URIs", cfg.ConsoleRedirectURIs)
 	if err != nil {
@@ -151,7 +145,6 @@ func parseURIList(what string, value string) ([]string, error) {
 	return uris, nil
 }
 
-// runOIDCBootstrap is `eapi oidc-bootstrap`.
 func runOIDCBootstrap(ctx context.Context, args []string) error {
 	cfg, err := resolveOIDCBootstrapConfig(args)
 	if err != nil {
@@ -164,8 +157,7 @@ func runOIDCBootstrap(ctx context.Context, args []string) error {
 	return runOIDCBootstrapWith(ctx, cfg, kube, log.New(os.Stderr, "oidc-bootstrap: ", log.LstdFlags|log.Lmsgprefix))
 }
 
-// runOIDCBootstrapWith is runOIDCBootstrap past configuration and cluster
-// wiring, so the whole flow runs in a test against a fake API server.
+// runOIDCBootstrapWith takes the cluster wiring as input so tests can use a fake API server.
 func runOIDCBootstrapWith(ctx context.Context, cfg oidcBootstrapConfig, kube kubernetes.Interface, logger *log.Logger) error {
 	if cfg.RestorePATs {
 		return oidcbootstrap.RestorePATs(ctx, kube, cfg.Namespace, cfg.PATsSecretName, cfg.BootstrapDir, logger)

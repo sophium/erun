@@ -4,7 +4,7 @@ import * as React from 'react';
 
 import type { UIContainerRegistryEntry } from '@/types';
 
-// Mirrors eruncommon.RegistryRole and must stay in lockstep; ordered by build → copy → deploy pipeline phase.
+// Mirrors eruncommon.RegistryRole and must stay in lockstep.
 const REGISTRY_ROLES = ['build', 'from', 'to', 'deploy'] as const;
 type RegistryRole = (typeof REGISTRY_ROLES)[number];
 
@@ -15,7 +15,7 @@ const ROLE_HINT: Record<RegistryRole, string> = {
   deploy: 'cluster pulls from here',
 };
 
-// ContainerRegistriesField edits an environment's registry list, or inherits the project default when the list is empty. Its inline hint previews the backend marker rules so operators can fix problems before saving. Inherited-from-project and in-cluster (`cluster:`) registries render as legible read-only rows rather than blank inputs.
+// ContainerRegistriesField edits an environment's registry list; empty inherits the project default.
 export function ContainerRegistriesField({
   entries,
   inherited,
@@ -83,10 +83,7 @@ export function ContainerRegistriesField({
         </div>
       )}
       {hint ? (
-        // An amber line alone is the same failure as a red one alone: the
-        // colour is the whole signal for an operator who cannot see it, and a
-        // hint naming a marker rule gives no other cue that the save is
-        // blocked until the entries change (WCAG 1.4.1).
+        // The glyph keeps the hint from relying on colour alone (WCAG 1.4.1).
         <p
           role="alert"
           className="flex items-start gap-1.5 text-xs leading-[1.35] text-amber-700 dark:text-amber-400 [overflow-wrap:anywhere]"
@@ -121,9 +118,7 @@ function RegistryRow({
     onChange({ ...entry, roles });
   };
   const label = `Registry ${String(index + 1)}`;
-  // A cluster entry names no static host, so it renders as a legible read-only
-  // row (never a blank text box). Its addresses resolve from the env's
-  // Kubernetes context, so there is nothing to type here.
+  // Cluster addresses resolve from the env's Kubernetes context.
   if (entry.cluster) {
     return (
       <ClusterRegistryRow entry={entry} index={index} disabled={disabled} onRemove={onRemove} />
@@ -206,9 +201,6 @@ function RegistryRoleCheckboxes({
   );
 }
 
-// ClusterRegistryRow shows a context-resolved in-cluster registry legibly. The
-// host is not editable (it resolves from the Kubernetes context), so the roles
-// render as read-only badges rather than checkboxes.
 function ClusterRegistryRow({
   entry,
   index,
@@ -264,7 +256,7 @@ function ClusterRegistryRow({
   );
 }
 
-// registriesValidationHint previews eruncommon.ContainerRegistries.Validate inline so operators catch marker problems before saving; the backend stays the authoritative gate.
+// Previews eruncommon.ContainerRegistries.Validate; the backend stays the authoritative gate.
 function registriesValidationHint(entries: UIContainerRegistryEntry[]): string {
   const rows = entries.filter((entry) => entry.registry.trim() !== '');
   if (rows.length === 0) {

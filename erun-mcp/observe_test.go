@@ -8,19 +8,11 @@ import (
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/mcptools"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
-// The observe tool published `drift` in its outputSchema while no surface
-// ever returned it — `erun observe --output json` left the key out entirely
-// and this tool's structured content did too, so a client that generated
-// types from the schema got a field it could never read and no way to tell
-// "no drift this run" from "this key is never populated". The two tests below
-// pin the two halves of that contract against the schema and the payload the
-// server really publishes, not a hand-written expectation.
-
-// observeOutputSchema returns the output schema the server publishes for
-// `observe` over the wire (tools/list).
 func observeOutputSchema(t *testing.T, session *mcp.ClientSession) *jsonschema.Schema {
 	t.Helper()
 	for _, tool := range listTools(t, session) {
@@ -44,11 +36,8 @@ func observeOutputSchema(t *testing.T, session *mcp.ClientSession) *jsonschema.S
 	return nil
 }
 
-// TestObserveToolRequiresTheDriftProperty covers the schema half: the published
-// contract must say the verdict is always there, so a generated client models
-// it as present rather than as a field it may never see.
 func TestObserveToolRequiresTheDriftProperty(t *testing.T) {
-	schema := observeOutputSchema(t, connectWithCapabilities(t, string(eruncommon.MCPCapabilityRead)))
+	schema := observeOutputSchema(t, connectWithCapabilities(t, string(mcptools.MCPCapabilityRead)))
 
 	if !slices.Contains(schema.Required, "drift") {
 		t.Fatalf("published outputSchema does not require `drift`; required = %v", schema.Required)
@@ -65,25 +54,13 @@ func TestObserveToolRequiresTheDriftProperty(t *testing.T) {
 	}
 }
 
-// TestObserveToolReturnsTheDriftKey covers the payload half against the tool
-// itself: a call's structured content must carry the key, so a consumer
-// reads the verdict off the same call it reads the rest of the state from.
-//
-// The call previews, which reads nothing: the key is then null — "not
-// determined", distinct from the [] a completed comparison carries when
-// nothing disagreed and from a populated list when something did. The
-// populated and empty cases are pinned where they are produced
-// (erun-common's observe_drift_test.go and erun-integration's observe
-// goldens); what this pins is that the key itself is never dropped at the MCP
-// boundary.
+// A preview reads nothing, so drift is null, but the key must still be present.
 func TestObserveToolReturnsTheDriftKey(t *testing.T) {
-	runtime := RuntimeConfig{
-		Context: RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
-		// The module's shared local-target store fixture, which resolves the
-		// one environment this server would be scoped to.
-		Store: usageTestStore("tenant-a", "dev"),
+	runtime := runtimecfg.RuntimeConfig{
+		Context: toolio.RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
+		Store:   usageTestStore("tenant-a", "dev"),
 	}
-	session := connectWithRuntime(t, runtime, string(eruncommon.MCPCapabilityRead))
+	session := connectWithRuntime(t, runtime, string(mcptools.MCPCapabilityRead))
 
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name:      "observe",

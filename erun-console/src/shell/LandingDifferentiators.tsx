@@ -6,13 +6,8 @@ import { DIFFERENTIATORS } from './landingContent';
 const FEATURED_INDEX = 0;
 const BANNER_INDEX = 3;
 
-// Four identical outline boxes read as a template, not a designed page.
-// Give the set rhythm instead — the strongest claim ("Side by side", the
-// product's one distinctive interaction model) takes the accent treatment
-// and double width, and the last card runs full-width as a closing banner,
-// so a reader has somewhere to look first rather than scanning four equals
-// left to right. Cards, not the docs site's hand-drawn diagram: a copy
-// loaded as a static image wouldn't repaint for the dark-mode toggle.
+// The lead card is accented at double width and the last runs full-width, so the set
+// has rhythm. Cards, not an image, so they repaint for dark mode.
 function cardClassName(index: number): string {
   if (index === FEATURED_INDEX) {
     return 'border-transparent bg-accent-brand text-accent-brand-foreground lg:col-span-2';

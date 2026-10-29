@@ -4,9 +4,7 @@ import { ImagePullSecretsField } from '@/components/app/ImagePullSecretsField';
 import { TextField } from '@/components/app/ManageDialog.fields';
 import type { UIEnvironmentConfig } from '@/types';
 
-// The two coordinates that decide whether the runtime pod can pull at all:
-// where erun's own chart comes from, and the secrets the image is pulled with.
-// Grouped so the General tab reads as sections rather than a flat field list.
+// The chart source and pull secrets that decide whether the runtime pod can pull.
 export function PullCoordinatesFields({
   config,
   disabled,

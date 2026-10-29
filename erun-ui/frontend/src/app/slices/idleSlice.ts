@@ -6,13 +6,7 @@ import type { CloudNodeOperation } from '../model';
 
 export interface IdleState {
   idleStatus: UIIdleStatus | null;
-  // cloudNodeOperations is the power work this desktop has in flight, keyed by
-  // the node's own context name. It replaced a single global boolean, which
-  // had no way to say WHICH node was busy: the titlebar's name follows the
-  // selected environment while the flag did not, so the widget paired a
-  // freshly-selected environment's node with an operation started elsewhere and
-  // announced work on an environment that had none. Keyed this way, a label can
-  // only ever report the operation on the node it names.
+  // Keyed by node context name so a label only reports work on the node it names.
   cloudNodeOperations: Record<string, CloudNodeOperation>;
 }
 

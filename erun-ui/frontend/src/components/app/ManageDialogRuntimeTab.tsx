@@ -44,24 +44,8 @@ type ManageDialog = AppState['manageDialog'];
 export function RuntimeTab(): React.ReactElement {
   const dispatch = useAppDispatch();
   const dialog = useAppSelector((state) => state.manageDialog);
-  // The runtime controls this tab renders are pod or cluster concepts, and a host
-  // env has no pod and no cluster contact of any kind — EnvConfig.HasPod is false
-  // for host alone. There is no runtime image to install, no chart to resolve,
-  // no pod to size or idle-stop, and neither Pin nor Deploy could succeed:
-  // erun pin, erun deploy and erun terraform each refuse a host env outright,
-  // and the deploy planner panics rather than build a plan for one. So those
-  // controls are replaced by a statement of the fact, the same treatment the
-  // Ports tab's Public access section gives this type. Keep the heading
-  // identical to that one: it is the shared wording for "this control has no
-  // referent for this environment type".
-  //
-  // The build-script opt-out is the one control here that is NOT a pod or
-  // cluster concept, so it is rendered for a host env too: erun build resolves
-  // its Docker/release contexts from any env whose builds run in that env's own
-  // directory (ResolveDockerBuildEnvConfig matches on project root, with no
-  // environment-type guard), and this dialog is the only desktop surface that
-  // sets it. Returning before it would leave the setting reachable only by
-  // hand-editing config.yaml.
+  // A host env has no pod or cluster, so those controls become a notice (heading shared with the Ports tab).
+  // The build-script opt-out still applies to host envs, so it renders here too.
   if (environmentTypeIsHost(dialog.config.type)) {
     return (
       <>
@@ -79,9 +63,7 @@ export function RuntimeTab(): React.ReactElement {
       </>
     );
   }
-  // Dialog-owned (not the shared tenants slice): this dialog resolves versions for
-  // its own env; boot/env-change deltas rewrite the tenants slice for the selected
-  // env and must not clobber this picker.
+  // Dialog-owned so tenants-slice deltas cannot clobber this picker.
   const versionSuggestions = dialog.versionSuggestions;
   const versionNotices = dialog.versionSuggestionNotices;
   return (
@@ -119,29 +101,21 @@ export function RuntimeTab(): React.ReactElement {
           })
         }
       />
-      {/* Directly under the version: the version names the image, this names the
-          chart, and the two together are what gets installed. */}
       <RuntimeChartField dialog={dialog} />
       <RuntimePowerField dialog={dialog} />
       <RuntimePodFields dialog={dialog} />
-      {/* Directly under the sliders: how close this environment already is to
-          the limits those sliders set is the evidence for moving them. */}
       {dialog.selection && (
         <RuntimeUsageField
           selection={dialog.selection}
           disabled={dialog.busy || dialog.configLoading}
         />
       )}
-      {/* Directly under the usage reading: the recommendation it earns, and the
-          one-click action that applies it instead of retyping the sliders. */}
       {dialog.selection && (
         <RuntimeSizingField
           selection={dialog.selection}
           disabled={dialog.busy || dialog.configLoading}
         />
       )}
-      {/* Next: when the figures read as capped, the following question is what
-          this environment is holding, and the answer is here. */}
       {dialog.selection && (
         <RuntimeActivityField
           selection={dialog.selection}
@@ -259,17 +233,7 @@ function IdleStopFields({ dialog }: { dialog: ManageDialog }): React.ReactElemen
   );
 }
 
-// PlatformAccountField renders the opt-in that binds this env's runtime
-// ServiceAccount to cluster-admin, so in-pod platform Terraform (the cluster
-// edge) and component installs can create cluster-scoped resources. Env-type
-// agnostic — a hosted runtime platform env or a cluster-provisioning agent env
-// can both be a platform account — so it renders for every type. Extracted to
-// keep IdleStopFields within its size/complexity budget.
-// BuildScriptField is the build.sh opt-out on its own, so the host branch of
-// RuntimeTab can offer it while the pod and cluster controls are replaced by
-// their unavailable notice: `erun build` honours this setting for any env whose
-// builds run in that env's own directory, a host env included. It is a separate
-// component rather than an inline field so both call sites cannot drift.
+// BuildScriptField is shared so the host branch can offer the build.sh opt-out.
 function BuildScriptField({ dialog }: { dialog: ManageDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
   return (
@@ -286,6 +250,7 @@ function BuildScriptField({ dialog }: { dialog: ManageDialog }): React.ReactElem
   );
 }
 
+// PlatformAccountField opts the runtime ServiceAccount into cluster-admin so in-pod platform Terraform can create cluster-scoped resources.
 function PlatformAccountField({ dialog }: { dialog: ManageDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
   const config = dialog.config;
@@ -303,9 +268,7 @@ function PlatformAccountField({ dialog }: { dialog: ManageDialog }): React.React
   );
 }
 
-// MountSourceFields renders the runtime-only opt-in for a mutable source
-// worktree: a toggle, and — once on — the git remote to clone. Extracted from
-// IdleStopFields to keep that function within its size/complexity budget.
+// MountSourceFields is the runtime-only opt-in for a mutable source worktree.
 function MountSourceFields({ dialog }: { dialog: ManageDialog }): React.ReactElement | null {
   const dispatch = useAppDispatch();
   const config = dialog.config;
@@ -372,9 +335,7 @@ function parseAutoStartMode(mode: string): boolean | undefined {
   return undefined;
 }
 
-// deployUnavailableNoticeId names the notice that states why Deploy cannot fire
-// on the picked version, so the button describes itself with a reason that is
-// actually rendered. The chart blocks the version outright, so it speaks first.
+// deployUnavailableNoticeId names the rendered reason Deploy is disabled; the chart speaks first.
 function deployUnavailableNoticeId(dialog: ManageDialog): string | undefined {
   if (runtimeChartBlocksDeploy(dialog)) {
     return RUNTIME_CHART_NOTICE_ID;
@@ -439,14 +400,7 @@ function RuntimeDeployField({
           id="environment-config-deploy"
           type="button"
           size="sm"
-          // Deploy installs a chosen version by reference, so it stays disabled
-          // until the operator picks one — never a build, never a guess — and
-          // until that version's component charts have been probed, so it can't
-          // fire the new version with the previous version's chart selection.
-          // ...on a version the registry says has no runtime chart, and on a
-          // checklist the operator emptied, which would otherwise fall through to
-          // the runtime chart alone. Each with the reason named beside the button
-          // rather than discovered by failing.
+          // Disabled until a version is picked and its charts probed, and on a chartless version or an empty checklist.
           disabled={
             disabled === true ||
             overrideVersion.trim() === '' ||
@@ -463,9 +417,7 @@ function RuntimeDeployField({
       </div>
       {!dialog.choicesOpen && <RuntimeChartNotice dialog={dialog} />}
       {!dialog.choicesOpen && <DeployComponentsEmptyNotice dialog={dialog} />}
-      {/* Deploy above installs an existing published version by reference and never
-          builds. Producing a new version from this env's source is this explicit,
-          separate action (local-agent envs only). */}
+      {/* Deploy never builds; creating a version is this separate local-agent action. */}
       {showCreateVersion && (
         <Button
           id="environment-config-create-version"
@@ -473,8 +425,7 @@ function RuntimeDeployField({
           size="sm"
           variant="outline"
           className="justify-self-start"
-          // Scoped by the same checklist as Deploy above, so it refuses an empty
-          // one for the same reason: it would roll the saved default instead.
+          // An empty checklist would roll the saved default instead.
           disabled={disabled === true || deployComponentsEmptySelection(dialog)}
           onClick={onCreateVersion}
         >

@@ -1,25 +1,7 @@
-// Package zitadel is the first consumer of the org-owner PAT the erun-zitadel
-// chart already provisions and durably persists (see the chart's
-// oidc-bootstrap sidecar, which uses the same PAT for OIDC app bootstrap).
-// This client drives the identity-administration slice of Zitadel's
-// Management API: listing/enrolling/deactivating/reactivating IdP users and
-// reading/updating org-level login and password policy.
-//
-// Org-owner is the highest-privilege credential the platform's IdP holds.
-// Zitadel's built-in roles do offer a narrower ORG_USER_MANAGER role that
-// would fit the user-CRUD half of this surface, but org policy management
-// (login policy, password complexity) has no built-in role short of
-// ORG_OWNER, and minting a second machine user for half the surface only
-// shrinks the blast radius for user CRUD while adding a second
-// bootstrap-managed credential. The compensating control instead is an
-// enumerated, non-proxying endpoint surface (see internal/routes/identity.go)
-// — every operation this client can perform is named here, not forwarded
-// generically.
-//
-// The PAT is loaded once from a mounted file and held only in memory. It
-// never appears in a struct field logged elsewhere, a command-line
-// argument, or error text — API errors carry the response body, never the
-// request headers.
+// Package zitadel drives the identity-administration slice of Zitadel's
+// Management API with the org-owner PAT, held only in memory and never logged.
+// Every operation is named here, never proxied generically: that enumerated
+// surface is the compensating control for the PAT's org-owner breadth.
 package zitadel
 
 import (
@@ -32,11 +14,12 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
 
-// Client drives Zitadel's Management API over HTTP.
 type Client struct {
 	baseURL        string
 	externalDomain string
@@ -44,32 +27,22 @@ type Client struct {
 	httpClient     *http.Client
 }
 
-// Config configures a Client. The PAT itself is never a field here — only
-// the path to read it from — so it cannot end up in a log line that prints a
-// Config by mistake.
+// Config holds only the PAT's path, so printing a Config cannot leak it.
 type Config struct {
-	// BaseURL is the Zitadel core Management API base, typically the
-	// cluster-internal Service address (e.g. http://<tenant>-zitadel:8080).
 	BaseURL string
-	// ExternalDomain is the externally reachable host Zitadel resolves the
-	// instance from: every request carries it as the outgoing Host, because a
-	// call with none 404s on every path (see the erun-zitadel chart header).
+	// ExternalDomain is sent as the Host header; Zitadel 404s every call without it.
 	ExternalDomain string
-	// PATPath is the filesystem path to the mounted org-owner PAT.
-	PATPath string
+	PATPath        string
 }
 
-// NewClientFromFile loads the PAT from cfg.PATPath and returns a configured
-// Client. It returns (nil, nil) when cfg is incomplete, matching this
-// codebase's optional-dependency convention (server.go): a feature stays
-// disabled rather than the process failing to start. A PATPath that is set
-// but unreadable or empty is a hard misconfiguration and returns an error.
+// NewClientFromFile returns (nil, nil) when cfg is incomplete, leaving the feature
+// disabled; a set but unreadable or empty PATPath is an error.
 func NewClientFromFile(cfg Config) (*Client, error) {
 	baseURL := strings.TrimSpace(cfg.BaseURL)
 	externalDomain := strings.TrimSpace(cfg.ExternalDomain)
 	patPath := strings.TrimSpace(cfg.PATPath)
 	if baseURL == "" || externalDomain == "" || patPath == "" {
-		return nil, nil
+		return nil, nil //nolint:nilnil // an incomplete config leaves the feature disabled
 	}
 	raw, err := os.ReadFile(patPath)
 	if err != nil {
@@ -91,9 +64,7 @@ func newClient(baseURL string, externalDomain string, pat string) *Client {
 	}
 }
 
-// APIError is a non-2xx response from the Management API. Body is the
-// response payload, truncated; the request's own Authorization header is
-// never included.
+// APIError is a non-2xx response; Body never includes request headers.
 type APIError struct {
 	Method     string
 	Path       string
@@ -105,29 +76,17 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("zitadel management api %s %s: status %d: %s", e.Method, e.Path, e.StatusCode, e.Body)
 }
 
-// NotFound reports whether the error is Zitadel's 404 for the resource
-// addressed by the request.
 func (e *APIError) NotFound() bool {
 	return e.StatusCode == http.StatusNotFound
 }
 
-// ErrUsernameTaken is the sentinel a caller matches with errors.Is when a
-// user could not be created because the login name asked for was already in
-// use. The concrete error is a *UsernameTakenError, which names the name.
+// ErrUsernameTaken is the sentinel behind *UsernameTakenError.
 var ErrUsernameTaken = errors.New("username is already taken")
 
 // UsernameTakenError reports a login name the instance already holds.
-//
-// The instance signals this with the message key
-// "Errors.User.AlreadyExists" ("User already exists") rather than a
-// username-specific one, reaching the caller as Zitadel's AlreadyExists
-// conflict. The caller needs the name they chose back -- the IdP's own text
-// names the account, not the one thing they can change.
 type UsernameTakenError struct {
-	// Username is the login name that was already in use, exactly as the
-	// caller supplied it. Under an instance whose Domain Policy requires
-	// login names to be domain-qualified, the name the instance actually
-	// holds is this one suffixed with the organization's own domain.
+	// Username is as the caller supplied it; under a domain-qualifying Domain Policy
+	// the instance holds it suffixed with the org's domain.
 	Username string
 }
 
@@ -135,23 +94,12 @@ func (e *UsernameTakenError) Error() string {
 	return fmt.Sprintf("username %q is already taken; choose a different login name", e.Username)
 }
 
-// Unwrap exposes the sentinel, so errors.Is(err, ErrUsernameTaken) is the
-// check that does not depend on the concrete type.
 func (e *UsernameTakenError) Unwrap() error { return ErrUsernameTaken }
 
-// zitadelUserAlreadyExistsKey is the message key the instance returns when a
-// human-user create collides with a uniqueness constraint on the identity.
 const zitadelUserAlreadyExistsKey = "Errors.User.AlreadyExists"
 
-// usernameConflict relabels Zitadel's user-already-exists conflict on a user
-// create as the named, actionable error above.
-//
-// The discriminator is that message key and not the status alone: a conflict
-// on this endpoint can also mean a colliding email or another uniqueness
-// rule, and relabelling every one of them as a username collision would send
-// the caller to change a name that was never the problem. Every other
-// failure is returned unchanged, so a transport fault or a validation error
-// still reports as itself.
+// usernameConflict keys on the message key, not the status: a conflict can also
+// be a colliding email, which is not a username problem.
 func usernameConflict(username string, err error) error {
 	var apiErr *APIError
 	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusConflict {
@@ -165,11 +113,8 @@ func usernameConflict(username string, err error) error {
 
 const errorBodyTruncateLimit = 500
 
-// callInOrg is call, addressed at one organization instead of the
-// credential's own. Zitadel scopes a Management API call by the
-// x-zitadel-orgid header, so the same org-owner credential can act in an org
-// it did not create — which is what lets a tenant's first user be created in
-// the org that tenant resolves by. An empty orgID is exactly call.
+// callInOrg addresses orgID via the x-zitadel-orgid header instead of the
+// credential's own org; an empty orgID is exactly call.
 func (c *Client) callInOrg(ctx context.Context, orgID string, method string, path string, body any, out any) error {
 	return c.callWithHeaders(ctx, method, path, body, out, orgHeaders(orgID))
 }
@@ -212,9 +157,6 @@ func (c *Client) callWithHeaders(ctx context.Context, method string, path string
 	return nil
 }
 
-// newRequest encodes the body and builds the authenticated request. Split out
-// of callWithHeaders so that function stays under the complexity threshold;
-// the sequence is unchanged.
 func (c *Client) newRequest(ctx context.Context, method string, path string, body any, headers map[string]string) (*http.Request, error) {
 	var reader io.Reader
 	if body != nil {
@@ -228,10 +170,8 @@ func (c *Client) newRequest(ctx context.Context, method string, path string, bod
 	if err != nil {
 		return nil, fmt.Errorf("build zitadel request %s %s: %w", method, path, err)
 	}
-	// Zitadel resolves which instance a Management API call targets from the
-	// Host header, not from the address the call is actually addressed to
-	// (see erun-zitadel chart header and internal/oidcbootstrap); req.Host is what
-	// net/http actually sends as the wire Host, a plain header set is ignored.
+	// Zitadel resolves the instance from the Host header; net/http sends req.Host,
+	// not a Host set in the header map.
 	req.Host = c.externalDomain
 	req.Header.Set("Authorization", "Bearer "+c.pat)
 	req.Header.Set("Content-Type", "application/json")
@@ -248,12 +188,8 @@ func truncate(body []byte, limit int) string {
 	return string(body[:limit]) + "..."
 }
 
-// User is a Zitadel IdP identity, as much of it as identity administration
-// needs to display and act on. IsMachine distinguishes the org's own
-// service identities (e.g. login-client, admin-sa) from human accounts —
-// Zitadel's _search response carries a "machine" object in exactly the
-// cases "human" is absent, so the two are read as a pair rather than
-// inferring one from the other's absence.
+// User is a Zitadel IdP identity. IsMachine is read from the "machine" object
+// rather than inferred from "human" being absent.
 type User struct {
 	ID        string `json:"id"`
 	Username  string `json:"username"`
@@ -265,7 +201,38 @@ type User struct {
 }
 
 type usersSearchResponse struct {
-	Result []userSearchResult `json:"result"`
+	Result  []userSearchResult `json:"result"`
+	Details listDetails        `json:"details"`
+}
+
+// listDetails carries a v1 search's totalResult, which the gateway renders as a
+// JSON string; absent means the server did not report one.
+type listDetails struct {
+	TotalResult *listCount `json:"totalResult"`
+}
+
+type listCount uint64
+
+func (c *listCount) UnmarshalJSON(data []byte) error {
+	text := strings.Trim(string(data), `"`)
+	if text == "" || text == "null" {
+		*c = 0
+		return nil
+	}
+	value, err := strconv.ParseUint(text, 10, 64)
+	if err != nil {
+		return fmt.Errorf("zitadel list totalResult %s: %w", data, err)
+	}
+	*c = listCount(value)
+	return nil
+}
+
+// nameEqualsQuery narrows a v1 project or app search to one exact name, so the
+// match is found however many siblings the server's row cap would hide.
+func nameEqualsQuery(name string) map[string]any {
+	return map[string]any{"queries": []map[string]any{{
+		"nameQuery": map[string]any{"name": name, "method": "TEXT_QUERY_METHOD_EQUALS"},
+	}}}
 }
 
 type userSearchResult struct {
@@ -301,53 +268,43 @@ func (r userSearchResult) toUser() User {
 	return u
 }
 
-// ListUsers lists every human and machine user of orgID, or of the org the
-// client's PAT belongs to when orgID is empty. Without this, an identity
-// created in another org via CreateHumanUserParams.OrgID became permanent,
-// invisible residue: this credential can act in any org on the instance (see
-// callInOrg), but a call with no org header only ever sees its own --
-// silently, not as a refusal, which reads as "this org has no such user"
-// rather than "you asked the wrong org".
+// ListUsers lists orgID's users, newest first, or the PAT's own org's when orgID
+// is empty. A call without the org header silently sees only its own org.
+// Zitadel caps an unpaged v1 search at its MaxQueryLimit (1000 by default) from
+// v4.19.5, so it pages by offset alone, each page whatever size that server
+// allows. Pages run oldest first so a user created mid-walk lands past the
+// offsets already read, and the result is reversed into the unpaged order.
 func (c *Client) ListUsers(ctx context.Context, orgID string) ([]User, error) {
-	var resp usersSearchResponse
-	if err := c.callInOrg(ctx, orgID, http.MethodPost, "/management/v1/users/_search", map[string]any{}, &resp); err != nil {
-		return nil, err
+	users := []User{}
+	for {
+		var resp usersSearchResponse
+		body := map[string]any{"query": map[string]any{"offset": strconv.Itoa(len(users)), "asc": true}}
+		if err := c.callInOrg(ctx, orgID, http.MethodPost, "/management/v1/users/_search", body, &resp); err != nil {
+			return nil, err
+		}
+		for _, result := range resp.Result {
+			users = append(users, result.toUser())
+		}
+		total := resp.Details.TotalResult
+		if len(resp.Result) == 0 || total == nil || uint64(len(users)) >= uint64(*total) {
+			slices.Reverse(users)
+			return users, nil
+		}
 	}
-	users := make([]User, 0, len(resp.Result))
-	for _, result := range resp.Result {
-		users = append(users, result.toUser())
-	}
-	return users, nil
 }
 
-// CreateHumanUserParams is the enrollment input for a new IdP identity.
-// InitialPassword is empty for Zitadel's normal invite flow: no password is
-// set, so Zitadel emails the enrollee a verification/initialization link
-// rather than this client (or its caller) ever handling a credential for
-// someone else's account. When the platform cannot send that email at all
-// , the caller sets InitialPassword instead -- verified live
-// against a real Zitadel v4.15.3 instance that AddHumanUser only sends the
-// initialization email "if either the email address is not marked as
-// verified or no password is set" (its own API doc comment), so a set
-// password alone still leaves the account in USER_STATE_INITIAL waiting on
-// a link that will never arrive; CreateHumanUser accordingly marks the email
-// verified in that case too, and only in that case, which is what actually
-// lands the account in USER_STATE_ACTIVE with the password usable
-// immediately.
+// CreateHumanUserParams is the enrollment input. An empty InitialPassword uses
+// Zitadel's invite email; when set, the email is also marked verified, since
+// Zitadel otherwise leaves the user in USER_STATE_INITIAL awaiting a link.
 type CreateHumanUserParams struct {
 	Username        string
 	Email           string
 	FirstName       string
 	LastName        string
 	InitialPassword string
-	// OrgID creates the user in that organization rather than the
-	// credential's own. Empty keeps today's behaviour.
-	OrgID string
+	OrgID           string
 }
 
-// CreateHumanUser creates a new human user in Zitadel. See
-// CreateHumanUserParams.InitialPassword for the two distinct outcomes this
-// produces.
 func (c *Client) CreateHumanUser(ctx context.Context, params CreateHumanUserParams) (User, error) {
 	username := strings.TrimSpace(params.Username)
 	email := strings.TrimSpace(params.Email)
@@ -397,23 +354,15 @@ func (c *Client) CreateHumanUser(ctx context.Context, params CreateHumanUserPara
 	}, nil
 }
 
-// Org is a Zitadel organization. Its ID is what an org-scoped issuer's
-// org_field_value holds, and what the urn:zitadel:iam:user:resourceowner:id
-// claim carries for a user who belongs to it.
+// Org is a Zitadel organization; its ID is what an org-scoped issuer's
+// org_field_value holds.
 type Org struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 }
 
-// CreateOrg creates a Zitadel organization, the per-tenant identity boundary
-// an org-scoped issuer resolves tenants by. Without it, onboarding a second
-// tenant onto the platform's own IdP needed a hand-made org in Zitadel's
-// console: erun could register the tenant and the issuer mapping, but had no
-// way to create the org the mapping points at.
-//
-// The org is created but deliberately not made the client's own: this
-// credential stays scoped to the platform's org, and the new org's first
-// erun caller becomes its admin through the per-tenant first-user bootstrap.
+// CreateOrg creates a Zitadel organization. The credential stays scoped to the
+// platform's org; the new org's first user becomes its admin via bootstrap.
 func (c *Client) CreateOrg(ctx context.Context, name string) (Org, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -428,18 +377,13 @@ func (c *Client) CreateOrg(ctx context.Context, name string) (Org, error) {
 	return Org{ID: resp.ID, Name: name}, nil
 }
 
-// DeactivateUser deactivates the IdP user, preventing their next sign-in.
-// orgID addresses the user's own org, the same as ListUsers; empty keeps
-// today's behaviour of acting in the client's own org. Zitadel scopes a user
-// id to the org that issued it, so a call with the wrong org (including no
-// org, for a user created elsewhere) 404s rather than silently acting on a
-// same-named user in the credential's own org -- there is no user to
-// "resolve to" by mistake here, only a wrong lookup key.
+// DeactivateUser deactivates the user in orgID (empty means the client's own).
+// User ids are org-scoped, so a wrong org 404s.
 func (c *Client) DeactivateUser(ctx context.Context, orgID string, userID string) error {
 	return c.callInOrg(ctx, orgID, http.MethodPost, fmt.Sprintf("/management/v1/users/%s/_deactivate", url.PathEscape(userID)), map[string]any{}, nil)
 }
 
-// ReactivateUser reverses DeactivateUser; see its doc comment for orgID.
+// ReactivateUser reverses DeactivateUser.
 func (c *Client) ReactivateUser(ctx context.Context, orgID string, userID string) error {
 	return c.callInOrg(ctx, orgID, http.MethodPost, fmt.Sprintf("/management/v1/users/%s/_reactivate", url.PathEscape(userID)), map[string]any{}, nil)
 }

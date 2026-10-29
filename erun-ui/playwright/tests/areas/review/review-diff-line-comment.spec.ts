@@ -8,19 +8,8 @@ import {
   uniqueEnvironmentName,
 } from '../../../fixtures/seedRoot.js';
 
-// Starting a new top-level review thread from a diff line is what
-// ReviewDetailDialog.Comments.tsx used to defer for exactly this reason: only
-// the diff panel knows which line was clicked. The Go side
-// (CreateReviewComment) is covered by erun-ui/tenant_review_write_test.go;
-// these specs cover the desktop's own precondition gating and the happy path.
-//
-// Everything the diff panel offers is rendered from LoadDiff's answer, and a
-// locator assertion carries no clock of its own: `toHaveCSS`, `toBeVisible`,
-// `toHaveAttribute` and `toHaveCount` resolve to expect's 10s default rather
-// than the budget these tests declare. Under contention a read that is merely
-// slow therefore reds the step with the test's clock unspent — the class
-// fixtures/erunApp.ts's `withTestBudget` exists for, and what the held-read
-// case at the end of this file reproduces.
+// Locator assertions default to expect's 10s, so reads of LoadDiff's answer
+// carry withTestBudget().
 
 function invokeBody(request: Request): { method: string } {
   return JSON.parse(request.postData() ?? '{}') as { method: string };
@@ -63,12 +52,8 @@ const DIFF = {
   includesWorktree: false,
 };
 
-// DIFF_GROWN is the same change after the panel's own re-read has picked up
-// more of it: an extra hunk renders ahead of the one carrying 'package main',
-// so that row sits lower on the panel than it did. This is the ordinary
-// outcome of the periodic refresh -- the panel re-reads LoadDiff precisely
-// because the diff it is showing can change while it is on screen -- and it is
-// what moves a row out from under a pointer resting on it.
+// An extra hunk renders above 'package main', moving that row out from under a
+// resting pointer, as a periodic refresh can.
 const DIFF_GROWN = {
   ...DIFF,
   files: [
@@ -94,15 +79,8 @@ const DIFF_GROWN = {
   ],
 };
 
-// DIFF_OTHER_FIRST is the same change after the panel's re-read has picked up a
-// second file ahead of it, whose own added line renders above main.go's. The
-// row that carried 'package main' is pushed down exactly as DIFF_GROWN pushes
-// it, but the row that lands under the stationary pointer is an ordinary
-// commentable line -- in a file the reader revealed nothing for. That is the
-// half of this contract the injected hunk line cannot reach: a `meta` row
-// offers no affordance at all, so it can only show that the reveal is lost; a
-// real line shows whether the reveal is instead handed to whatever the pointer
-// happens to be over.
+// A second file renders above main.go, so an ordinary commentable line lands
+// under the stationary pointer.
 const DIFF_OTHER_FIRST = {
   ...DIFF,
   summary: { fileCount: 2, additions: 2, deletions: 0 },
@@ -144,9 +122,7 @@ function seedDashboardEnvironment(title: string): string {
   return environment;
 }
 
-// DIFF_NO_COMMIT is DIFF with no commit for a new thread to anchor to, so
-// resolveDiffCommitHash resolves to '' and the "commit this change" blocked
-// reason renders instead of the "no active review" one.
+// No commit to anchor to, so the "commit this change" reason renders.
 const DIFF_NO_COMMIT = { ...DIFF, reviewCommits: [] };
 
 function routeLoadTenantDashboard(
@@ -167,13 +143,8 @@ function routeLoadTenantDashboard(
   });
 }
 
-// dismissAIOccupancyPromptIfShown is a defensive wait, not a feature this
-// spec is testing: opening an environment auto-spawns its AI tab
-// (ensureDefaultEnvTabs), which resolves either into an AI tab or -- if the
-// environment's activity lease is already held -- the occupancy prompt
-// (erun#1221). These tests care about the diff panel, not the AI tab, so race
-// on whichever the spawn actually produces and clear the prompt out of the
-// way rather than letting it block a later click.
+// Opening an env spawns its AI tab, or the occupancy prompt if its lease is
+// held; race on whichever appears.
 async function dismissAIOccupancyPromptIfShown(
   app: import('../../../pages/index.js').AppShell,
 ): Promise<void> {
@@ -191,12 +162,7 @@ async function dismissAIOccupancyPromptIfShown(
   }
 }
 
-// openActiveReviewContext opens a review from the tenant dashboard and closes
-// its (modal) dialog, establishing reviewId as the active commenting context
-// per closeReviewDetail's own comment, then returns to the environment's diff
-// panel -- the same round trip the "starts a new top-level thread" test below
-// exercises, factored out so the two blocked-reason tests can set up the same
-// active-review precondition without duplicating it.
+// Opening and closing the review detail makes it the active commenting context.
 async function openActiveReviewContext(
   app: import('../../../pages/index.js').AppShell,
   tenant: string,
@@ -236,19 +202,13 @@ test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
     await app.sidebar.openEnvironment(seededEnv.tenant, seededEnv.environment);
     await dismissAIOccupancyPromptIfShown(app);
     await app.titlebar.toggleReviewPanel();
-    // Converge on the panel having opened, then on the diff it fetches: both are
-    // separate renders after the toggle, and expect's own budget is a fixed 10s.
     await app.reviewPanel.waitForOpen();
     await app.page.getByText('package main').waitFor({ state: 'visible' });
 
-    // The affordance is revealed by hovering its own line rather than painted
-    // on every row: the diff is the densest reading surface in the app, so a
-    // persistent per-line icon would compete with the code it discusses.
+    // Revealed on hover rather than painted on every row of a dense surface.
     const action = app.page.getByRole('button', { name: 'Comment on line 1 of main.go' });
     await expect(action).toHaveCSS('opacity', '0', withTestBudget());
     await app.page.getByText('package main').hover();
-    // The reveal is the hover's own render, so it converges on this test's
-    // declared budget rather than on expect's 10s default.
     await expect(action).toHaveCSS('opacity', '1', withTestBudget());
 
     await action.click();
@@ -256,10 +216,7 @@ test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
       app.page.getByText('Open a review from the Reviews tab to comment on this line.'),
     ).toBeVisible(withTestBudget());
 
-    // Unlike the other two blocked reasons (checked below), this one names a
-    // destination on a different surface -- so the popover carries a real
-    // action to get there in one click, rather than leaving the reader to
-    // find the tenant dashboard on their own (#1388).
+    // This reason names a destination on another surface, so it carries an action.
     const openReviewsTab = app.page.getByRole('button', { name: 'Open Reviews tab' });
     await expect(openReviewsTab).toBeVisible(withTestBudget());
     await openReviewsTab.click();
@@ -295,12 +252,8 @@ test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
         await route.continue();
       });
 
-      // A review is the active commenting context throughout -- this blocked
-      // reason is about the diff's own commit state, not the review.
       await openActiveReviewContext(app, SEED_TENANT, environment);
       await app.titlebar.toggleReviewPanel();
-      // Converge on the panel having opened, then on the diff it fetches: both
-      // are separate renders after the toggle, and expect's own budget is fixed.
       await app.reviewPanel.waitForOpen();
       await page.getByText('package main').waitFor({ state: 'visible' });
 
@@ -308,8 +261,6 @@ test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
       await expect(page.getByText('Commit this change before commenting on it.')).toBeVisible(
         withTestBudget(),
       );
-      // This blocked reason is actionable exactly where the operator already
-      // stands (commit the change), so it stays message-only (#1388).
       await expect(page.getByRole('button', { name: 'Open Reviews tab' })).toHaveCount(0);
       await expect(page.getByLabel('New comment')).toHaveCount(0);
     } finally {
@@ -343,8 +294,6 @@ test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
 
       await openActiveReviewContext(app, SEED_TENANT, environment);
       await app.titlebar.toggleReviewPanel();
-      // Converge on the panel having opened, then on the diff it fetches: both
-      // are separate renders after the toggle, and expect's own budget is fixed.
       await app.reviewPanel.waitForOpen();
       await page.getByText('package main').waitFor({ state: 'visible' });
 
@@ -352,8 +301,6 @@ test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
       await expect(page.getByText('You do not have access to comment on this review.')).toBeVisible(
         withTestBudget(),
       );
-      // Actionable exactly where the operator stands (ask for access), so no
-      // navigation button here either (#1388).
       await expect(page.getByRole('button', { name: 'Open Reviews tab' })).toHaveCount(0);
       await expect(page.getByLabel('New comment')).toHaveCount(0);
     } finally {
@@ -398,14 +345,8 @@ test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
         await route.continue();
       });
 
-      // Open the review to establish it as the active commenting context,
-      // then close the (modal) dialog so the diff panel underneath it is
-      // reachable — see closeReviewDetail's own comment for why this
-      // survives the close.
       await openActiveReviewContext(app, SEED_TENANT, environment);
       await app.titlebar.toggleReviewPanel();
-      // Converge on the panel having opened, then on the diff it fetches: both
-      // are separate renders after the toggle, and expect's own budget is fixed.
       await app.reviewPanel.waitForOpen();
       await page.getByText('package main').waitFor({ state: 'visible' });
 
@@ -413,8 +354,6 @@ test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
       await page.getByLabel('New comment').fill('what does this do?');
       await page.getByRole('button', { name: 'Comment', exact: true }).click();
 
-      // The composer closes when CreateReviewComment's own answer lands, so
-      // this convergence waits on the round trip, not on expect's 10s default.
       await expect(page.getByLabel('New comment')).toHaveCount(0, withTestBudget());
       expect(commentInput).toMatchObject({
         reviewId: REVIEW.reviewId,
@@ -428,25 +367,9 @@ test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
     }
   });
 
-  // The reveal belongs to the line the reader pointed at, not to whatever
-  // pixels the pointer happens to be over: the panel re-reads LoadDiff on its
-  // own timer -- that is what the refresh is for, the diff it is showing can
-  // change while it is on screen -- and an answer that renders the change
-  // differently carries that row somewhere else. A reveal that tracked only the
-  // pointer's position is gone there, and nothing on the page brings it back:
-  // the pointer has not moved, so there is no second hover to produce it and no
-  // clock that converges on it. The invariant this pins is the operator's --
-  // the affordance the reader revealed survives the re-read -- so the case
-  // performs exactly one pointer movement and never re-issues the hover after
-  // the panel has re-read. Re-driving the pointer is the recovery the app is
-  // supposed to supply by itself, and asserting through it would pass on the
-  // pre-fix code for the wrong reason.
-  //
-  // The shift is injected by this spec's own LoadDiff stub answering a grown
-  // diff, rather than by loading the machine, so the reproduction is
-  // deterministic on a quiet host. Pre-fix this case reds with the reveal
-  // stranded at "0" while the pointer rests over the hunk the panel has just
-  // rendered above the row.
+  // The reveal belongs to the line, not the pointer position: after a re-read
+  // moves the row, no second hover will restore it. The case therefore moves the
+  // pointer once and never re-hovers, which would pass for the wrong reason.
   test('the affordance the reader revealed survives a re-read of the diff', async ({
     app,
     page,
@@ -471,33 +394,18 @@ test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
     const action = page.getByRole('button', { name: 'Comment on line 1 of main.go' });
     await expect(action).toHaveCSS('opacity', '0', withTestBudget());
 
-    // The reader reveals the affordance. This is the only pointer movement in
-    // this case; every assertion below it reads a state the app produced on its
-    // own.
+    // The only pointer movement in this case.
     await page.getByText('package main').hover();
     await expect(action).toHaveCSS('opacity', '1', withTestBudget());
 
-    // The panel's next re-read answers the grown diff, which renders the extra
-    // hunk above this row and carries the row out from under the pointer.
     grown = true;
     await page.getByText('index 1111111..2222222').waitFor({ state: 'visible' });
 
-    // The pointer is still where the reader left it, and the affordance the
-    // reader revealed is still revealed -- on the line it was revealed for.
-    // Converging here is what makes the case deterministic: the read follows the
-    // reflow that moved the row, so it cannot catch a mid-transition frame.
+    // Converging after the reflow avoids reading a mid-transition frame.
     await expect(action).toHaveCSS('opacity', '1', withTestBudget());
   });
 
-  // The other half of the same contract, and the reason the reveal is held as
-  // panel state rather than left to the row's own `:hover`: a reveal that
-  // outlived the reader's own pointer for good would be its own defect, so the
-  // pointer moving is what re-derives it -- from whatever is under it now, not
-  // from where it used to be. After a re-read has moved the row that means the
-  // line under the pointer decides, which is the state the panel starts from
-  // and the one the reader can act on. The case reads `1` across the re-read
-  // before it moves at all, so it fails on the unfixed code for the reason the
-  // case above fails, and then pins what recovery from there looks like.
+  // The held reveal is re-derived from whatever is under the pointer once it moves.
   test('the affordance is re-observed when the panel re-renders under the pointer', async ({
     app,
     page,
@@ -527,36 +435,16 @@ test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
     await page.getByText('index 1111111..2222222').waitFor({ state: 'visible' });
     await expect(action).toHaveCSS('opacity', '1', withTestBudget());
 
-    // The reader moves onto the hunk the re-read rendered above the row. The
-    // reveal is released, because the line under the pointer now offers no
-    // affordance at all -- held state, but never held against the reader.
+    // A meta row offers no affordance, so the reveal is released.
     await page.getByText('index 1111111..2222222').hover();
     await expect(action).toHaveCSS('opacity', '0', withTestBudget());
 
-    // And moving back re-derives it for the line under the pointer, which the
-    // re-read left at the number it had.
     await page.getByText('package main').hover();
     await expect(action).toHaveCSS('opacity', '1', withTestBudget());
   });
 
-  // The injected hunk line above is one shape of the reflow, and the benign
-  // one: a `meta` row carries no affordance (`DiffLineCommentAction` renders
-  // nothing for `kind === 'meta'`), so nothing there can be lit and the case
-  // can only show the reveal being lost. A reflow that brings an ordinary
-  // commentable line of another file under the stationary pointer is the other
-  // shape, and it has to answer both halves at once: the reveal the reader
-  // made stays on the line the reader made it for, and the line the pointer now
-  // covers reveals itself the way any hovered row does. Those are two
-  // mechanisms, and the case pins that holding one does not suppress the other
-  // -- the row the reflow moved under the pointer is not the row the reader
-  // revealed, so it is neither the one the held reveal lights nor the one it
-  // takes anything from.
-  //
-  // Measured, so the case does not overclaim: on the unfixed code the first
-  // half is deterministically red -- the revealed section is carried down by
-  // the file above it and its row loses `:hover` -- which is the strand this
-  // branch exists to fix, in the shape that puts a real added line where the
-  // pointer is resting rather than a `meta` row.
+  // Holding the reader's reveal must not suppress the normal hover reveal of the
+  // other file's line that the reflow moved under the pointer.
   test('the affordance the reader revealed survives a reflow that brings another file under the pointer', async ({
     app,
     page,
@@ -581,23 +469,15 @@ test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
     const action = page.getByRole('button', { name: 'Comment on line 1 of main.go' });
     await expect(action).toHaveCSS('opacity', '0', withTestBudget());
 
-    // The reader reveals main.go's line. This is the only pointer movement in
-    // this case; nothing below re-issues it.
+    // The only pointer movement in this case.
     await page.getByText('package main').hover();
     await expect(action).toHaveCSS('opacity', '1', withTestBudget());
 
     grown = true;
     await page.getByText('package util').waitFor({ state: 'visible' });
 
-    // The pointer rests over util.go's added line now. The affordance the
-    // reader revealed is still revealed, and it is still main.go's line 1 --
-    // the reveal followed the line, not the row the reflow moved under the
-    // pointer.
+    // The reveal followed main.go's line, not the row now under the pointer.
     await expect(action).toHaveCSS('opacity', '1', withTestBudget());
-    // And the row that did move under the pointer reveals itself normally, the
-    // way any hovered row does: holding the reader's reveal neither suppresses
-    // the hover the pointer is making now nor hands it the reveal it is not
-    // over. Two lines are lit, and each is lit for its own reason.
     await expect(page.getByRole('button', { name: 'Comment on line 1 of util.go' })).toHaveCSS(
       'opacity',
       '1',
@@ -605,26 +485,12 @@ test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
     );
   });
 
-  // The line-comment affordance exists only once the panel has rendered the
-  // diff LoadDiff answered with, and the assertions on it carry no timeout of
-  // their own: `toHaveCSS` resolves to expect's 10s default rather than the
-  // budget this test declares. A read that is merely slow therefore reds the
-  // step with the test's own clock unspent.
-  //
-  // The hold below is deliberately just past that 10s default: the smallest
-  // delay that discriminates. It is injected at a named RPC (this spec's own
-  // LoadDiff stub) rather than by loading the machine, so the reproduction is
-  // deterministic on a quiet host. Pre-fix this case reds at exactly 10_000ms
-  // with 20s of its own budget unused.
+  // LoadDiff is held just past expect's 10s default.
   test('a diff read that lands past the step cap is waited out, not cut off', async ({
     app,
     page,
     seededEnv,
   }) => {
-    // 60s, not the suite's 30s default: this case deliberately spends 12s of
-    // its own budget holding the read above, so the default is not a clock for
-    // the scenario -- it is a clock for the scenario minus the delay this case
-    // exists to introduce. Same pairing the sibling held-read cases use.
     test.setTimeout(60_000);
     let held = false;
     await page.route('**/__erun_invoke', async (route: Route, request: Request) => {

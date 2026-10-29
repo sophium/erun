@@ -2,28 +2,15 @@ import { expect, test, withTestBudget } from '../../../fixtures/erunApp.js';
 import { LOCAL_SHELL_PROMPT } from '../../../fixtures/seedRoot.js';
 import type { Page } from '@playwright/test';
 
-// lockTerminalsForActivity only locks the sessions that already exist when a
-// deploy starts. A tab opened after that -- lockNewlyJoinedSessionIfDeployInFlight
-// -- used to show no lock overlay at all until some later queue event happened
-// to touch it, so an operator who opened a new terminal mid-deploy had no
-// indication the runtime it would attach to was mid-rollout.
-//
-// This drives the real backend path end to end rather than staging a synthetic
-// event: the deploy-start trace is written into the real Local shell's PTY, so
-// the backend's own output scanner (the same one a real `erun deploy`'s output
-// would go through) registers the activity entry, and a brand-new terminal tab
-// is opened only after that entry already exists.
+// Drives the real backend scanner: the deploy trace goes into the Local shell's PTY,
+// and the new tab opens only after the activity entry exists.
 
 interface SessionInputBridge {
   go: { main: { App: { SendSessionInput: (id: number, data: string) => Promise<void> } } };
 }
 
-// Routes through the same Wails method a real keystroke sends, but as one
-// call instead of one per character -- per-character typing round-trips each
-// key over its own HTTP call to the headless bridge, and those can race and
-// land out of order. The trailing \r submits the line, matching what Enter
-// sends. Single-quoting the line keeps the shell from parsing its literal
-// `>` as a redirection operator.
+// One call rather than per-character typing, whose HTTP calls can land out of order.
+// Single quotes keep the shell from treating `>` as a redirection.
 async function runInSession(page: Page, sessionId: number, command: string): Promise<void> {
   await page.evaluate(
     async ({ id, data }) => {
@@ -43,8 +30,6 @@ test.describe('a terminal opened after a deploy has already started locks immedi
     const { tenant, environment } = seededEnv;
     const localSessionId = await app.openEnvironmentTerminal(tenant, environment);
     expect(localSessionId).toBeGreaterThan(0);
-    // withTestBudget, not expect's 10s default: the shell's own prompt render
-    // is a step the test declared 30s for, not a step capped at 10s.
     await expect(app.terminalPane.rows()).toContainText(LOCAL_SHELL_PROMPT, withTestBudget());
 
     const deployLine = `==> Deploying ${tenant}/${environment}`;
@@ -58,20 +43,12 @@ test.describe('a terminal opened after a deploy has already started locks immedi
     await expect.poll(() => extraTabs.count(), withTestBudget()).toBeGreaterThan(initialExtraCount);
 
     const overlay = page.getByRole('status').filter({ hasText: 'Waiting for deploy to complete' });
-    // waitFor (not expect) converges against the enclosing test's own budget:
-    // the overlay lands only once the backend's own scanner has seen the
-    // staged deploy line and pushed the lock event back.
     await overlay.waitFor({ state: 'visible' });
     await expect(overlay).toBeVisible();
 
-    // The backend's trace scanner has no way to tell this fake deploy apart
-    // from a real one, so without a matching completion line the activity
-    // entry it started stays "running" in the shared singleton backend for
-    // every spec that runs after this one. Finish it the same way a real
-    // deploy would.
+    // Finish the fake deploy, or the entry stays "running" in the shared backend.
     await runInSession(page, localSessionId, `echo '==> Deployed ${tenant}/${environment}'`);
-    // Converge on the release too, so a slow one cannot leave a locked overlay
-    // behind for the next spec in this worker.
+    // Wait for the release so no locked overlay leaks into the next spec.
     await overlay.waitFor({ state: 'hidden' });
     await expect(overlay).toBeHidden();
   });

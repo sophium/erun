@@ -2,26 +2,10 @@ import type { Page } from '@playwright/test';
 
 import { expect, test } from '../../../fixtures/erunApp.js';
 
-// An environment on a stopped cloud node rendered NO indicator at all —
-// indistinguishable from one whose status simply could not be determined, and
-// from one whose port-forward never came up. All three read as "nothing to say",
-// and they need different actions. The node's power state was already measured
-// and cached per cloud context (cloud_context_cache.go) and simply never carried
-// per environment.
-//
-// These specs lock the rendered half of the fix. A real stopped EC2 instance
-// needs a cloud account the headless harness deliberately lacks, so they drive
-// the same `env-node` Wails event erun-ui/environment_node.go publishes; what
-// that event says for a given cache state is owned by
-// erun-ui/environment_node_test.go, and the derivation these specs exercise by
-// erun-ui/frontend/src/app/environmentNodeState.test.ts.
-//
-// The backend's own cloud sweep runs on a timer against the seeded envs (which
-// have no cloud context, so it reports no node) and can legitimately clear an
-// injected reading, so every assertion is re-driven until it converges, bounded
-// by the calling test's own deadline rather than a second cap the step picked
-// for itself. A genuinely broken indicator never converges and the step still
-// fails.
+// A stopped cloud node must be distinguishable from an undetermined status and a missing
+// port-forward.
+// Specs drive the `env-node` event (internal/runtimeview/node.go); the backend sweep can clear it, so
+// assertions re-drive until they converge.
 
 interface NodeEvent {
   tenant: string;
@@ -86,10 +70,7 @@ test.describe('sidebar cloud-node indicator', () => {
       async () => {
         await expect(indicator).toBeVisible({ timeout: 1_000 });
         await expect(indicator).toHaveAttribute('data-node-state', 'stopped', { timeout: 1_000 });
-        // The label names the NODE and the way out of the state. It is read out
-        // of context (as the indicator's accessible name), so a bare "Stopped"
-        // there would be read as the environment being stopped — a different
-        // fact with a different remedy.
+        // The accessible name is read out of context, so it must name the node, not just "Stopped".
         await expect(indicator).toHaveAccessibleName(
           new RegExp(`^Cloud node ${NODE.label} is stopped`),
           { timeout: 1_000 },
@@ -106,8 +87,7 @@ test.describe('sidebar cloud-node indicator', () => {
     page,
     seededEnv,
   }) => {
-    // The definite answer "nothing erun power-manages backs this environment".
-    // Rendering a stopped node for it would be the confident wrong answer.
+    // Nothing erun power-manages backs this env; a stopped node would be the wrong answer.
     const { tenant, environment } = seededEnv;
     await emitEnvNode(page, { tenant, environment });
     await expect(app.sidebar.envNodeIndicator(tenant, environment)).toHaveCount(0);
@@ -124,8 +104,7 @@ test.describe('sidebar cloud-node indicator', () => {
       await expect(indicator).toHaveAttribute('data-node-state', 'unknown', { timeout: 1_000 });
       await expect(indicator).toHaveAccessibleName(/could not be checked/, { timeout: 1_000 });
     });
-    // The other shape of the same answer: a known-good reading the poller can no
-    // longer confirm. Both must read unknown.
+    // A known-good reading the poller can no longer confirm also reads unknown.
     await driveEnvNode(
       page,
       { tenant, environment, node: { ...NODE, status: 'unknown' } },
@@ -140,9 +119,7 @@ test.describe('sidebar cloud-node indicator', () => {
     page,
     seededEnv,
   }) => {
-    // The node indicator is additive. An environment that is answering must keep
-    // reading as running even while its node reading is undetermined — a second,
-    // weaker claim must not rewrite a definite one.
+    // An undetermined node reading must not override an answering env.
     const { tenant, environment } = seededEnv;
     const dot = app.sidebar.envOpenDot(tenant, environment);
     await expect(async () => {
@@ -155,8 +132,6 @@ test.describe('sidebar cloud-node indicator', () => {
       });
       await emitEnvNode(page, { tenant, environment, node: { ...NODE, status: 'unknown' } });
       await expect(dot).toHaveAttribute('data-env-state', 'running', { timeout: 1_000 });
-      // And the undetermined node stays quiet, because the row is already
-      // saying something.
       await expect(app.sidebar.envNodeIndicator(tenant, environment)).toHaveCount(0);
     }).toPass();
   });
@@ -166,10 +141,7 @@ test.describe('sidebar cloud-node indicator', () => {
     page,
     seededEnv,
   }) => {
-    // A running node adds no row glyph — it is the ordinary case, and a green
-    // dot per row would drown the two states that need attention. The card is
-    // where "the node is fine, it is the environment that cannot be determined"
-    // stays answerable.
+    // A running node adds no row glyph; the card still answers it.
     const { tenant, environment } = seededEnv;
     const card = app.sidebar.envHoverCard(tenant, environment);
     await expect(async () => {

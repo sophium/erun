@@ -8,8 +8,7 @@ import { setTerminalCopyOutput, setTerminalCopyStatus } from './slices/terminalS
 import type { AppThunk } from './store';
 import { requireController } from './thunkExtra';
 
-// A recovery command must surface in the Local tab; run invisibly in a
-// background shell, and users re-click and flood it.
+// Run in the visible Local tab; hidden, users re-click and flood it.
 const runLocalRecoverySelection =
   (
     selection: UISelection,
@@ -29,7 +28,6 @@ const runLocalRecoverySelection =
     await dispatch(activateLocalAfterCommand(selection, result));
   };
 
-// Backs the "Run doctor" button on a failed deploy card.
 export const startDoctorSelection = (selection: UISelection): AppThunk<Promise<void>> =>
   runLocalRecoverySelection(
     selection,
@@ -37,7 +35,6 @@ export const startDoctorSelection = (selection: UISelection): AppThunk<Promise<v
     StartDoctorSession,
   );
 
-// Backs the "Rebuild & redeploy" button on a failed deploy card or failing container.
 export const startForceDeploySelection = (selection: UISelection): AppThunk<Promise<void>> =>
   runLocalRecoverySelection(
     selection,

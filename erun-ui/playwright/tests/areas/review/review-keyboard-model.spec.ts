@@ -9,14 +9,6 @@ import {
 } from '../../../fixtures/seedRoot.js';
 import type { AppShell } from '../../../pages/index.js';
 
-// The review surface's keyboard model (erun-ui/AGENTS.md § "The keyboard
-// model the review surface still owes", issue #1421): next/previous changed
-// file, next/previous hunk, and starting a review in the diff panel; reply
-// and resolve/unresolve on the focused comment thread in the review detail
-// dialog. Every binding here is a regression against that decision if it
-// ever silently stops firing, since it was reachable no other way before
-// this spec existed.
-
 function invokeBody(request: Request): { method: string } {
   return JSON.parse(request.postData() ?? '{}') as { method: string };
 }
@@ -35,10 +27,8 @@ function diffLine(newLine: number, content: string): DiffLineStub {
   return { kind: 'add', oldLine: null, newLine, content };
 }
 
-// TWO_FILE_DIFF gives the flat hunk order [a.go#1, a.go#2, b.go#1]: two
-// hunks in one file exercise next/previous hunk crossing a file boundary,
-// and a second file exercises next/previous changed file jumping straight
-// past a.go's second hunk.
+// Flat hunk order [a.go#1, a.go#2, b.go#1]: exercises hunk navigation across a file boundary and
+// file navigation skipping a hunk.
 const TWO_FILE_DIFF = {
   rawDiff: '',
   workingDirectory: '/seed',
@@ -74,13 +64,8 @@ const TWO_FILE_DIFF = {
   includesWorktree: true,
 };
 
-// dismissAIOccupancyPromptIfShown mirrors diff-panel-start-review.spec.ts's
-// own helper (not imported: specs stay independent of each other's
-// internals, see erun-ui/playwright/AGENTS.md). Opening an environment
-// auto-spawns its AI tab, which resolves either into an AI tab or -- if the
-// environment's activity lease is already held -- this occupancy prompt.
-// This spec cares about the diff panel, not the AI tab, so race on whichever
-// the spawn actually produces.
+// Opening an env auto-spawns its AI tab, which may resolve to the occupancy prompt instead; race on
+// whichever appears.
 async function dismissAIOccupancyPromptIfShown(app: AppShell): Promise<void> {
   const dialog = app.aiOccupancyPromptDialog;
   await Promise.race([
@@ -100,8 +85,6 @@ async function openDiffPanel(app: AppShell, tenant: string, environment: string)
   await app.sidebar.openEnvironment(tenant, environment);
   await dismissAIOccupancyPromptIfShown(app);
   await app.titlebar.toggleReviewPanel();
-  // The callers all assert on content the panel itself renders, so converge on
-  // it having opened rather than racing its render.
   await app.reviewPanel.waitForOpen();
 }
 
@@ -135,8 +118,6 @@ test.describe('diff panel keyboard model — next/previous hunk and changed file
 
     await page.keyboard.press('ArrowDown');
     await expect(aHunk2).toBeFocused();
-    // Moving focus by keyboard must leave a visible trail, not just a
-    // logical one -- the target hunk is scrolled into view as it is focused.
     await expect(aHunk2).toBeInViewport();
 
     await page.keyboard.press('ArrowDown');
@@ -183,28 +164,14 @@ test.describe('diff panel keyboard model — next/previous hunk and changed file
     await expect(popover.getByText('Start a review')).toBeVisible(withTestBudget());
   });
 
-  // Every spec above converges on `diffSectionPaths()` -- the hunks the panel
-  // renders from LoadDiff's answer -- with an `expect.poll` that carries no
-  // timeout of its own, so it resolves to expect's 10s default rather than the
-  // budget its test declared. Under contention a read that is merely slow
-  // therefore reds the step with the test's clock unspent, and because the poll
-  // is the first step after the panel opens, it reds before any of the
-  // bindings the spec exists to cover have been exercised at all.
-  //
-  // The hold below is deliberately just past that 10s default: the smallest
-  // delay that discriminates. It is injected at a named RPC (this spec's own
-  // LoadDiff stub) rather than by loading the machine, so the reproduction is
-  // deterministic on a quiet host. Pre-fix this case reds at exactly 10_000ms
-  // with 20s of its own budget unused.
+  // Holds LoadDiff just past expect's 10s default to prove the read waits on the test budget, not
+  // the default.
   test('a diff read that lands past the step cap is waited out, not cut off', async ({
     app,
     page,
     seededEnv,
   }) => {
-    // 60s, not the suite's 30s default: this case deliberately spends 12s of
-    // its own budget holding the read above, so the default is not a clock for
-    // the scenario -- it is a clock for the scenario minus the delay this case
-    // exists to introduce. Same pairing the sibling held-read cases use.
+    // Covers the 12s hold above.
     test.setTimeout(60_000);
     let held = false;
     await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
@@ -417,32 +384,22 @@ test.describe('review detail dialog keyboard model — reply and resolve/unresol
       await page.keyboard.press('ArrowUp');
       await expect(aliceThread).toBeFocused();
 
-      // R opens the reply composer for the focused thread (alice's).
       await page.keyboard.press('r');
       const replyInput = dialog.replyInput();
       await expect(replyInput).toBeFocused();
 
-      // Typing in the composer must still type -- this is the regression
-      // most likely to be introduced by a new binding and least likely to
-      // be noticed. The typed text itself contains 'r' and is followed by a
-      // real Enter press, exercising both bindings' guard at once.
+      // Typing in the composer must not trigger bindings; the text contains 'r'.
       await page.keyboard.type('has an r in it');
       await expect(replyInput).toHaveValue('has an r in it');
       await page.keyboard.press('Enter');
       await expect.poll(() => replySubmittedBody, withTestBudget()).toBe('has an r in it');
       await expect(replyInput).toBeHidden(withTestBudget());
 
-      // Submitting invalidates and reloads the whole review detail
-      // (loadReviewDetail), which flashes the dialog to its loading state
-      // and remounts the comments list once the reload lands -- true for a
-      // mouse click on Send today too, not something this keyboard model
-      // introduces. The remounted list resets to its default roving focus
-      // (the first thread); re-focus it the way one more Tab press would.
+      // Submitting reloads the review detail and resets roving focus to the first thread.
       await expect(aliceThread).toBeVisible(withTestBudget());
       await aliceThread.focus();
       await expect(aliceThread).toBeFocused();
 
-      // Enter resolves the focused (alice's) thread -- not a reply target.
       await expect(aliceThread.getByText('Unresolved')).toBeVisible(withTestBudget());
       await page.keyboard.press('Enter');
       await expect(aliceThread.getByText('Resolved')).toBeVisible(withTestBudget());

@@ -15,8 +15,7 @@ const refreshDialogRuntimeResources =
     if (!dialog.open) {
       return;
     }
-    // No selected context → clear stale capacity rather than leaving a figure from
-    // a previously resolved context showing under an empty selection.
+    // Clear capacity from a previous context so no stale figure shows.
     if (!context) {
       dispatch(patchEnvironmentDialog({ resourceStatus: null, resourceStatusLoading: false }));
       return;
@@ -61,10 +60,8 @@ const refreshDialogRuntimeResources =
     }
   };
 
-// refreshDialogClusterRegistry detects the in-cluster erun-registry for the
-// selected context and defaults the dialog to using it. Cleared when no context
-// is selected or none is deployed, so the container-registry choice always
-// matches the selected cluster.
+// refreshDialogClusterRegistry defaults the dialog to the selected context's
+// in-cluster registry, clearing it when there is none.
 export const refreshDialogClusterRegistry =
   (kubernetesContext: string): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {
@@ -90,8 +87,6 @@ export const refreshDialogClusterRegistry =
       dispatch(
         patchEnvironmentDialog({
           clusterRegistry: deployed ? status : null,
-          // Default to the in-cluster registry whenever one is detected for the
-          // chosen context; the user can still opt out to a static registry.
           useClusterRegistry: deployed,
         }),
       );
@@ -109,12 +104,8 @@ export const refreshDialogClusterRegistry =
     }
   };
 
-// refreshDialogHostedRegistry probes erun's hosted registry once when the
-// dialog opens (the host is fixed, not resolved per Kubernetes context like
-// the in-cluster registry, so there is nothing to re-probe on context change).
-// A probe failure — including one the Go side could not even classify — still
-// resolves to "not available" rather than throwing, so this always lands a
-// definite status the "Use erun's hosted registry" checkbox can gate on.
+// refreshDialogHostedRegistry probes once per open (the host is fixed); any
+// failure resolves to "not available" rather than throwing.
 export const refreshDialogHostedRegistry =
   (): AppThunk<Promise<void>> => async (dispatch, getState) => {
     if (!getState().environmentDialog.open) {
@@ -145,9 +136,7 @@ export const refreshDialogHostedRegistry =
     }
   };
 
-// forceRefetch is required: without it RTK Query pins the previous
-// (possibly transient-empty) context list to the dialog, so Rescan can
-// never recover after a kubeconfig change.
+// forceRefetch is required or Rescan cannot recover from a stale empty list.
 export const refreshKubernetesContexts =
   (): AppThunk<Promise<void>> => async (dispatch, getState) => {
     try {

@@ -1,24 +1,14 @@
-// Model-id helpers shared by the per-environment AI tab and the erun-level
-// gateway catalog. A model id is an opaque token to erun — resolving one to a
-// concrete model is Claude Code's concern — so the only rules that live here
-// are the ones a launch genuinely depends on.
 import type { UIOpenRouterModel } from '@/uiOpenRouterTypes';
 
-// Mirrors claudeModelTokenPattern in erun-common/ai_launch.go. A value outside
-// it reaches the shell as syntax rather than a model name, and the launch drops
-// it silently, so it is rejected at the point of entry instead of accepted and
-// then ignored. The first character excludes '-', which would reach `--model`
-// as a flag.
+// Mirrors claudeModelTokenPattern in erun-common/ai_launch.go; the launch drops
+// anything else silently. A leading '-' would reach `--model` as a flag.
 const claudeModelTokenPattern = /^[A-Za-z0-9._:/][A-Za-z0-9._:/-]*$/;
 
 export function isClaudeModelToken(value: string): boolean {
   return claudeModelTokenPattern.test(value.trim());
 }
 
-// addClaudeModelId returns the list with id appended: the known entries keep
-// their existing order, and anything outside that set follows in the order it
-// was added. Appending to the caller's base preserves the entries already
-// selected rather than replacing the selection with the new id alone.
+// addClaudeModelId appends id while keeping the existing selection and order.
 export function addClaudeModelId({
   base,
   known,
@@ -39,14 +29,8 @@ export function addClaudeModelId({
   return ordered;
 }
 
-// selectableClaudeModelIds returns the catalog's usable ids, so a default
-// model can never be chosen from a blank or malformed row.
-//
-// A row declared to require reasoning echo is not one of them: it is exactly
-// the model a default must not name, since the default is what an environment
-// renders as ANTHROPIC_MODEL and what an exec agent job starts on. Offering it
-// here would let the operator pick, as the default, the one listing the catalog
-// has already recorded cannot be driven.
+// selectableClaudeModelIds returns usable catalog ids, excluding malformed rows
+// and the reasoning-echo listing no default may name.
 export function selectableClaudeModelIds(rows: UIOpenRouterModel[]): string[] {
   return rows
     .filter((row) => !row.requiresReasoningEcho)

@@ -8,12 +8,10 @@ import { confirmReconnect, dismissReconnect } from '@/app/reviewThunks';
 import { setSelected } from '@/app/slices/selectionSlice';
 import { InlineAlert } from '@/components/app/InlineAlert';
 
-// Fudge factor so a layout that settles a pixel or two short of perfect
-// alignment still counts as "at the bottom" for auto-scroll.
+// Tolerance so a layout a pixel or two short still counts as at the bottom.
 const STICK_TO_BOTTOM_PX = 16;
 
-// Non-modal panel for the reconnect flow, scoped to a single env so the
-// operator keeps full use of every other environment while one reconnects.
+// Non-modal and scoped to one env, so others stay usable while it reconnects.
 export function ReconnectStatusPanel(): React.ReactElement | null {
   const status = useAppSelector((state) => state.review.reconnect.status);
   const tenant = useAppSelector((state) => state.review.reconnect.tenant);
@@ -99,8 +97,7 @@ function ReconnectStatusHeader({
 
 function ReconnectStatusLines({ lines }: { lines: readonly string[] }): React.ReactElement {
   const scrollerRef = React.useRef<HTMLDivElement>(null);
-  // Don't auto-scroll while the user has scrolled up to read history — new
-  // output would otherwise yank them back to the bottom.
+  // Don't auto-scroll while the user has scrolled up.
   const stickToBottomRef = React.useRef(true);
 
   const handleScroll = React.useCallback(() => {
@@ -124,8 +121,6 @@ function ReconnectStatusLines({ lines }: { lines: readonly string[] }): React.Re
     <div
       ref={scrollerRef}
       onScroll={handleScroll}
-      // min-h keeps the panel from collapsing to a single-line strip when
-      // the buffer is short.
       className="min-h-[3.75rem] max-h-40 overflow-y-auto bg-muted/40 px-3 py-2 font-mono text-[12px] leading-[1.4]"
     >
       {lines.length === 0 ? (

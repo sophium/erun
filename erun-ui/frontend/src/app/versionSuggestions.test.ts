@@ -4,11 +4,6 @@ import { test } from 'vitest';
 
 import { versionNoticeMessage } from './versionSuggestions';
 
-// A notice is the only thing the picker shows for a source that produced no
-// versions, so the sign-in it names has to be the one that reaches that source's
-// own registry — naming a different registry sends the operator to authenticate
-// somewhere the image is not.
-
 test('a private ghcr image names both ghcr sign-ins', () => {
   const message = versionNoticeMessage({ image: 'ghcr.io/sophium/pw-devops', kind: 'auth' });
   assert.match(message, /is private/);

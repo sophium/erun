@@ -11,11 +11,8 @@ interface ErrorBoundaryState {
   error: Error | null;
 }
 
-// ErrorBoundary shows a recoverable surface instead of the blank white screen a
-// bare React tree leaves when a render throws and unmounts the whole root. Must
-// stay a class: React only runs error-boundary lifecycle on class components.
-// Scoped to its children so the titlebar chrome stays interactive while the user
-// recovers.
+// ErrorBoundary shows a recoverable surface instead of a blank screen. It must stay a
+// class: React runs error-boundary lifecycle only on class components.
 export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
   constructor(props: ErrorBoundaryProps) {
     super(props);

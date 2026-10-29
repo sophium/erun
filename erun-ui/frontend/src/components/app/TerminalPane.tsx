@@ -49,13 +49,9 @@ export function TerminalPane({
   const liveLock = locks.get(sessionId) ?? null;
   const activeTabIsAI = useAppSelector(selectActiveTabIsAI);
   const occupancyLeases = useAppSelector((state) => state.idle.idleStatus?.leases ?? []);
-  // The same selection the leases were loaded for, so the banner acts on the
-  // environment it is describing rather than whatever tab happens to be active.
+  // The selection the leases were loaded for, not the active tab.
   const occupancySelection = useAppSelector((state) => state.selection.selected);
-  // The user can dismiss the overlay locally for a session if it's
-  // covering output they need to read or input they need to provide
-  // (e.g. the in-pod CLI's helm-recovery prompt). Backend keeps the
-  // lock state intact; only this desktop's view of it is hidden.
+  // Dismissal hides the overlay on this desktop only; the backend lock is untouched.
   React.useEffect(() => {
     if (!liveLock && hiddenForSession) {
       dispatch(clearHiddenLockOverlay(sessionId));
@@ -68,14 +64,8 @@ export function TerminalPane({
   return (
     <div
       className={cn(
-        // The terminal column tracks the visible width (min 0). A hard min
-        // (e.g. minmax(360px,1fr)) forces the pane wider than the available
-        // area when the sidebar is wide or the window is narrow, so the
-        // `overflow-hidden` parent clips its right edge — and drags the
-        // right-anchored ActivityLockOverlay off-screen with it.
-        // At any width where the terminal already fits, `minmax(0,1fr)` is
-        // pixel-identical to a hard min; it only differs when starved, where
-        // letting xterm reflow narrower beats clipping content off the right.
+        // minmax(0,1fr): a hard min would clip the pane and drag the right-anchored
+        // ActivityLockOverlay off-screen when space is starved.
         'grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] overflow-hidden',
         hidden && 'hidden',
         reviewOpen &&
@@ -84,7 +74,7 @@ export function TerminalPane({
     >
       <div className="grid h-full min-h-0 min-w-0 grid-rows-[32px_minmax(0,1fr)] overflow-hidden">
         <TerminalTabStrip />
-        {/* Padding lives on the wrapper, not on the FitAddon parent: xterm's FitAddon reads the parent's computed height but does not subtract its padding, so any padding on terminalRoot would over-count rows and clip the bottom line. */}
+        {/* Padding lives on the wrapper: FitAddon does not subtract parent padding. */}
         <div
           id="erun-terminal-pane"
           role="group"
@@ -133,8 +123,6 @@ export function TerminalPane({
   );
 }
 
-// The banner needs its own dispatch to route to the jobs surface, and keeping
-// it out of TerminalPane keeps that component within its line budget.
 function OccupancyBanner({
   leases,
   selection,

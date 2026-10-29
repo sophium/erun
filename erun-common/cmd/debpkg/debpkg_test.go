@@ -17,8 +17,7 @@ type call struct {
 	args []string
 }
 
-// fakeRunner records every tool call. `go build` writes its -o file, and
-// dpkg-deb snapshots the package root it is handed, since build removes it.
+// fakeRunner snapshots the package root at dpkg-deb, since build removes it.
 type fakeRunner struct {
 	calls   []call
 	outputs map[string]string
@@ -51,8 +50,6 @@ func (f *fakeRunner) output(dir string, env []string, name string, args ...strin
 	return f.outputs[name], nil
 }
 
-// snapshotTree is "<mode> <path>" for every entry under root, as dpkg-deb -c
-// would list it, plus the control file's content.
 func snapshotTree(root string) map[string]string {
 	tree := map[string]string{}
 	_ = filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
@@ -90,7 +87,7 @@ func cliPackageArgs(t *testing.T, versionArgs ...string) []string {
 		"--section", "utils", "--homepage", "https://github.com/sophium/erun",
 		"--description", "Multi-tenant multi-environment deployment and management tool",
 		"--description-line", "ERun ships the erun CLI together with the emcp and eapi executables.",
-		"--go-build", "/src/erun-cli:.:/usr/bin/erun:github.com/sophium/erun/cmd.buildVersion",
+		"--go-build", "/src/erun-cli:.:/usr/bin/erun:github.com/sophium/erun/cmd/shared.buildVersion",
 		"--go-build", "/src/erun-backend/erun-backend-api:./cmd/eapi:/usr/bin/eapi",
 		"--file", license + ":/usr/share/doc/erun/copyright",
 		"--out", filepath.Join(t.TempDir(), "deb"),
@@ -109,8 +106,6 @@ func runTool(t *testing.T, hostArch string, outputs map[string]string, args []st
 	return runner, stdout.String()
 }
 
-// The control file carries the fields, in the order, the package stages'
-// former printf wrote, and nothing for a field not given.
 func TestControlFileMatchesThePackageStagesFields(t *testing.T) {
 	runner, stdout := runTool(t, "arm64", nil, cliPackageArgs(t, "--version", "1.2.3"))
 	want := "Package: erun\n" +
@@ -130,8 +125,6 @@ func TestControlFileMatchesThePackageStagesFields(t *testing.T) {
 	}
 }
 
-// The layout: binaries 0755 at their destinations, files at their modes, every
-// directory 0755 including the root, and the package packed with root owner.
 func TestPackageLayoutModesAndPacking(t *testing.T) {
 	runner, _ := runTool(t, "arm64", nil, cliPackageArgs(t, "--version", "1.2.3"))
 	want := map[string]string{
@@ -162,8 +155,6 @@ func TestPackageLayoutModesAndPacking(t *testing.T) {
 	}
 }
 
-// Each Go binary is a static, trimmed linux build for the target, stamped with
-// the version only where it names a variable.
 func TestGoBuildsTargetTheArchitectureAndStampTheVersion(t *testing.T) {
 	runner, _ := runTool(t, "amd64", nil, cliPackageArgs(t, "--version", "1.2.3"))
 	builds := slices.DeleteFunc(slices.Clone(runner.calls), func(c call) bool { return c.name != "go" })
@@ -178,7 +169,7 @@ func TestGoBuildsTargetTheArchitectureAndStampTheVersion(t *testing.T) {
 	}
 	erun := builds[0]
 	if erun.dir != "/src/erun-cli" || !slices.Equal(erun.args[:2], []string{"build", "-trimpath"}) ||
-		erun.args[slices.Index(erun.args, "-ldflags")+1] != "-s -w -X github.com/sophium/erun/cmd.buildVersion=1.2.3" ||
+		erun.args[slices.Index(erun.args, "-ldflags")+1] != "-s -w -X github.com/sophium/erun/cmd/shared.buildVersion=1.2.3" ||
 		erun.args[len(erun.args)-1] != "." {
 		t.Errorf("erun build = %+v", erun)
 	}
@@ -188,8 +179,6 @@ func TestGoBuildsTargetTheArchitectureAndStampTheVersion(t *testing.T) {
 	}
 }
 
-// A CGO build for a foreign architecture compiles with its cross toolchain;
-// Depends comes from dpkg-shlibdeps run for the target architecture.
 func TestCGOCrossBuildAndShlibDepends(t *testing.T) {
 	args := []string{
 		"build", "--name", "erun-desktop", "--version", "2.0.0", "--arch", "amd64",
@@ -224,7 +213,6 @@ func TestCGOCrossBuildAndShlibDepends(t *testing.T) {
 	}
 }
 
-// A native CGO build uses the stage's own toolchain.
 func TestCGONativeBuildUsesTheDefaultToolchain(t *testing.T) {
 	args := []string{
 		"build", "--name", "erun-desktop", "--version", "2.0.0", "--arch", "arm64",
@@ -254,8 +242,6 @@ func TestShlibDependsMustFindLibraries(t *testing.T) {
 	}
 }
 
-// Docker's TARGETARCH names the Debian architecture for the two erun releases;
-// anything else is refused rather than packed under a wrong name.
 func TestArchitectureMapping(t *testing.T) {
 	for target, want := range map[string]string{"amd64": "amd64", "arm64": "arm64"} {
 		if got, err := debianArch(target); err != nil || got != want {
@@ -269,8 +255,6 @@ func TestArchitectureMapping(t *testing.T) {
 	}
 }
 
-// Without --version (an unset ERUN_VERSION) the version file is the version,
-// every space removed.
 func TestVersionFallsBackToTheVersionFile(t *testing.T) {
 	file := writeTemp(t, " 3.4.5\n")
 	runner, _ := runTool(t, "arm64", nil, cliPackageArgs(t, "--version", "", "--version-file", file))
@@ -301,8 +285,6 @@ func TestFlagsAreValidated(t *testing.T) {
 	}
 }
 
-// cross-deps installs the target's toolchain and libraries only for a foreign
-// target, and keeps their documentation out.
 func TestCrossDepsInstallsOnlyForAForeignTarget(t *testing.T) {
 	runner, stdout := runTool(t, "arm64", nil, []string{"cross-deps", "--arch", "arm64", "libgtk-3-dev"})
 	if len(runner.calls) != 0 || !strings.Contains(stdout, "native arm64 build") {

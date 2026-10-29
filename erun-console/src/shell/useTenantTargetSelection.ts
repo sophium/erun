@@ -5,11 +5,7 @@ export interface TenantTargetSelection {
   setTargetTenantId: (tenantId: string) => void;
 }
 
-// useTenantTargetSelection is the state half of "pick a target tenant": a
-// form starts pointed at the caller's own tenant and lets an OPERATIONS
-// caller redirect it elsewhere. Previously a copy-pasted
-// `useState(ownTenantId)` in both identity/EnrollUserForm.tsx and
-// identity/UsersPanel.tsx (erun#1816).
+// useTenantTargetSelection defaults to the caller's own tenant.
 export function useTenantTargetSelection(ownTenantId: string): TenantTargetSelection {
   const [targetTenantId, setTargetTenantId] = React.useState(ownTenantId);
   return { targetTenantId, setTargetTenantId };

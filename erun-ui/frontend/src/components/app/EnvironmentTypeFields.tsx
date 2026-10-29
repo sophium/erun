@@ -9,8 +9,6 @@ import { LocalRepoPathInput } from './LocalRepoPathInput';
 
 type EnvironmentDialog = AppState['environmentDialog'];
 
-// EnvironmentTypeSelect picks the env's fundamental shape: whether the worktree
-// lives on the host, on a cluster PVC, or not at all (deploy-only runtime pod).
 export function EnvironmentTypeSelect({
   dialog,
 }: {
@@ -55,9 +53,7 @@ function environmentTypeHelper(envType: EnvironmentDialog['envType']): string {
   }
 }
 
-// LocalRepoPathField's path applies to local-agent and host envs — both use
-// a directory on this machine, differing only in whether a pod mounts it;
-// remote-agent uses a cluster PVC and runtime has no worktree.
+// Applies to local-agent and host envs, which both use a directory on this machine.
 export function LocalRepoPathField({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
   return (

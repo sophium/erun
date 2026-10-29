@@ -20,11 +20,7 @@ type DesktopIdentity struct {
 	PublicKey ed25519.PublicKey
 }
 
-// SeedDesktopIdentity writes an Ed25519 desktop identity where erun resolves it,
-// so `erun mcp` scenarios can mint bearer tokens for an environment's MCP edge
-// without the desktop app ever having run. The public half is returned rather
-// than written: the CLI reads only the private key, and a scenario needs the
-// public key to verify the token the CLI produced.
+// SeedDesktopIdentity writes the Ed25519 private key where erun resolves it and returns the public half.
 func SeedDesktopIdentity(t testing.TB, setup env.Setup) DesktopIdentity {
 	t.Helper()
 	public, private, err := ed25519.GenerateKey(rand.Reader)
@@ -45,11 +41,7 @@ func SeedDesktopIdentity(t testing.TB, setup env.Setup) DesktopIdentity {
 	return DesktopIdentity{Dir: dir, KeyPath: keyPath, PublicKey: public}
 }
 
-// SeedDesktopIdentityPublicKey writes the public half of the desktop identity
-// where erun resolves it, and returns its path. A deploy that refuses to drop
-// live MCP auth looks for it there to tell the operator which key to re-supply,
-// so a scenario that exercises that arm needs the file on disk — SeedDesktopIdentity
-// deliberately keeps the public half in memory for the token-minting scenarios.
+// SeedDesktopIdentityPublicKey writes the public half to disk, for the deploy arm that names the key to re-supply.
 func SeedDesktopIdentityPublicKey(t testing.TB, setup env.Setup, publicKeyPEM string) string {
 	t.Helper()
 	dir := desktopIdentityDir(setup)
@@ -61,13 +53,11 @@ func SeedDesktopIdentityPublicKey(t testing.TB, setup env.Setup, publicKeyPEM st
 	return path
 }
 
-// The identity lives under os.UserConfigDir()/ERun, which resolves differently
-// per host; every branch stays inside the scenario's isolated HOME.
+// desktopIdentityDir mirrors os.UserConfigDir()/ERun inside the isolated HOME.
 func desktopIdentityDir(setup env.Setup) string {
 	if runtime.GOOS == "darwin" {
 		return filepath.Join(setup.Home, "Library", "Application Support", "ERun")
 	}
-	// Linux honours XDG_CONFIG_HOME and Windows reads %AppData%; env.Setup points
-	// both at the same isolated config directory.
+	// env.Setup points XDG_CONFIG_HOME and %AppData% at the same directory.
 	return filepath.Join(setup.ConfigHome, "ERun")
 }

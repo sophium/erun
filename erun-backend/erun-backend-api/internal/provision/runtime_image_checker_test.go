@@ -13,8 +13,6 @@ const (
 	canonicalImage = "ghcr.io/acme/erun-devops:1.2.3"
 )
 
-// withGHCRTestServers points the checker at local httptest servers instead of
-// the real ghcr.io, restoring the real hosts afterward.
 func withGHCRTestServers(t *testing.T, tokenServer, apiServer *httptest.Server) {
 	t.Helper()
 	prevAPI, prevToken := ghcrAPIBase, ghcrTokenBase
@@ -27,7 +25,6 @@ func withGHCRTestServers(t *testing.T, tokenServer, apiServer *httptest.Server) 
 	})
 }
 
-// staticCredentials is a RegistryCredentials that answers for one host.
 type staticCredentials struct {
 	host       string
 	credential RegistryCredential
@@ -40,16 +37,11 @@ func (c staticCredentials) For(_ context.Context, host string) (RegistryCredenti
 	return c.credential, true
 }
 
-// ghcrStub is a fake ghcr.io: per-repository manifest statuses, and a token
-// endpoint that mimics the real one's refusal to issue an anonymous pull token
-// for a repository the caller may not see. Every request is recorded so a test
-// can assert the probe authenticated.
+// ghcrStub is a fake ghcr.io that refuses anonymous pull tokens for private repos.
 type ghcrStub struct {
-	// manifests maps `<repo>:<tag>` to the status a *readable* request gets.
-	manifests map[string]int
-	// private lists repositories that answer only an authenticated caller.
-	private map[string]bool
-	// credential is the one username/password the stub accepts.
+	// manifests maps `<repo>:<tag>` to the status a readable request gets.
+	manifests  map[string]int
+	private    map[string]bool
 	credential RegistryCredential
 
 	tokenRequests []tokenRequest
@@ -69,9 +61,7 @@ func (s *ghcrStub) start(t *testing.T) {
 		s.tokenRequests = append(s.tokenRequests, tokenRequest{scope: scope, authenticated: authenticated})
 		repo := strings.TrimSuffix(strings.TrimPrefix(scope, "repository:"), ":pull")
 		if s.private[repo] && !authenticated {
-			// What ghcr.io really answers an anonymous caller for a private or
-			// nonexistent repository: no token at all, so the caller never gets
-			// to see a 404 or a 200.
+			// Real ghcr.io issues no anonymous token for private or nonexistent repos.
 			w.WriteHeader(http.StatusForbidden)
 			return
 		}
@@ -90,9 +80,6 @@ func (s *ghcrStub) start(t *testing.T) {
 	withGHCRTestServers(t, token, api)
 }
 
-// assertConfirmedMissing drives one probe and asserts its verdict, so each
-// scenario below reads as the registry shape it sets up plus the answer it must
-// produce.
 func assertConfirmedMissing(t *testing.T, checker *GHCRImageChecker, want bool, reason string) {
 	t.Helper()
 	missing, err := checker.ConfirmedMissing(context.Background(), tenantImage, canonicalImage)
@@ -104,11 +91,6 @@ func assertConfirmedMissing(t *testing.T, checker *GHCRImageChecker, want bool, 
 	}
 }
 
-// TestGHCRImageCheckerPrivateNamespace is the regression this checker exists
-// for: a tenant's own image is absent from a *private* registry namespace,
-// where an anonymous probe cannot tell "absent" from "not yours to see" and so
-// left every projectless tenant deploying an image nobody ever published. With
-// the deploy Job's own pull credential the two separate, and only then.
 func TestGHCRImageCheckerPrivateNamespace(t *testing.T) {
 	credential := RegistryCredential{Username: "pull-user", Password: "pull-token"}
 	newStub := func() *ghcrStub {
@@ -148,16 +130,10 @@ func TestGHCRImageCheckerPrivateNamespace(t *testing.T) {
 	})
 }
 
-// TestGHCRImageCheckerFailsOpenOnAmbiguousOutcomes locks the deliberate
-// fail-open behavior: this check exists to catch a *knowable* missing image,
-// never to gate a deploy on an inconclusive registry probe.
 func TestGHCRImageCheckerFailsOpenOnAmbiguousOutcomes(t *testing.T) {
 	credential := RegistryCredential{Username: "pull-user", Password: "pull-token"}
 	credentials := staticCredentials{host: "ghcr.io", credential: credential}
 
-	// The credential is what makes a 404 mean "absent" rather than "not for
-	// you", so one that cannot even read an image known to be published proves
-	// nothing about the one that answered 404.
 	t.Run("credential that cannot read the control image", func(t *testing.T) {
 		stub := &ghcrStub{
 			manifests:  map[string]int{"acme/erun-devops:1.2.3": http.StatusUnauthorized},
@@ -209,10 +185,7 @@ func TestGHCRImageCheckerFailsOpenOnAmbiguousOutcomes(t *testing.T) {
 	})
 }
 
-// TestGHCRImageCheckerProbesTheRequestedRepositories pins that each probe is
-// scoped to its own repository: a pull token is per-repository, so reusing the
-// control image's token for the tenant image would ask the registry about the
-// wrong thing.
+// A pull token is per-repository, so each probe must request its own.
 func TestGHCRImageCheckerProbesTheRequestedRepositories(t *testing.T) {
 	credential := RegistryCredential{Username: "pull-user", Password: "pull-token"}
 	stub := &ghcrStub{
@@ -239,8 +212,6 @@ func TestGHCRImageCheckerProbesTheRequestedRepositories(t *testing.T) {
 	}
 }
 
-// assertConfirmedPresent mirrors assertConfirmedMissing for the positive
-// counterpart.
 func assertConfirmedPresent(t *testing.T, checker *GHCRImageChecker, want bool, reason string) {
 	t.Helper()
 	present, err := checker.ConfirmedPresent(context.Background(), tenantImage, canonicalImage)
@@ -252,12 +223,6 @@ func assertConfirmedPresent(t *testing.T, checker *GHCRImageChecker, want bool, 
 	}
 }
 
-// TestGHCRImageCheckerConfirmedPresent locks ConfirmedPresent, the positive
-// counterpart to ConfirmedMissing added for erun#1480: it is what lets the
-// runtime-image fallback report a real substitution instead of guessing one
-// — a confirmed 200 is the only outcome that reports true, so an absent,
-// forbidden, or inconclusive probe never asserts a substitution that was
-// never actually confirmed.
 func TestGHCRImageCheckerConfirmedPresent(t *testing.T) {
 	credential := RegistryCredential{Username: "pull-user", Password: "pull-token"}
 	credentials := staticCredentials{host: "ghcr.io", credential: credential}

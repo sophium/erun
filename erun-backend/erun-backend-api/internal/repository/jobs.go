@@ -17,9 +17,7 @@ type JobRepository struct {
 	txs *TxManager
 }
 
-// JobFilter composes GET /v1/jobs discovery filters. Every field is optional
-// and AND-ed together; an empty filter lists every job visible to the
-// caller's tenant.
+// JobFilter composes GET /v1/jobs filters, AND-ed together.
 type JobFilter struct {
 	Status        model.JobStatus
 	EnvironmentID string
@@ -46,9 +44,8 @@ func (r *JobRepository) Create(ctx context.Context, job model.Job) (model.Job, e
 	return created, err
 }
 
-// classifyJobError maps jobs' foreign key and CHECK constraints onto the
-// repository's sentinel errors: an environmentId the caller's tenant cannot see fails the same foreign key
-// check whether it genuinely doesn't exist or just isn't this tenant's.
+// classifyJobError maps constraint violations to sentinel errors; an invisible
+// environmentId fails the FK like a missing one.
 func classifyJobError(err error) error {
 	code, ok := pgErrorCode(err)
 	if !ok {
@@ -64,12 +61,8 @@ func classifyJobError(err error) error {
 	}
 }
 
-// Get returns a job owned by tenantID, or ErrNotFound for an id that names
-// another tenant's job. The tenant is an explicit predicate and not left to
-// RLS, the same reason EnvironmentRepository.Get states it: erun_operations'
-// RLS policy is unconditional (USING (true)), so for an OPERATIONS caller an
-// id-only lookup would answer with a stranger's row — here on the job routes,
-// where Get's result is what PATCH /v1/jobs/{job_id} then moves forward.
+// Get returns tenantID's job, or ErrNotFound. tenantID is an explicit predicate
+// because erun_operations' RLS policy is unconditional.
 func (r *JobRepository) Get(ctx context.Context, tenantID, jobID string) (model.Job, error) {
 	var job model.Job
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
@@ -84,26 +77,20 @@ func (r *JobRepository) Get(ctx context.Context, tenantID, jobID string) (model.
 	return job, err
 }
 
-// List returns the caller's tenant's jobs narrowed by filter, the live queue
-// first: every open job -- PLANNED or RUNNING -- ahead of the finished ones,
-// then most recently started first. Scoped explicitly by tenant_id from the security context
-// rather than left to RLS: erun_operations' policy is unconditional, so an
-// OPERATIONS caller's empty filter would otherwise read every tenant's jobs.
+// List returns the tenant's jobs, open (PLANNED/RUNNING) first, then most
+// recently started. tenant_id is filtered explicitly because erun_operations'
+// RLS policy is unconditional.
 func (r *JobRepository) List(ctx context.Context, filter JobFilter) ([]model.Job, error) {
 	return r.list(ctx, filter, "")
 }
 
-// ListByEnvironment is List narrowed to one environment — the per-environment
-// view, which mirrors the ai-sessions sub-route's own read-back for a caller
-// watching a single environment rather than the whole tenant queue.
+// ListByEnvironment is List narrowed to one environment.
 func (r *JobRepository) ListByEnvironment(ctx context.Context, environmentID string) ([]model.Job, error) {
 	return r.list(ctx, JobFilter{}, environmentID)
 }
 
 func (r *JobRepository) list(ctx context.Context, filter JobFilter, environmentID string) ([]model.Job, error) {
-	// An empty list is a definite "nothing is recorded", so it is built
-	// non-nil and marshals as [] rather than null — a caller ranging over the
-	// body must not need a null check.
+	// Non-nil so it marshals as [] rather than null.
 	jobs := []model.Job{}
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		securityContext, err := security.RequiredFromContext(ctx)
@@ -146,18 +133,8 @@ func (r *JobRepository) list(ctx context.Context, filter JobFilter, environmentI
 	return jobs, err
 }
 
-// FindOpenByScope returns the job currently holding scope, if one is. The
-// lookup is the claim primitive's read half: a caller about to start work
-// asks this first so a second claim can be refused with the holder named,
-// instead of two actors silently duplicating each other.
-//
-// PLANNED counts as holding: a parked plan is a claim on the same scope a
-// running job is, and leaving it out would let a second actor claim as
-// RUNNING the very work somebody had already recorded an intent to do.
-//
-// A scope no open job holds is reported as ErrNotFound, the same sentinel a
-// missing row resolves to, so a caller cannot confuse "nobody holds this"
-// with a lookup that failed.
+// FindOpenByScope returns the open job holding scope, or ErrNotFound. PLANNED
+// counts as holding.
 func (r *JobRepository) FindOpenByScope(ctx context.Context, scope string) (model.Job, error) {
 	var job model.Job
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
@@ -179,32 +156,11 @@ func (r *JobRepository) FindOpenByScope(ctx context.Context, scope string) (mode
 	return job, err
 }
 
-// AbandonStale closes every RUNNING job whose last update predates
-// staleBefore, returning the rows it closed so the sweep's effect is
-// observable rather than inferred from a count.
-//
-// This is deliberately not tenant-scoped. A sweep runs under the operations
-// role across every tenant at once — a job abandoned in one tenant must not
-// require that tenant to ask for it to be cleared — and it is the only write
-// in this repository that reads no tenant from the security context. The
-// tenant's own reads stay scoped in SQL rather than left to RLS, because
-// erun_operations' policy is unconditional (see List).
-//
-// One statement, not a read followed by a write: a row that a later update
-// refreshes between the two would otherwise be abandoned on the strength of
-// the state it had when it was read.
-//
-// PLANNED is deliberately outside the predicate rather than merely absent
-// from it. ABANDONED means an actor started work and stopped updating it; a
-// parked plan has no actor to stop, so sweeping one would destroy exactly the
-// prospective backlog entry the status exists to hold -- within the TTL,
-// silently, on a schedule. The sweep closes RUNNING jobs and nothing else,
-// and that is a contract, not an accident of the current predicate: widening
-// it to every open job would put a planned item back on the clock.
+// AbandonStale closes, across all tenants, every RUNNING job not updated since
+// staleBefore, in one statement so a concurrent refresh is not lost. PLANNED
+// jobs are never swept: they have no actor to go stale.
 func (r *JobRepository) AbandonStale(ctx context.Context, staleBefore time.Time) ([]model.Job, error) {
-	// A sweep that closed nothing is still a definite answer, so the slice is
-	// built non-nil and marshals as [] rather than null -- the same contract
-	// every list in this repository holds to.
+	// Non-nil so it marshals as [] rather than null.
 	abandoned := []model.Job{}
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		return tx.NewRaw(`
@@ -218,15 +174,8 @@ func (r *JobRepository) AbandonStale(ctx context.Context, staleBefore time.Time)
 	return abandoned, err
 }
 
-// Update persists a job's progress: its status, summary and local_job_id,
-// plus the ended_at the status change implies. Every other field — what the
-// job claims, who holds it, when it started — is immutable after creation,
-// so a job cannot be reassigned to another actor by a later write.
-// Update writes tenantID's own job, carrying the same explicit tenant
-// predicate Get does. The service reaches this only with a job it read back
-// through Get under the same tenant, so the predicate states a scope that was
-// already true rather than newly narrowing the write — which is the point: it
-// is stated here, not inherited from whichever read happened to precede it.
+// Update persists status, summary, local_job_id and ended_at; all other fields
+// are immutable so a job cannot be reassigned. tenantID is an explicit predicate.
 func (r *JobRepository) Update(ctx context.Context, tenantID string, job model.Job) (model.Job, error) {
 	updated := job
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {

@@ -6,9 +6,7 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'unexpected error';
 }
 
-// resolveAuth runs the console's sign-in lifecycle once on load: OIDC
-// discovery (GET /v1/platform), then the bearer token (an OIDC callback
-// exchange, a token already held this session, or the dev-token fallback).
+// resolveAuth runs OIDC discovery, then resolves the bearer token, once on load.
 export function resolveAuth(): AppThunk<Promise<void>> {
   return async (dispatch) => {
     const resolution = await resolveOidcConfig();

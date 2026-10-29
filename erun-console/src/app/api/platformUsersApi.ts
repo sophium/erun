@@ -1,11 +1,5 @@
-// RTK Query endpoints for /v1/users: the raw erun-side enrollment surface
-// (erun-backend-api/internal/routes/users.go) that writes a user row
-// directly, optionally linking an external (issuer, subject) identity —
-// the same capability `erun platform user enroll` exposes on the CLI.
-// Distinct from identityApi's /v1/identity/users, which also creates the IdP
-// account itself; this one assumes the identity already exists (or will be
-// linked later) and is the only enrollment path that can target a tenant
-// other than the caller's own.
+// RTK Query endpoints for /v1/users: enrol an erun user for an existing identity,
+// the only enrollment path that can target another tenant.
 import { asOptionalString, asString, isRecord } from 'erun-kit';
 
 import { platformApi } from './platformApi';
@@ -35,11 +29,7 @@ function parsePlatformUserList(value: unknown): PlatformUser[] {
   return value.filter(isRecord).map(parsePlatformUser);
 }
 
-// EnrollPlatformUserInput mirrors POST /v1/users' body. tenantId targets a
-// tenant other than the caller's own and is honored only for an
-// operations-tenant caller (erun-backend-api's resolveTargetTenant); the
-// backend refuses it outright for anyone else, so the console's own
-// tenant-selector gating is presentation only, never the real boundary.
+// tenantId is honored only for an operations-tenant caller; the backend is the real boundary.
 export interface EnrollPlatformUserInput {
   username: string;
   issuer?: string;
@@ -47,11 +37,7 @@ export interface EnrollPlatformUserInput {
   tenantId?: string;
 }
 
-// alreadyEnrolled distinguishes the no-op "this identity is already enrolled
-// in the target tenant" success (200) from a genuine username collision,
-// which the backend reports as a USERNAME_TAKEN error instead (see
-// httpBaseQuery's parsedError / queryError's describeQueryError for how that
-// surfaces to a caller of enrollPlatformUser).
+// alreadyEnrolled marks the no-op 200; a username collision is a USERNAME_TAKEN error instead.
 export interface EnrollPlatformUserResult {
   user: PlatformUser;
   alreadyEnrolled: boolean;
@@ -79,9 +65,7 @@ export const platformUsersApi = platformApi.injectEndpoints({
       providesTags: ['PlatformUsers'],
     }),
 
-    // enrollPlatformUser invalidates 'Tenants' as well as 'PlatformUsers':
-    // it is the one write that can change a tenant's user count, which the
-    // Tenants view's inert-tenant flag (erun#1744) reads from listTenants.
+    // Also invalidates 'Tenants': it changes the user count the inert-tenant flag reads.
     enrollPlatformUser: builder.mutation<
       EnrollPlatformUserResult,
       { token: string; input: EnrollPlatformUserInput }

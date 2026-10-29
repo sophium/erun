@@ -2,11 +2,7 @@ import { Button, Input, Label } from 'erun-kit';
 import { Plus, Trash2 } from 'lucide-react';
 import * as React from 'react';
 
-// ImagePullSecretsField edits the Kubernetes secrets the runtime pod pulls its
-// image with. It matters most when the environment carries a private runtime
-// image: without a secret the pod never starts, and the empty state says so
-// rather than leaving the operator to infer why a pod they created will not
-// come up.
+// Without a secret a private runtime image never pulls, which the empty state says.
 export function ImagePullSecretsField({
   secrets,
   disabled,

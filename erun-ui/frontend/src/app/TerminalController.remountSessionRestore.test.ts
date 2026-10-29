@@ -1,20 +1,5 @@
-// A pane that is torn down and rebuilt has to come back on the session the
-// store names.
-//
-// `unmountTerminal` drops the switch a teardown made unrunnable
-// (TerminalSwitchQueue.cancel) and `mount` builds a fresh, blank xterm. What
-// fills that pane is a `setSessionId` dispatch, and the middleware only
-// forwards one when the store's session *changes* -- which tearing the pane
-// down does not. So a reader whose window is rebuilt while they sit on a
-// session is left on an empty terminal with the tab strip naming the session it
-// should be showing, and nothing will ever repaint it: the pane is blank for
-// good, and it is the same dead end as a switch that is dropped after it has
-// cleared the pane.
-//
-// This drives the real controller on a real DOM with a real xterm and a real
-// serializer, tears the pane down, rebuilds it, and asserts the pane comes back
-// holding the session's screen -- with no dispatch between the two, which is
-// exactly the state a rebuilt pane is left in.
+// A rebuilt pane must restore the store's session without a new setSessionId
+// dispatch: the middleware only forwards session changes.
 //
 // @vitest-environment jsdom
 import assert from 'node:assert/strict';
@@ -36,9 +21,7 @@ const EXTRA = 501;
 
 type OutputHandler = (payload: TerminalOutputPayload) => void;
 
-// Waits on xterm's own write queue instead of the clock. A switch runs from a
-// write callback and then issues writes of its own, so the first barrier lets
-// the queued switch run and the second lets what it wrote be parsed.
+// A switch writes from a write callback, so two barriers are needed.
 async function settled(terminal: Terminal): Promise<void> {
   for (let barrier = 0; barrier < 2; barrier += 1) {
     await new Promise<void>((resolve) => {
@@ -121,9 +104,6 @@ test('a remounted pane renders the session the store already names', async () =>
   await settled(first);
   assert.ok(reader.serialize().includes(EXTRA_MARKER), 'setup: extra did not render');
 
-  // The pane is torn down and rebuilt -- a layout change, a window re-open --
-  // with the store still naming the session the reader was on, and nothing
-  // dispatching a session id afterwards.
   unmount();
   unmount = controller.mount(elements());
   const terminal = (controller as unknown as { terminal: Terminal }).terminal;

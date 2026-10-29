@@ -190,7 +190,7 @@ cache-busting source change that invalidates the layer around it:
 downloaded `.deb`s, and it defeats the mount entirely. Package installation is
 routinely the single largest phase of a cold build.
 
-**Pin base images to a version.** `alpine:3.20`, never `alpine:latest`: a
+**Pin base images to a version.** `alpine:3.24`, never `alpine:latest`: a
 floating tag invalidates every layer beneath it the day it moves, with no
 change on your side and no way to tell from the diff.
 

@@ -4,9 +4,7 @@ export type SidebarCloudAliasAction = '' | 'login' | 'logout' | 'bearer';
 
 export interface SidebarState {
   collapsedTenants: string[];
-  // Absence means idle. Keyed by alias so per-provider-type rows (AWS,
-  // Cloudflare) get independent spinners — one alias's in-flight action must
-  // not disable another alias's control.
+  // Absence means idle. Keyed by alias so one alias's action never disables another's.
   sidebarCloudAliasBusyByAlias: Record<string, SidebarCloudAliasAction>;
 }
 

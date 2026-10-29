@@ -44,18 +44,9 @@ func (m *TxManager) WithinTx(ctx context.Context, fn func(context.Context, bun.T
 	return m.db.RunInTx(ctx, nil, fn)
 }
 
-// WithinSystemTx runs fn in a transaction bound to the erun_operations
-// database role with no caller identity and no tenant scoping — the narrow
-// escape hatch AGENTS.md's Row-Level Security section calls for "before
-// tenant context exists". Its one legitimate caller today is the invite
-// accept flow: resolving an unauthenticated invite token to its target
-// tenant has no security.Context to read a tenant from, the same problem
-// root resolution tables like tenant_issuers solve by carrying no RLS at
-// all, except invites is tenant-owned end to end (created, listed, and
-// revoked under normal per-tenant RLS) so it cannot go that route. Every
-// statement fn issues must name its own tenant_id explicitly:
-// erun_operations' RLS policy grants it every tenant's rows regardless of
-// erun.tenant_id, so nothing here provides tenant isolation on its own.
+// WithinSystemTx runs fn as erun_operations with no identity or tenant scope,
+// for flows that precede tenant context (invite accept). Every statement must
+// filter tenant_id itself: nothing here isolates tenants.
 func (m *TxManager) WithinSystemTx(ctx context.Context, fn func(context.Context, bun.Tx) error) error {
 	if m.dialect != DialectPostgres {
 		return m.db.RunInTx(ctx, nil, fn)

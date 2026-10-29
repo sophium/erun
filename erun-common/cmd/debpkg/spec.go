@@ -11,8 +11,7 @@ import (
 	"strings"
 )
 
-// debianArches maps a Docker TARGETARCH to the Debian architecture a package
-// built for it declares. Only the architectures erun releases are accepted.
+// debianArches maps Docker TARGETARCH to the Debian arch; only released arches are accepted.
 var debianArches = map[string]string{
 	"amd64": "amd64",
 	"arm64": "arm64",
@@ -26,8 +25,6 @@ func debianArch(targetArch string) (string, error) {
 	return arch, nil
 }
 
-// packageSpec is one .deb: its control fields, the Go binaries it compiles
-// for the target, the files it copies in, and where the package goes.
 type packageSpec struct {
 	Name             string
 	Version          string
@@ -48,8 +45,6 @@ type packageSpec struct {
 	Out              string
 }
 
-// goBuild compiles Package in the module at Dir into Dest inside the package,
-// stamping the package version into VersionVar when it is set.
 type goBuild struct {
 	Dir        string
 	Package    string
@@ -57,7 +52,6 @@ type goBuild struct {
 	VersionVar string
 }
 
-// packageFile copies Src to Dest inside the package with Mode.
 type packageFile struct {
 	Src  string
 	Dest string
@@ -116,8 +110,7 @@ func parseBuildFlags(args []string) (packageSpec, error) {
 	return spec, validateSpec(spec)
 }
 
-// resolveVersion takes the version as given, or else the version file's
-// content with every space removed, as a bare build without ERUN_VERSION does.
+// resolveVersion falls back to the version file with spaces removed.
 func resolveVersion(version, versionFile string) (string, error) {
 	if version = strings.TrimSpace(version); version != "" {
 		return version, nil
@@ -179,7 +172,6 @@ func parsePackageFiles(values []string) ([]packageFile, error) {
 	return files, nil
 }
 
-// packagePath is an absolute path inside the package that stays inside it.
 func packagePath(dest string) (string, error) {
 	clean := path.Clean(dest)
 	if !strings.HasPrefix(dest, "/") || clean == "/" || strings.HasPrefix(clean, "/DEBIAN") {

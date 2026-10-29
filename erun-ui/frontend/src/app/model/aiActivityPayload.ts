@@ -1,5 +1,4 @@
-// AIActivityPayload drives a "working" spinner on an env's sidebar row while its AI
-// tab produces output, including when the user has navigated away to a different env.
+// Drives an env's sidebar spinner while its AI tab produces output, even when another env is selected.
 export interface AIActivityPayload {
   sessionId: number;
   tenant: string;

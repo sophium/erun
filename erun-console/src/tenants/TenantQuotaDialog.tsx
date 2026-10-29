@@ -17,9 +17,7 @@ import { useSetTenantQuotaMutation } from '../app/api/quotaApi';
 import { queryErrorMessage } from '../app/queryError';
 import { useQuotaController } from '../quota/controller';
 
-// QUOTA_FIELDS drives both the form's inputs and the request body, so a new
-// cap only needs one new entry here rather than a field repeated per form and
-// per submit handler.
+// QUOTA_FIELDS drives both the inputs and the request body.
 const QUOTA_FIELDS: { key: keyof SetTenantQuotaInput; label: string; suffix: string }[] = [
   { key: 'maxEnvironments', label: 'Environments', suffix: '' },
   { key: 'maxCpuMillicores', label: 'Per-environment CPU', suffix: 'm' },
@@ -54,11 +52,7 @@ function parseQuotaInput(values: QuotaFieldValues): SetTenantQuotaInput {
   };
 }
 
-// quotaToFieldValues renders a loaded TenantQuota back into the same string
-// shape the form's inputs hold, so a PUT that fully replaces the row (see
-// setTenantQuotaRequest's own comment) starts from the target tenant's actual
-// current caps instead of a blank form the operator would otherwise have to
-// author blind.
+// The PUT replaces the whole row, so the form starts from the current caps.
 function quotaToFieldValues(quota: TenantQuota): QuotaFieldValues {
   return {
     maxEnvironments: String(quota.maxEnvironments),
@@ -102,11 +96,8 @@ function QuotaFields({
   );
 }
 
-// TenantQuotaDialog is the operations-only cross-tenant write side of the
-// quota surface (PUT /v1/tenants/{tenant_id}/quota) -- the counterpart to
-// every tenant's own read-only QuotaPanel. A PUT always fully replaces the
-// row, so every field is required on every submit, matching the backend's
-// own validation (erun-backend-api/internal/routes/tenant_quotas.go).
+// TenantQuotaDialog is the OPERATIONS-only quota write; every field is
+// required because the PUT fully replaces the row.
 export function TenantQuotaDialog({
   tenantId,
   tenantName,
@@ -124,9 +115,6 @@ export function TenantQuotaDialog({
   const currentQuotaState = useQuotaController(token, tenantId);
   const loadedQuota = currentQuotaState.status === 'ready' ? currentQuotaState.quota : undefined;
 
-  // Seeds the form from the target tenant's actual current caps once they
-  // load, the same "a fresh value always wins" resync RateLimitPanel uses for
-  // its own single field.
   React.useEffect(() => {
     if (loadedQuota !== undefined) {
       setValues(quotaToFieldValues(loadedQuota));

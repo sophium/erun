@@ -7,9 +7,7 @@ export interface DialogFrameBox {
   height: number;
 }
 
-// The dialog frame and its contents as one layout snapshot; a member is null
-// only when its element is absent from that snapshot, which a spec asserts on
-// rather than silently skipping (see boundingBoxOf's note on the same rule).
+// A member is null only when its element is absent; specs assert on that.
 export interface DialogFrameGeometry {
   dialog: DialogFrameBox | null;
   title: DialogFrameBox | null;
@@ -21,20 +19,8 @@ export interface DialogFrameGeometry {
 export class GlobalConfigDialog {
   constructor(public readonly page: Page) {}
 
-  // The dialog is matched even while it is hidden from the accessibility tree.
-  //
-  // Radix's modal Select hides the rest of the document with aria-hidden for as
-  // long as its content is mounted, and that content stays mounted through its
-  // close transition — so for a moment after every gateway-select interaction
-  // every element in this dialog, including the dialog itself, is aria-hidden
-  // while sitting plainly in the DOM. A role query skips those elements, so
-  // anything derived from this locator resolves to a clean, wrong zero: the
-  // catalog's clear loop reads "no rows to remove" and exits without removing
-  // any, a `toHaveCount(0)` guard passes vacuously, and the pre-click index is
-  // taken as 0 against a catalog that already holds a row — one Add then makes
-  // two. Every one of those reads follows a select interaction, which is why the
-  // window lands on all of them. Matching the element rather than what a screen
-  // reader would currently see keeps a count a count.
+  // includeHidden: Radix's modal Select aria-hides the dialog through its close transition,
+  // and a role query would then count zero rows.
   locator(): Locator {
     return this.page.getByRole('dialog', { name: 'ERun settings', includeHidden: true });
   }
@@ -47,18 +33,7 @@ export class GlobalConfigDialog {
     await this.locator().waitFor({ state: 'hidden' });
   }
 
-  // Converge on the frame this dialog settles into once its config has landed.
-  //
-  // `waitForOpen` resolves the moment the content mounts, which is the
-  // `configLoading` shell: the header and the footer are already there, the body
-  // is one placeholder line, and the whole card is ~195px tall inside a viewport
-  // whose loaded frame is capped at 85vh (~1020px). Geometry read before the
-  // config lands is therefore geometry of a different card than the one the
-  // assertions are about. The body's own first field is the observable signal
-  // that the load landed -- `GlobalConfigBody` renders the placeholder instead
-  // of it for as long as `configLoading` is set -- and the enter animation
-  // (DialogContent's `zoom-in-95`, 200ms) is waited out so a measurement is not
-  // taken part-way through a scale transform.
+  // waitForLoadedFrame waits for the loaded body (not the loading shell) and the enter animation.
   async waitForLoadedFrame(): Promise<void> {
     await this.locator().locator('#global-config-defaulttenant').waitFor({ state: 'visible' });
     await this.locator().evaluate(async (root) => {
@@ -66,16 +41,7 @@ export class GlobalConfigDialog {
     });
   }
 
-  // The dialog frame and everything asserted inside it, read from ONE layout.
-  //
-  // As separate locator round trips these are separate layout moments, and this
-  // card's height changes by ~815px between its loading shell and its loaded
-  // body: a frame read before the config lands and a footer read after it are
-  // ~382px apart, so a containment assertion across the two fails on the loading
-  // shell's own bottom while the footer is legitimately inside the loaded one.
-  // This dialog is the one that measured it -- see the spec's own note. One
-  // evaluation, one layout: no transition can land between two reads that are
-  // not two reads.
+  // frameGeometry reads everything in one evaluation, so no layout change lands between reads.
   async frameGeometry(): Promise<DialogFrameGeometry> {
     return this.locator().evaluate((root) => {
       const box = (el: Element | null): DialogFrameBox | null => {
@@ -98,8 +64,7 @@ export class GlobalConfigDialog {
   }
 
   defaultTenantTrigger(): Locator {
-    // The trigger's accessible text is the selected value, not a stable label,
-    // so match it by id rather than by role name.
+    // The trigger's text is the selected value, so match by id.
     return this.page.locator('#global-config-defaulttenant');
   }
 
@@ -151,13 +116,7 @@ export class GlobalConfigDialog {
   }
 
   // --- Add-provider actions ---
-  //
-  // AWS and Cloudflare delegate to the CLI's guided `erun cloud init` flow, not
-  // an in-app form; those add buttons launch that flow and close the dialog.
-  // erun collects its one required field (the platform API URL) in a popover
-  // without leaving Settings — see addERunButton/erunApiUrlInput/connectERun.
-  // The same three buttons render in the header (once aliases exist) and in
-  // the empty state (before any do) — never both at once.
+  // AWS and Cloudflare launch `erun cloud init` and close the dialog; erun uses a popover.
 
   addAWSButton(): Locator {
     return this.locator().getByRole('button', { name: 'Add AWS account', exact: true });
@@ -179,15 +138,12 @@ export class GlobalConfigDialog {
     await this.addCloudflareButton().click();
   }
 
-  // The in-app add form was removed in favour of the guided CLI flow; specs use
-  // this locator to assert it resolves to zero matches — the negative invariant
-  // that the desktop hosts no bespoke add form for Cloudflare.
+  // Specs assert this resolves to nothing: there is no in-app Cloudflare form.
   cloudflareForm(): Locator {
     return this.page.locator('form[aria-label="Add Cloudflare token"]');
   }
 
-  // The erun add popover is portal'd to document.body by Radix, so these
-  // query at page level rather than inside the dialog locator.
+  // The popover is portaled to document.body.
   erunApiUrlInput(): Locator {
     return this.page.locator('#cloud-alias-erun-api-url');
   }
@@ -213,19 +169,12 @@ export class GlobalConfigDialog {
   }
 
   // --- Gateway catalog ---
-  //
-  // The erun-level OpenRouter catalog: one list every environment selects from.
-  // Rows carry a data-openrouter-model index so a spec addresses the row it
-  // added rather than whichever one happens to be first.
 
   openRouterBaseURLInput(): Locator {
     return this.page.locator('#global-config-openrouter-baseurl');
   }
 
-  // The gateway credential is reported, not typed into a field: erun delivers
-  // one erun-level value, so what an operator picks from is which key is in play.
-  // The summary carries its source so a spec asserts on the state rather than on
-  // a sentence that may be reworded.
+  // The credential is reported by source, not typed into a field.
   openRouterCredentialSummary(): Locator {
     return this.locator().locator('[data-gateway-credential-source]');
   }
@@ -294,8 +243,6 @@ export class GlobalConfigDialog {
     return this.page.locator('#global-config-openrouter-gateway');
   }
 
-  // A known gateway is chosen from the list; anything else is a self-hosted
-  // address, so the field is revealed before it is typed into.
   async setOpenRouterBaseURL(value: string): Promise<void> {
     await this.openRouterGatewayTrigger().click();
     if (value === '') {
@@ -328,27 +275,15 @@ export class GlobalConfigDialog {
     await this.openRouterLoadModelsButton().click();
   }
 
-  // The choice is searched, not scrolled: a gateway can serve hundreds of
-  // models. The option's accessible name carries the display name and the id,
-  // so the id identifies it without depending on a name a gateway may omit.
+  // Searched, not scrolled; the option name includes the id.
   async selectOpenRouterModel(index: number, id: string, search = id): Promise<void> {
     await this.openRouterModelChoicesButton(index).click();
     await this.openRouterModelSearchInput().fill(search);
     await this.page.getByRole('option', { name: id }).click();
   }
 
-  // addOpenRouterModel appends a row and fills it.
-  //
-  // The index comes from the count taken BEFORE the click, and the click is then
-  // waited on by expecting that count to rise. Reading the count after the click
-  // instead would be a non-retrying query: it can return the pre-click length
-  // while the new row is still mounting, which points the fills at the wrong row
-  // (or at none) and shows up later as the wrong value on reopen. Deriving the
-  // index from a count that is then waited on cannot skew.
-  //
-  // Both fields are asserted before returning, so a fill that did not stick
-  // fails here — where the row is visible — rather than after a save, where it
-  // would be indistinguishable from a persistence bug.
+  // addOpenRouterModel takes the index from the pre-click count and waits for it to rise,
+  // then asserts both fields so a lost fill fails here, not after save.
   async addOpenRouterModel({ id, context }: { id: string; context?: number }): Promise<void> {
     const rows = this.openRouterModelRows();
     const index = await rows.count();

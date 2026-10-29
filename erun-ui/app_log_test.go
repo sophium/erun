@@ -24,11 +24,7 @@ func TestAppLogPathIsUnderTheERunSupportDir(t *testing.T) {
 	}
 }
 
-// The bug: the desktop is launched via `open`, which gives it no
-// controlling terminal, so a log.Printf that only reaches stderr is invisible
-// the moment the process is not run from a shell. initDurableAppLog gives it
-// a second, durable destination every existing log.Printf call already writes
-// to via the default logger.
+// A detached launch has no terminal, so stderr-only log.Printf output is lost.
 func TestInitDurableAppLogCapturesLogPrintfCalls(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
@@ -53,9 +49,7 @@ func TestInitDurableAppLogCapturesLogPrintfCalls(t *testing.T) {
 	}
 }
 
-// restoreLogOutputAfter points the default logger back at its previous output
-// once the test ends, so this test cannot leak its file handle into the rest
-// of the suite (log.SetOutput is process-global state).
+// restoreLogOutputAfter restores the process-global log output when the test ends.
 func restoreLogOutputAfter(t *testing.T) {
 	t.Helper()
 	t.Cleanup(func() { log.SetOutput(os.Stderr) })
@@ -161,8 +155,7 @@ func TestBoundedLogFilePicksUpExistingSizeOnOpen(t *testing.T) {
 	}
 	defer func() { _ = file.Close() }()
 
-	// 25 already on disk + 10 more crosses the 32-byte cap, so this write must
-	// rotate rather than silently growing the file past its bound.
+	// 25 bytes on disk + 10 crosses the 32-byte cap, so this write must rotate.
 	if _, err := file.Write(bytes.Repeat([]byte("y"), 10)); err != nil {
 		t.Fatalf("write: %v", err)
 	}

@@ -2,15 +2,12 @@ import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 
 import type { UIUpgradePlanItem } from '@/types';
 
-// Drives the cross-env "Upgrade all" preview dialog only; confirming runs the
-// actual `erun upgrade`, which this slice does not perform.
+// Drives the "Upgrade all" preview dialog; it does not run `erun upgrade`.
 export interface UpgradeAllState {
   open: boolean;
   loading: boolean;
   error: string;
   items: UIUpgradePlanItem[];
-  // Maps "<tenant>/<environment>" to the version the operator picked when an
-  // env offers more than one newer candidate.
   choices: Record<string, string>;
 }
 

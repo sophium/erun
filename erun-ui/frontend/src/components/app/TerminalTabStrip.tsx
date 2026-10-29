@@ -8,9 +8,7 @@ import { selectIsOrchestratorSession } from '@/app/selectors';
 import { addTerminalTab, closeTerminalTab, selectTerminalTab } from '@/app/sessionThunks';
 import { selectionKey } from '@/app/versionSuggestions';
 
-// StripTab is the render-agnostic tab model. The strip has two modes — the env's
-// in-pod/host tabs, and the cross-env orchestrator sessions — but both render
-// identically; only the source list and the select/close actions differ.
+// StripTab is shared by env tabs and cross-env orchestrator sessions.
 interface StripTab {
   key: string;
   label: string;
@@ -68,13 +66,7 @@ export function TerminalTabStrip(): React.ReactElement {
   const stripBaseClass =
     'flex h-8 items-end border-b border-[oklch(0.18_0_0)] bg-[oklch(0.05_0_0)] pl-2 pr-1';
 
-  // When the active session is an orchestrator, the strip reflects the
-  // orchestrators (they are cross-env, so the selected env's tabs would misalign
-  // with what the pane actually renders). Selecting an environment row switches
-  // the active session back to an env tab and the strip returns to env mode.
-  //
-  // Shared with the titlebar rather than re-derived: one definition of "the
-  // active session is an orchestrator" (#1178).
+  // Orchestrators are cross-env, so the strip lists them instead of the selected env's tabs.
   const orchestratorMode = useAppSelector(selectIsOrchestratorSession);
 
   let tabs: StripTab[];

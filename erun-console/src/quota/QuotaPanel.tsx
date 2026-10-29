@@ -47,10 +47,6 @@ function QuotaBody({ quotaState }: { quotaState: QuotaState }): React.ReactEleme
   return <QuotaList quota={quotaState.quota} />;
 }
 
-// tenantLabel looks up the scoped tenant's name for the panel's "whose quota
-// is this" badge -- undefined for the caller's own tenant (no scope) or a
-// tenant id the caller's own tenant list doesn't (yet) carry. Same shape as
-// environments/EnvironmentsPanel.tsx's row-level equivalent.
 function tenantLabel(tenants: PlatformTenant[], tenantId: string | undefined): string | undefined {
   if (tenantId === undefined) {
     return undefined;
@@ -58,27 +54,17 @@ function tenantLabel(tenants: PlatformTenant[], tenantId: string | undefined): s
   return tenants.find((tenant) => tenant.tenantId === tenantId)?.name;
 }
 
-// QuotaPanel is every tenant's self-service view of its own caps — env count,
-// the per-environment resource ceiling every provisioned environment gets,
-// and the aggregate tenant-wide budget (see erun-backend-api/internal/routes/
-// tenant_quotas.go's TenantQuotaReader). Read-only: only an operations tenant
-// can change a quota, from the Tenants panel's per-tenant "Set quota" action.
-// Wired to shell/ScopeSelector.tsx: an OPERATIONS caller pointed at another
-// tenant sees that tenant's caps here too, named by the badge below rather
-// than rendering unlabeled -- otherwise a scoped read is indistinguishable
-// from the caller's own (erun#1816).
+// Read-only; quotas are set from the Tenants panel. A scoped read is badged so it is
+// not mistaken for the caller's own.
 export function QuotaPanel({
   token,
   tenants = [],
   scopeTenantId,
 }: {
   token: string;
-  // The full tenant list, for naming the scoped tenant on the badge below --
-  // populated only for an OPERATIONS caller (shell/AppShell.tsx).
+  // Populated only for an OPERATIONS caller.
   tenants?: PlatformTenant[];
-  // Set once shell/ScopeSelector.tsx points this caller at another tenant;
-  // undefined means "my own tenant", the default and every caller's ordinary
-  // behavior before the scope selector existed.
+  // Undefined means the caller's own tenant.
   scopeTenantId?: string;
 }): React.ReactElement {
   const quotaState = useQuotaController(token, scopeTenantId);

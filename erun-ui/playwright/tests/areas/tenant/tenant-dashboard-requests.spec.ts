@@ -9,16 +9,8 @@ import {
   uniqueEnvironmentName,
 } from '../../../fixtures/seedRoot.js';
 
-// tenant-dashboard-requests.spec.ts covers the operator/admin queue (the
-// Requests tab, TenantDashboardPanels.Requests.tsx): who is waiting, and the
-// Issue invitation / Decline actions -- the desktop half of #1682 alongside
-// request-invitation-dialog.spec.ts's requester-side dialog. Like
-// tenant-dashboard-registration.spec.ts, this stubs the __erun_invoke RPC
-// boundary rather than a real erun-backend-api, which the inert harness
-// deliberately cannot reach; the Go side is covered by
-// erun-ui/tenant_platform_invite_requests_test.go, and the console's own
-// equivalent (including the capability-gated case) is covered by
-// erun-console/src/requests/RequestsPanel.test.tsx.
+// The operator side of invitation requests. The RPC is stubbed because the
+// harness cannot reach erun-backend-api.
 
 function seedDashboardEnvironment(title: string): string {
   const environment = uniqueEnvironmentName(title);
@@ -26,12 +18,8 @@ function seedDashboardEnvironment(title: string): string {
   return environment;
 }
 
-// Applies the app's own class-based light/dark mechanism directly (root
-// AGENTS.md's Design-Language Decision Record: one shared `.dark` class
-// mechanism), the same escape hatch manage-dialog-status-badge.spec.ts uses,
-// rather than clicking the titlebar toggle -- Radix's Dialog primitive marks
-// the rest of the app aria-hidden while the decline dialog is open, so the
-// titlebar button is unreachable via an accessible role query until it closes.
+// Sets the `.dark` class directly: the open Radix dialog makes the titlebar
+// toggle aria-hidden.
 async function forceDarkTheme(page: import('@playwright/test').Page): Promise<void> {
   await page.evaluate(() => {
     document.documentElement.classList.add('dark');
@@ -274,10 +262,7 @@ test.describe('tenant dashboard — Requests tab', () => {
       await expect(confirm).toBeEnabled();
       await confirm.click();
 
-      // The body the decline sent is this spec's own route handler's to
-      // record, so this step waits on that read arriving -- and `expect.poll`
-      // carries no timeout of its own, resolving to expect's 10s default
-      // rather than the 30s this test declares. Pointed at that budget.
+      // expect.poll defaults to expect.timeout, not the test deadline.
       await expect.poll(() => declineBody?.reason, withTestBudget()).toBe('no room right now');
       await expect(app.tenantDashboard.requestsEmptyState()).toBeVisible();
     } finally {
@@ -285,11 +270,8 @@ test.describe('tenant dashboard — Requests tab', () => {
     }
   });
 
-  // The desktop's own equivalent of the console's capability-gated case
-  // (RequestsPanel.test.tsx): the queue itself stays visible (partial
-  // degradation), but the actions the caller may not use do not render, and
-  // the missing access is still named (root AGENTS.md "Degrade by
-  // permission").
+  // The queue stays visible, unusable actions do not render, and the missing
+  // access is named.
   test('names the missing access when the caller can neither issue nor decline', async ({
     app,
     page,

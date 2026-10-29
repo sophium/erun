@@ -6,5 +6,5 @@ export function cn(...inputs: ClassValue[]): string {
 }
 
 export function noop(): void {
-  // Intentional no-op for places where a function is required but no action is needed.
+  // Intentionally empty.
 }

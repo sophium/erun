@@ -3,8 +3,7 @@ import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 import type { CloudInitProvider } from '@/app/model';
 import type { UISelection } from '@/types';
 
-// The large, frequently-churning terminal output buffers deliberately live
-// outside Redux (on TerminalSessionRegistry) for perf; only metadata lives here.
+// Terminal output buffers live outside Redux for perf; only metadata is here.
 
 export interface SessionsState {
   selectionToSessionId: Record<string, number>;
@@ -12,24 +11,11 @@ export interface SessionsState {
   cloudInitSessions: Record<number, CloudInitProvider>;
   exitReasons: Record<number, string>;
   exitOutputs: Record<number, string>;
-  // Drives a per-env "opening" spinner in the sidebar, independent of the
-  // user's current selection or the terminal busy overlay.
   openingByEnv: Record<string, true>;
-  // Envs (selectionKey-keyed) mid-teardown from a deliberate closeEnvironment,
-  // as a count of the closes currently in flight rather than a flag. Its own
-  // default-tab sessions still exit asynchronously once torn down, and those
-  // terminal-exit events race the thunk's own tab-clearing dispatch — see
-  // dropExitedSessionFromTabs in wailsEventThunks.ts for why that race must not
-  // auto-select (and thereby respawn) a sibling default tab. Overlapping closes
-  // of one env (a double-triggered close) each mark and clear it; a flag would
-  // let the first close to finish turn the guard off while the second's
-  // sessions are still exiting.
-  //
-  // This hold is for that tab race alone. It says nothing about whose exit a
-  // terminal-exit event is: that is answered by the exit itself (see
-  // terminalExitPayload.Deliberate), because only the session knows whether the
-  // desktop ended it, and a close that comes back an error has still killed
-  // whatever it reached on the way down.
+  // closingEnvs counts in-flight deliberate closes per env (a flag would clear
+  // too early on overlapping closes), so exit events don't respawn a sibling
+  // default tab (see dropExitedSessionFromTabs). Whether an exit was deliberate
+  // comes from terminalExitPayload.Deliberate, not from this.
   closingEnvs: Record<string, number>;
 }
 
@@ -47,10 +33,6 @@ export function envKey(tenant: string, environment: string): string {
   return `${tenant} ${environment}`;
 }
 
-// envClosing is the one truth test for "this env has a deliberate teardown in
-// flight right now", shared by every reader so a close-in-flight is never
-// re-derived from the count by hand: a key at zero or absent reads as
-// not-closing.
 export function envClosing(state: SessionsState, key: string): boolean {
   return (state.closingEnvs[key] ?? 0) > 0;
 }
@@ -99,11 +81,7 @@ export const sessionsSlice = createSlice({
         envKey(action.payload.tenant, action.payload.environment),
       );
     },
-    // openSelection calls this at the top of each click so a stale spinner
-    // from a slow previous open (e.g. EC2 cold start) does not linger on a row
-    // the user has navigated away from. The abandoned env's StartSession still
-    // runs in the background; its state mutations are dropped by the
-    // isCurrentSelection gate in openSelection.
+    // Clears a stale spinner from a slow previous open the user has left.
     resetEnvOpening(state) {
       state.openingByEnv = {};
     },

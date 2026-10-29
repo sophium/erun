@@ -30,36 +30,89 @@ this file for the conventions below.
 - Follow root "Refactoring Rules" for behavior preservation, ownership moves,
   visibility, and removal of obsolete wrappers.
 
-### Target package layers (planned, not yet in place)
+### Package layers
 
-https://github.com/sophium/erun/issues/2741 splits this one package into layers
-so an edit recompiles only its dependents and the compiler enforces primitive
-independence. Today everything is still package `eruncommon`; new code is
-written so it would already sit in one layer:
+The module is split into layers so an edit recompiles only its dependents and
+the compiler enforces primitive independence. The module root holds no package;
+new code goes into the layer it belongs to:
 
 ```
 erun-common/
-  base/          model/ core/ config/
-  infra/         docker/ kube/ helm/ gitx/ platformclient/ cloud/ activity/ mcpauth/ mcptools/
-  primitive/     build/ push/ deploy/ open/ release/
-  orchestration/ build --release, --deploy, --push: compositions of primitives
-  command/       mergequeue/ review/ jobs/ lifecycle/ setup/ doctor/ observe/ terraform/ e2e/ orchestrator/ podruntime/
+  base/          model/ core/ config/ config/<concern>/ seam/<concern>/
+  infra/         kube/ helm/ gitx/ registry/ platformclient/ cloud/<concern>/ activity/<concern>/ mcp/ mcpauth/ mcptools/ remoteinit/ codesign/
+  primitive/     shared/<concern>/ build/<concern>/ deploy/<concern>/ open/<concern>/ push/ release/
+  orchestration/ build/ deploy/ release/ execute/ clusterread/ diagnosis/
+  command/       ai/ doctor/ e2e/ expose/ inputs/ jobs/ lifecycle/<concern>/ mergequeue/ observe/ orchestrator/ platform/ podruntime/ review/ setup/ terraform/ workspace/
 ```
 
-| Layer | May depend on |
-|---|---|
-| `base/model` | stdlib only |
-| `base/core`, `base/config` | lower `base/*` (config → core → model) |
-| `infra/*` | `base/*`; other `infra/*` only downward |
-| `primitive/*` | `base/*`, `infra/*`; never another primitive |
-| `orchestration` | `base/*`, `infra/*`, `primitive/*` |
-| `command/*` | anything below; never another `command/*` |
-| erun-backend-api | `base/*`, `infra/mcpauth`, `infra/cloud` only |
+Every package may import the Go standard library. Beyond that, a package may
+import only the erun packages its row names:
 
-Until the split lands: a primitive's files never call another primitive (the
-composition goes in an orchestration-shaped file), types and config code never
-call build, deploy or release, and no new file mixes layers. depguard rules
-enforce the table once each step lands.
+| Package | May import |
+|---|---|
+| `base/model` | no other erun package |
+| `base/core` | `base/model` |
+| `base/config` | `base/model`, `base/core` |
+| `base/config/*` | `base/model`, `base/core`, `base/config` |
+| `base/seam/*` | `base/model`, `base/core`, `base/config`, sibling seams |
+| `infra/*` | `base/*` and, for cloud and activity, their own `<concern>` subpackages; another `infra/*` only where its depguard rule names it |
+| `primitive/shared/*` | `base/*`, `infra/*`, other `primitive/shared/*` |
+| `primitive/*` | `base/*`, `infra/*`, `primitive/shared/*`, and for build, deploy and open their own `<concern>` siblings; never another primitive |
+| `orchestration/build`, `/deploy`, `/clusterread`, `/diagnosis` | `base/*`, `infra/*`, `primitive/*` |
+| `orchestration/release` | `base/*`, `infra/*`, `primitive/*`, `orchestration/build` |
+| `orchestration/execute` | `base/*`, `infra/*`, `primitive/*`, `orchestration/build`, `/deploy`, `/release` |
+| `command/*` | `base/*`, `infra/*`, `primitive/*`, `orchestration/*`, and for lifecycle its own `<concern>` siblings; never another `command/*` |
+| erun-backend-api | `base/*`, `infra/cloud`, `/mcpauth`, `/mcptools`, `/platformclient` |
+
+- `base/model` holds the data types modules exchange: every type another
+  module uses, with the data types those reference. It declares types, their
+  constants and methods only; behavior lives in the package that uses it.
+  `erun-integration`'s `TestModelHoldsOnlyData` fails on a free function or
+  package variable there.
+- `base/seam` holds the func and interface types one package injects into
+  another (stores, runners, resolvers), so a package that takes a seam depends
+  on `base/*`, not on the package that implements it.
+- depguard in `.golangci.yml` enforces the table: each package denies the
+  module and allows only what lies beneath it. An infra package lists the exact
+  infra packages it imports, so a new edge between external systems is a
+  reviewed config change. erun-backend-api's own `.golangci.yml` holds its row.
+- `.go-arch-lint.yml` in every Go module lists, per package, the packages and
+  third-party modules it imports. A new import is declared there in the same
+  change, so a package's fan-out only grows as a reviewed decision. The build
+  runs `go-arch-lint check`, `go mod tidy -diff` and golangci-lint (with
+  revive's 500-line `file-length-limit`) in each module's test stage.
+- The command rule holds production files only. A test may import a sibling
+  command where it pins a contract between the two, and only there:
+  `expose` → `observe` (`TestSharedReadsNameTheReadAndTheOperationNamesItself`),
+  `orchestrator` → `ai` (the launch effort levels), `platform` → `setup`
+  (`TestErunRegistry*`), `podruntime` → `doctor`
+  (`TestRuntimeBootConfigCloudContextDefaults`).
+- erun-cli's commands follow the same rule one level up: `erun-cli/cmd/<command>`
+  per command, `erun-cli/cmd/shared/<concern>` for what two or more of them use,
+  and the root `cmd` package registering them. erun-cli's `.golangci.yml` holds a
+  command to `cmd/shared/*` and `cmd/shared/*` to no command. Split with the same
+  tool, run from `erun-cli/cmd` (`maps/06-cli.map` names the command).
+- A test whose helper is this test binary re-executed registers that helper
+  from an `init` in its own file (`reentryHelpers`, in each package's suite
+  `TestMain`), so it keeps working from whichever package its file is in.
+  Tests that read a sibling module find the repository with `erunRepoRoot`,
+  never by a fixed `../` depth.
+- Move declarations between packages with `go run ./cmd/pkgmove`, never by
+  hand. `plan -map` simulates a map (the import graph it makes, every cycle
+  with the references that hold it, the fields it would export); `apply`
+  rewrites this module and its importers. Each step's map is committed under
+  `cmd/pkgmove/maps/`; a branch that predates a step re-runs that step's map
+  after rebasing rather than resolving the move by hand.
+- Test helpers are not shared across packages. A `_test.go` declaration
+  cannot be exported, so a helper a moved test needs is copied into that
+  package's tests, and moved instead when its own package no longer uses it.
+- A primitive never calls another primitive: what two primitives share goes to
+  the `primitive/shared/<concern>` package for that concern, and a composition
+  of primitives goes in the
+  `orchestration/*` package for that composition.
+  Types and config code never call build, deploy or release.
+- `cmd/buildcost` measures what one edit costs every module's build, vet and
+  test compile; compare a layer's edit before and after its step.
 
 ### Platform identity: one per environment, and its form says which grant
 
@@ -135,7 +188,7 @@ enforce the table once each step lands.
 - An in-cluster cloud context names the cluster the current process itself runs
   in, so it is already running: `CloudContextPreflight` must not refresh or
   start it, and no working-hours gate applies (`isInClusterCloudContext` in
-  `cloud_context.go`, `cloud_context_in_cluster_test.go`). The default a pod's
+  `cloud_context_power.go`, `cloud_context_in_cluster_test.go`). The default a pod's
   injected env produces is that same sentinel. A power-managed context with no
   instance ID is still a genuine `has no instance ID` error — the distinction
   is in-cluster versus power-managed, never present versus missing.
@@ -385,7 +438,10 @@ demonstrated:
 ## Visibility
 
 - Default to package-private; export only for a current external caller, not
-  same-package tests. Lower a symbol when its last external use disappears.
+  same-package tests. Another erun-common package is an external caller: a
+  symbol a lower layer offers to a higher one is exported, which is what the
+  layered split does at every boundary it draws. Lower a symbol when its last
+  external use disappears.
 
 ## Naming
 
@@ -412,17 +468,18 @@ drift. `erun-cli/AGENTS.md` and `erun-ui/AGENTS.md` apply this record to their o
 surfaces.
 
 - **A failed read states what could not be read, in the operator's terms, before
-  the underlying error.** `erun-ui/runtime_usage.go` and
-  `erun-ui/environment_usage.go` both lead with `Cannot read this environment's
-  resource usage: ` and let the cause follow; `erun-ui/runtime_sizing.go` does the
-  same for a sizing recommendation. A bare `exit status 1: kubectl ...` with no
+  the underlying error.** `erun-ui/internal/runtimeview/usage.go` and
+  `erun-ui/internal/runtimeview/env_usage.go` both lead with `Cannot read this
+  environment's resource usage: ` and let the cause follow;
+  `erun-ui/internal/runtimeview/sizing.go` does the same for a sizing
+  recommendation. A bare `exit status 1: kubectl ...` with no
   headline is the departure this names.
 - **A message names the command actually invoked, or names none.**
   `erun-common/open.go`'s shared tenant resolver hardcodes its own caller --
   `open could not infer one` -- so `erun usage` and `erun observe` both report that
   `open` failed (#2363). A command that names itself must be the one the operator
   ran; where a shared helper genuinely cannot know its caller, it names no command.
-  `erun-cli/cmd/pin.go`'s `` see `erun pin --list` `` is the honoured form.
+  `erun-cli/cmd/pin/pin.go`'s `` see `erun pin --list` `` is the honoured form.
 - **A failure that occurred once is reported once, at the level it occurred.**
   `erun-common/cloud_context.go`'s `setCloudContextStatusFailure` builds one
   `status refresh failed: ...` string outside the loop and stamps it on every

@@ -14,12 +14,7 @@ export const tenantDashboardSlice = createSlice({
     patchTenantDashboard(state, action: PayloadAction<Partial<TenantDashboardState>>) {
       Object.assign(state, action.payload);
     },
-    // setReviewUnresolvedThreads writes back the count a review detail read
-    // computed from that review's own comment threads, so the list row and
-    // the dialog over it report the same number. The detail's read is the
-    // authoritative one: it holds the threads. A review the loaded dashboard
-    // does not list (or a dashboard that never loaded) is left alone rather
-    // than invented.
+    // The review detail's thread count is authoritative; unlisted reviews are left alone.
     setReviewUnresolvedThreads(
       state,
       action: PayloadAction<{ reviewId: string; unresolvedThreads: number }>,

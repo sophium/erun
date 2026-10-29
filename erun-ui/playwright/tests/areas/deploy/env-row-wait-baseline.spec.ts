@@ -4,45 +4,14 @@ import * as path from 'node:path';
 import { expect, test } from '@playwright/test';
 import ts from 'typescript';
 
-// env-row-wait-baseline.spec.ts is a repo-state structural gate: a
-// seeded-row wait shaped like
-//
-//   await app.reloadEnvironments();
-//   await app.sidebar
-//     .envRowButton(tenant, environment)
-//     .waitFor({ state: 'visible', timeout: 15_000 });
-//
-// reads the sidebar exactly once and then waits — if that single reload lands
-// before the row is seeded, or is overwritten by the backend sweep, the
-// following timeout cannot recover it because there is no second read. This
-// is not a "too short" timeout, it is an *unrepeated* one.
-// `waitForSeededRow` (fixtures/erunApp.ts) is the fix: it puts the reload
-// inside the retry, so every attempt re-reads. This gate targets the shape
-// the bug takes in source — a bare `envRowButton(...).waitFor({ ...,
-// timeout })` call — via the TypeScript AST rather than an enumerated list of
-// phrasings, the same reasoning erun-integration's issue_reference_test.go
-// and bare_required_input_test.go give for matching shape over literals: a
-// grep tuned to today's exact call layout is one reflow away from missing
-// the next instance.
-//
-// A file's count may only shrink from here, never grow: `waitForSeededRow`'s
-// own implementation legitimately contains this exact shape (it is the retry
-// body the whole fix is built from), so the baseline is not zero everywhere
-// — it is "no more than what already exists", enforced per file the same way
-// erun-integration's bareRequiredInputBaseline/issueReferenceBaseline and
-// erun-backend-api's KnownUnsurfacedRoutes are.
+// A bare `envRowButton(...).waitFor({ timeout })` reads the sidebar once, so a
+// reload that lands before seeding can never recover; `waitForSeededRow` retries the reload.
 
 const PLAYWRIGHT_ROOT = path.resolve(__dirname, '..');
 const REPO_ROOT = path.resolve(PLAYWRIGHT_ROOT, '..', '..');
 const SCAN_DIRS = ['tests', 'fixtures', 'pages'];
 
-// envRowWaitBaseline is a shrink-only baseline (the same pattern as
-// erun-integration's bareRequiredInputBaseline/issueReferenceBaseline): the
-// key is the file path relative to the repo root, the value is the exact
-// count of matching call sites still in that file. `fixtures/erunApp.ts`
-// carries the one legitimate hit — `waitForSeededRow`'s own retry body.
-// Every other file must stay at zero: any new hit there is a fresh instance
-// of the unrepeated-reload bug this gate exists to catch.
+// Shrink-only: `fixtures/erunApp.ts` holds the one legitimate hit (waitForSeededRow's retry body).
 const envRowWaitBaseline: Record<string, number> = {
   'erun-ui/playwright/fixtures/erunApp.ts': 1,
 };
@@ -52,9 +21,6 @@ interface EnvRowWaitHit {
   line: number;
 }
 
-// isEnvRowButtonCall matches `<expr>.envRowButton(...)`, regardless of the
-// receiver expression, so `app.sidebar.envRowButton(...)` and any future
-// wrapper around it are both caught.
 function isEnvRowButtonCall(node: ts.Node): node is ts.CallExpression {
   return (
     ts.isCallExpression(node) &&
@@ -63,9 +29,6 @@ function isEnvRowButtonCall(node: ts.Node): node is ts.CallExpression {
   );
 }
 
-// objectLiteralHasTimeoutProperty matches shape, not phrasing: any property
-// named `timeout` (declared or shorthand), regardless of the timeout value
-// or the other properties alongside it (e.g. `state: 'visible'`).
 function objectLiteralHasTimeoutProperty(objectLiteral: ts.ObjectLiteralExpression): boolean {
   return objectLiteral.properties.some(
     (property) =>
@@ -73,12 +36,7 @@ function objectLiteralHasTimeoutProperty(objectLiteral: ts.ObjectLiteralExpressi
   );
 }
 
-// isBareEnvRowButtonWaitFor matches `<expr>.envRowButton(...).waitFor({ ...,
-// timeout: N })` — a seeded-row wait with no retry around it. `waitForSeededRow`
-// puts the identical call inside an `expect(async () => { ... }).toPass(...)`
-// retry; this matcher intentionally does not look at the surrounding
-// statements, since the baseline (not a zero-tolerance rule) is what carries
-// that one legitimate exception.
+// Deliberately ignores surrounding statements; the baseline carries waitForSeededRow's exception.
 function isBareEnvRowButtonWaitFor(node: ts.Node): boolean {
   if (!ts.isCallExpression(node)) {
     return false;
@@ -140,8 +98,6 @@ function findAllEnvRowWaitHits(): EnvRowWaitHit[] {
   return hits;
 }
 
-// findOverages reports one entry per hit beyond what envRowWaitBaseline
-// allows for its file -- a file with no entry gets zero tolerance.
 function findOverages(): string[] {
   const counts = new Map<string, number>();
   const overages: string[] = [];
@@ -161,11 +117,7 @@ function findOverages(): string[] {
   return overages;
 }
 
-// findStaleBaselineEntries reports a baseline entry that claims more hits
-// than a file still has -- the shrink-only enforcement half of the gate. A
-// baselined file absent from this checkout (a narrowed build context) is
-// skipped rather than compared, the same reasoning erun-integration's own
-// baseline-is-current checks use.
+// A baselined file absent from this checkout (narrowed build context) is skipped.
 function findStaleBaselineEntries(): string[] {
   const counts = new Map<string, number>();
   for (const hit of findAllEnvRowWaitHits()) {
@@ -180,8 +132,6 @@ function findStaleBaselineEntries(): string[] {
     );
 }
 
-// This gate scans source, not rendered UI, so it needs neither the app
-// fixture nor the headless backend.
 test.describe('env row wait baseline', () => {
   test('no file exceeds its envRowWaitBaseline entry', () => {
     expect(findOverages()).toEqual([]);

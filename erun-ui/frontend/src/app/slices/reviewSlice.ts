@@ -7,28 +7,14 @@ import { RECONNECT_LINE_BUFFER_LIMIT, type ReconnectState } from '../state';
 
 export type ReviewScope = 'current' | 'commit' | 'all';
 
-// EnvDiffState is one environment's diff and everything scoped to it. An
-// orchestrator session is cross-env, so the panel holds one of these per linked
-// environment rather than one globally (#1178).
-//
-// Each carries its OWN error, which is the load-bearing part. The single-slot
-// shape cleared the one diff on any failure, so one stopped environment blanked
-// the diffs of every other linked env -- and an orchestrator's environments are
-// rarely all running at once, so that was the everyday state, not an edge case.
-//
-// scope and commit are per-env too: ReviewBase, ReviewCommits, Scope and
-// SelectedCommit are per-repository, so a commit list means nothing shared
-// across two unrelated checkouts.
+// EnvDiffState is one environment's diff, error, scope and commit; each env has
+// its own so one stopped env cannot blank the others.
 export interface EnvDiffState {
   diff: DiffResult | null;
   loading: boolean;
   error: string;
   errorReconnectable: boolean;
-  // Only meaningful while errorReconnectable is true: which of the two
-  // reachability shapes this is, so the panel can render a stopped
-  // environment as informational rather than a fault (#1230). Defaults to
-  // 'stale-forward', the always-a-fault behavior every caller had before the
-  // kind existed.
+  // Only meaningful while errorReconnectable; lets a stopped env render as informational.
   errorKind: ReachabilityKind;
   scope: ReviewScope;
   commit: string;
@@ -45,18 +31,10 @@ export const emptyEnvDiffState: EnvDiffState = {
 };
 
 export interface ReviewState {
-  // Keyed "<tenant>/<environment>". A single-environment tab is simply the
-  // one-entry case, so there is one code path rather than two.
-  //
-  // Explicitly sparse: a plain Record<string, EnvDiffState> would type a missing
-  // key as present, so every necessary undefined check would read as redundant
-  // while still being required at runtime.
+  // Keyed "<tenant>/<environment>"; sparse so missing keys type as undefined.
   diffByEnv: Record<string, EnvDiffState | undefined>;
   reconnect: ReconnectState;
-  // Keyed "<envKey>:<path>". Paths collide across environments -- two linked
-  // envs can both have AGENTS.md -- and this and collapsedDiffDirs are both
-  // path-keyed, so an unkeyed value silently aliases one env's file onto
-  // another's.
+  // Keyed "<envKey>:<path>" since paths collide across environments.
   selectedDiffPath: string;
   // A substring match, not an identity, so it stays global across sections.
   diffFilter: string;
@@ -78,8 +56,6 @@ const initialState: ReviewState = {
   collapsedDiffDirs: [],
 };
 
-// envSlot returns the mutable slot for an environment, creating it on first
-// write so a caller never has to check.
 function envSlot(state: ReviewState, envKey: string): EnvDiffState {
   const existing = state.diffByEnv[envKey];
   if (existing) {
@@ -114,8 +90,6 @@ export const reviewSlice = createSlice({
       slot.errorReconnectable = action.payload.reconnectable;
       slot.errorKind = action.payload.kind ?? 'stale-forward';
     },
-    // Drop the environments no longer in scope, so switching from a two-env
-    // orchestrator to a single env tab does not leave stale sections rendering.
     pruneEnvDiffs(state, action: PayloadAction<string[]>) {
       const keep = new Set(action.payload);
       state.diffByEnv = Object.fromEntries(
@@ -176,25 +150,12 @@ export const {
   setAll: setReviewAll,
 } = reviewSlice.actions;
 
-// diffPathKey namespaces a file path by its environment. Two linked
-// environments can both have AGENTS.md, and selectedDiffPath / collapsedDiffDirs
-// are both path-keyed, so an unkeyed path silently aliases one env's file onto
-// another's (#1178).
 export function diffPathKey(envKey: string, path: string): string {
   return envKey + ':' + path;
 }
 
-// diffPathWithinEnv is diffPathKey's inverse for one known environment: the
-// bare path a keyed selection carries, or '' when the key names some other
-// environment (or no environment at all). Matched by the env key's own prefix
-// rather than by splitting on the first colon -- collapsedDiffDirs is matched
-// the same way -- because a directory target's env key is `directory:<abs
-// path>` and the path beside it can contain a colon too, so splitting on ':'
-// is ambiguous.
-//
-// Only a reader that must decide *which* environment a keyed selection belongs
-// to needs this. Everything that already holds the env key compares or builds
-// with diffPathKey directly.
+// diffPathWithinEnv inverts diffPathKey for one env, or '' for another env.
+// Matches by prefix because a directory key and its path may both contain ':'.
 export function diffPathWithinEnv(envKey: string, keyedPath: string): string {
   const prefix = `${envKey}:`;
   return keyedPath.startsWith(prefix) ? keyedPath.slice(prefix.length) : '';

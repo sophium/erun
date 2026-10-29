@@ -1,13 +1,14 @@
-# Passthrough wrapper over the upstream PowerDNS Authoritative Server image,
-# following the wrap-and-pin pattern (erun-devops/AGENTS.md). The pinned
-# version lives in the sibling VERSION file and in the chart's default tag;
-# they must move together. The 4.9 line ships as repo `pdns-auth-49`.
-ARG POWERDNS_VERSION=4.9.3
+# Keep in sync with the sibling VERSION file and the chart's default tag.
+ARG POWERDNS_VERSION=4.9.18
 FROM powerdns/pdns-auth-49:${POWERDNS_VERSION}
 
-# Reclaim provenance from the upstream image. A passthrough FROM inherits the
-# upstream's org.opencontainers.image.source, which points at the vendor's
-# repository, so without this override the published package attributes itself
-# to them and links there instead of to erun. Registry *visibility* is a
-# separate axis and is not label-driven (see erun-devops/AGENTS.md).
+# Override the upstream's inherited source label so the package links to erun.
 LABEL org.opencontainers.image.source=https://github.com/sophium/erun
+
+# The upstream image predates Debian's libbrotli1 decoder fix; fail the build if apt cannot supply it.
+USER root
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends --only-upgrade libbrotli1 && \
+    dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libbrotli1)" ge 1.1.0-2+deb13u1 && \
+    rm -rf /var/lib/apt/lists/*
+USER pdns

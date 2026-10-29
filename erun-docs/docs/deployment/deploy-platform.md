@@ -24,7 +24,7 @@ How an operator stands up a hosted erun platform (for example `erunpaas.com`). Y
 | 5 | laptop / desktop | `erun init` (runtime env, pinned to `<version>`) | Create **`<tenant>-prod`** from the built image. | Ready |
 | 6 | `<tenant>-prod` | `erun deploy --version <version>` | Deploy the platform components: the **erun API**, Postgres, DB migrations, PowerDNS, and the docs publish. | Ready (API + edge land with PRs #681/#688) |
 | 7 | `<tenant>-prod` | Provide the Cloudflare API token **here** | Supply the token in prod, not local, so the edge can bootstrap the DNS zones. | Ready |
-| 8 | `<tenant>-prod` | `erun terraform apply <tenant> prod` (or skill **`erun-enable-hosting-edge`**) | Apply the env's scaffolded `terraform-<tenant>/prod/` root — Traefik + cert-manager + the Cloudflare DNS-01 wildcard-TLS issuer — using the supplied token. You type the environment name to confirm before it applies. The skill is the guided alternative (references erun's module directly). | Ready (PR #688) |
+| 8 | `<tenant>-prod` | `erun terraform apply <tenant> prod` (or skill **`erun-enable-hosting-edge`**) | Apply the env's scaffolded `terraform-<tenant>/prod/` root — Traefik + cert-manager + the Cloudflare DNS-01 wildcard-TLS issuer — using the supplied token. You type the environment name to confirm before it applies. The skill is the guided alternative (references erun's module directly and keeps the edge's state in the cluster); leave the edge module out of the tree if you take it. The two are alternatives for the edge's first apply only: the one that applied it maintains it from then on, and one edge is never applied both ways — the skill refuses to adopt an edge the tree already holds. | Ready (PR #688) |
 | 9 | `<tenant>-prod` | `erun deploy --version <version> --components <tenant>-zitadel` | Deploy the **hosted IdP** that serves OIDC at `auth.<base-domain>`. See [Hosted IdP](#hosted-idp) — it needs a masterkey Secret and a DNS record first. | Ready |
 | 10 | `<tenant>-prod` | `erun deploy --version <version> --components <tenant>-console` | Deploy the **hosted web console** at `console.<base-domain>`. See [The console](#the-console) — it needs a DNS record and (in production) a cert-manager issuer name first. | Ready |
 | 11 | `<tenant>-prod` | `erun expose <tenant> <env> mcp --ip <ingress-ip>` | Publish an environment's MCP at `mcp.<tenant>-<env>.services.<base-domain>`. For a runtime environment created through the hosted provisioning API instead of `erun init`, this step runs automatically — see [Hosted platform · Automatic exposure](/concepts/hosted-platform#automatic-exposure). | Ready |
@@ -57,6 +57,27 @@ The API side needs nothing: a platform deploy already trusts its own auth host, 
 
 Trusting an issuer trusts every client registered against it. To narrow that to named clients, set `api.oidcAllowedAudiences` on the `erun-backend-api` component to the client ids allowed to call the API. It is empty by default — every deployment's client ids differ, and a wrong list refuses every caller — so read the ids off the IdP and confirm them against a real token before setting it. The API's startup line says which state it is in (`oidc audience enforcement=on`/`=off`); see [the audience allow-list](/agent-reference/api-protocol#oidc-audience-allow-list) for the resolution rules and error behaviour.
 
+**Upgrading the IdP.** Each erun release pins a Zitadel version, and Zitadel migrates its database whenever its core starts on a new version. Starting an older core afterwards neither undoes those migrations nor refuses to run on them, so the only way back is the database as it was. Before you deploy a new release to an environment that runs the IdP, dump Zitadel's own `zitadel` database. Do not snapshot the Postgres volume: it also holds erun's own data, which a volume restore would roll back too.
+
+```bash
+(umask 077 && kubectl -n <tenant>-prod exec deploy/<tenant>-postgres -- \
+  pg_dump -U erun -Fc -d zitadel > ~/zitadel-before-<version>.dump)
+```
+
+The dump holds the IdP's users, password hashes and encrypted secrets: keep it out of any git checkout and shared storage, and delete it once the upgrade has held.
+
+To roll the IdP back, stop Zitadel, replace its database with that dump, then deploy the earlier release. Anything changed in Zitadel since the dump — users, sessions, settings — is lost.
+
+```bash
+kubectl -n <tenant>-prod scale deploy/<tenant>-zitadel --replicas=0
+kubectl -n <tenant>-prod exec deploy/<tenant>-postgres -- dropdb -U erun --force zitadel
+kubectl -n <tenant>-prod exec -i deploy/<tenant>-postgres -- \
+  pg_restore -U erun --create -d postgres < ~/zitadel-before-<version>.dump
+erun deploy --version <earlier-version> --components <tenant>-zitadel
+```
+
+`erun` is the database user unless the env sets `api.postgres.user`. The Login V2 container signs its session cookies with a key the chart generates once and keeps in the `<tenant>-zitadel-login` Secret, so redeploys and login-token rotation keep everyone signed in. If that Secret is deleted, the login container derives the key from its own token on its next start, and the next deploy recreates the Secret with a new key; each change signs every user out.
+
 ### Error behaviour
 
 | Failure mode | What happens | Recovery |
@@ -67,6 +88,7 @@ Trusting an issuer trusts every client registered against it. To narrow that to 
 | Login container restarts on first boot | Expected and self-healing: it needs a token core writes during initialisation, so it restarts until core is up. Its startup probe reports the wait | None; watch for the pod going Ready |
 | `/ui/v2/login` returns `{"code":5,"message":"Not Found"}` | Core answered a path only the Login V2 container serves — the Ingress route or the login container is missing | Confirm both containers are running and the Ingress still carries the `/ui/v2/login` path |
 | Sign-in redirects to an unreachable host | The issuer names something other than the public origin | Confirm the auth host in the `platform:` block matches the DNS record and the certificate |
+| Rolled back to a release with an older `erun-zitadel` without restoring its database | The older core starts on the database the newer one migrated: nothing fails, and it runs on a schema it was not built for | Stop Zitadel, restore the dump taken before the upgrade, then deploy the earlier release, as in [Upgrading the IdP](#hosted-idp) |
 
 ## The console {#the-console}
 

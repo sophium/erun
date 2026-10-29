@@ -30,11 +30,6 @@ function orchestrator(overrides: Partial<OrchestratorInfo> = {}): OrchestratorIn
   };
 }
 
-// The defect this report exists to fix (#1241): the panel derived its context
-// from the sidebar's env selection alone, so an orchestrator session — which
-// never touches that selection — rendered the environment-shaped report's
-// "nothing selected" fallback. Every orchestrator report must carry the
-// orchestrator's own identity instead, never that string.
 test('an orchestrator context never emits "environment: none selected"', () => {
   const report = formatDiagnosticsReport({
     generatedAt: '2026-08-24T00:00:00.000Z',
@@ -104,10 +99,6 @@ test('an app context reports the desktop log when neither an env nor an orchestr
   assert.match(report, /no log captured yet/);
 });
 
-// A definition may name only directories, with no environment linked at all, so
-// the report must carry them: without this a directory-only orchestrator files a
-// bug report reading "linked environments: (none)", which looks like an
-// orchestrator with no scope rather than one working in directories.
 test('an orchestrator context names the directories it works in', () => {
   const report = formatDiagnosticsReport({
     generatedAt: '2026-08-24T00:00:00.000Z',

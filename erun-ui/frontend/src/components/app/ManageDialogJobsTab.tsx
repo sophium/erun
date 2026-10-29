@@ -35,9 +35,7 @@ import type { UISelection } from '@/types';
 
 import { LoadEnvironmentJobs } from '../../../wailsjs/go/main/App';
 
-// The desktop already writes into the job store -- Investigate starts a job
-// there -- and could not show the job it had just created. This is the missing
-// lifecycle half: what ran, how it ended, what it printed, and a way to stop it.
+// JobsTab shows the env's jobs: outcome, output, and cancel.
 export function JobsTab({
   selection,
   open,
@@ -46,10 +44,7 @@ export function JobsTab({
   open: boolean;
 }): React.ReactElement {
   const [jobs, setJobs] = React.useState<JobView[]>([]);
-  // False from this tab's first render until the read it opened with has been
-  // answered. Starting false is what keeps the placeholder over the whole read
-  // rather than only the part of it after the effect fired, so the settled
-  // empty state below is never rendered before the read it describes.
+  // Starts false so the placeholder covers the whole read and the empty state never precedes it.
   const [settled, setSettled] = React.useState(false);
   const [error, setError] = React.useState('');
   const [unreachable, setUnreachable] = React.useState<UnreachableJobsState | null>(null);
@@ -88,9 +83,7 @@ export function JobsTab({
     reload();
   }, [open, reload]);
 
-  // A running job's duration would otherwise freeze at whatever it was when the
-  // tab opened. One tick a second, and only while the tab is open and something
-  // is actually running, so nothing animates on a closed dialog.
+  // Tick each second only while open and something is running.
   const hasRunning = jobs.some((job) => job.state === 'running');
   React.useEffect(() => {
     if (!open || !hasRunning) {
@@ -107,16 +100,11 @@ export function JobsTab({
   if (!selection) {
     return <JobsEmptyState message="Select an environment to see its jobs." />;
   }
-  // Its own test id: the reading placeholder and the settled empty state are
-  // different states, and a caller waiting on the empty state has to be able
-  // to settle on the read's answer rather than on this.
+  // Separate test id from the settled empty state, so waits settle on the read's answer.
   if (!settled && jobs.length === 0) {
     return <JobsEmptyState message="Loading jobs…" testId="manage-jobs-loading" />;
   }
-  // Distinct from "no jobs yet": the pod that would answer is not reachable
-  // right now, so an empty list here would read as "nothing is running" when
-  // the truth is "cannot tell" -- a stopped environment's own jobs still read
-  // as empty above, since a stopped pod genuinely has none to miss.
+  // Unreachable means "cannot tell", not "no jobs"; a stopped env genuinely has none.
   if (unreachable) {
     return (
       <JobsUnreachableAlert
@@ -152,16 +140,7 @@ interface UnreachableJobsState {
   message: string;
 }
 
-// JobsReadFailureAlert is the counterpart to JobsUnreachableAlert below: the
-// read was answered with a refusal rather than a list. "Could not read" is not
-// "No jobs" -- an empty list here would assert nothing is running when the
-// truth is that nothing is known -- and of the failures that land here a
-// timeout is the most retryable there is: nothing needs re-establishing, only
-// re-asking. JobsUnreachableAlert already carried that action; this surface
-// named its cause and offered no remedy, leaving the operator to switch tabs
-// and hope the remount re-fetched. The Retry re-issues the same read
-// through the caller's reload(), so what replaces the alert is the result --
-// the list, or this alert again with whatever the retry failed on.
+// JobsReadFailureAlert: a refused read is not "no jobs"; Retry re-issues the read.
 function JobsReadFailureAlert({
   error,
   onRetry,
@@ -188,12 +167,7 @@ function JobsReadFailureAlert({
   );
 }
 
-// JobsUnreachableAlert names the same two reachability shapes the sidebar and
-// diff panel already distinguish: a stale port-forward is a fault
-// worth reconnecting, told apart from an environment nobody has opened. The
-// action reuses the shared reconnect flow (confirm dialog, then the same MCP
-// reconnect call) so recovering from here behaves exactly like recovering
-// from the diff panel.
+// JobsUnreachableAlert reuses the shared reconnect flow for a stale port-forward.
 function JobsUnreachableAlert({
   kind,
   message,
@@ -277,9 +251,7 @@ function JobsEmptyState({
   );
 }
 
-// Colour never carries the outcome on its own: each state has its own icon and
-// its own words, so the row reads the same to someone who cannot separate the
-// green from the red.
+// Each state has its own icon and words; colour never carries the outcome alone.
 export function OutcomeBadge({ job }: { job: JobView }): React.ReactElement {
   const outcome = jobOutcome(job);
   const label = jobOutcomeLabel(job);
@@ -322,9 +294,7 @@ export function OutcomeBadge({ job }: { job: JobView }): React.ReactElement {
       </span>
     );
   }
-  // Abandoned wears the destructive styling rather than the amber "unresolved"
-  // one: something is still running in the pod and nothing will report on it
-  // again, so it is the one outcome that needs an operator to act.
+  // Destructive, not amber: work is still running unreported and needs action.
   if (outcome === 'abandoned') {
     return (
       <span className={`${shared} text-destructive`} data-testid="manage-jobs-row-outcome">
@@ -416,7 +386,6 @@ function JobRow({
   );
 }
 
-// Running work reads as elapsed; finished work reads as how long it took.
 function jobTimingLabel(state: string, duration: string): string {
   if (!duration) {
     return '';

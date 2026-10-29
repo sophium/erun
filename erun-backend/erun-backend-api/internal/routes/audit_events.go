@@ -12,9 +12,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 )
 
-// AuditEventRepository lists the caller's tenant audit trail. Read-only: audit
-// events are written by authentication middleware for every authorized
-// request, never by a route.
+// AuditEventRepository lists the caller's tenant audit trail; middleware writes it.
 type AuditEventRepository interface {
 	List(ctx context.Context, filter repository.AuditEventFilter) (repository.AuditEventPage, error)
 }

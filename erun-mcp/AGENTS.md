@@ -11,11 +11,10 @@ MCP transport guidance. Follow root `AGENTS.md` and shared Go conventions in
   push/deploy version or rely on interactive prompts.
 - Findings are structured results, not tool-call failures. Fail calls when the
   check could not run; see CLI "Exit-Code Contract: Reporting Commands Vs Gating Checks".
-- Planned (https://github.com/sophium/erun/issues/2741, see
-  `erun-common/AGENTS.md` § "Target package layers"): one package per tool group
-  under `tools/<group>/`, importing its matching `erun-common` package, `base/*`
-  and a thin shared helper package, never another tool group; `server.go`
-  registers them. Until then keep each tool group's handlers in its own files.
+- One package per tool group under `tools/<group>/` (`erun-common/AGENTS.md`
+  § "Package layers"). What two or more groups use lives in one package per
+  concern under `tools/shared/<concern>/`; a group imports only the concerns it
+  uses and never another group. `server.go` registers them.
 
 ## The WebSocket Attach Edge Is Not An MCP Tool
 
@@ -26,6 +25,9 @@ MCP transport guidance. Follow root `AGENTS.md` and shared Go conventions in
   Browser auth uses exactly `[attachAuthSubprotocol, token]` in subprotocols;
   header auth remains supported. Echo only the scheme, never the token.
   This fallback is attach-only; JSON-RPC still requires its bearer header.
+  The offer is read before anything is verified, so parsing it stops after the
+  two entries it reads while accepting exactly what gorilla's `Subprotocols`
+  would (`subprotocol_bound_test.go`).
 - Preserve `http.Hijacker`: do not wrap attach in the ordinary byte-counting
   traffic middleware. Record activity directly.
 - Binary frames carry PTY bytes; text frames carry resize control and one terminal

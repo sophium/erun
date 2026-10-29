@@ -10,7 +10,6 @@ import (
 	"time"
 )
 
-// listedReview is one row of GET /v1/reviews, as a caller reads it.
 type listedReview struct {
 	ReviewID       string `json:"reviewId"`
 	Repository     string `json:"repository"`
@@ -20,8 +19,6 @@ type listedReview struct {
 	IssueRefSource string `json:"issueRefSource"`
 }
 
-// e2eOpenReviewForRepository opens a review naming repository, which is
-// canonicalized on the way in exactly as a real client's remote is.
 func e2eOpenReviewForRepository(t *testing.T, baseURL, repository, sourceBranch string) {
 	t.Helper()
 	code, body := e2eRequest(t, baseURL, http.MethodPost, "/v1/reviews", map[string]any{
@@ -35,8 +32,6 @@ func e2eOpenReviewForRepository(t *testing.T, baseURL, repository, sourceBranch 
 	}
 }
 
-// e2eListReviews drives the listing and returns the status, the rows, and the
-// raw body so a refusal can be read as well as a listing.
 func e2eListReviews(t *testing.T, baseURL, query string) (int, []listedReview, string) {
 	t.Helper()
 	code, body := e2eRequest(t, baseURL, http.MethodGet, "/v1/reviews"+query, nil)
@@ -47,19 +42,12 @@ func e2eListReviews(t *testing.T, baseURL, query string) (int, []listedReview, s
 	return code, listed, body
 }
 
-// The reported failure, at the layer a caller drives: a listing narrowed to a
-// repository by one of the spellings its remote is held in answered nothing
-// for a repository holding two reviews, and a listing narrowed by a bare
-// owner/repo shorthand answered the silent subset of that repository its own
-// rows happened to match.
 func TestReviewListFindsOneRepositoryAcrossEverySpellingOfItsRemote(t *testing.T) {
 	config := mergeQueueE2EFromEnv(t)
 	srv := startMergeQueueAPI(t, config)
 
 	unique := fmt.Sprintf("%d", time.Now().UnixNano())
-	// Two remotes for one repository, as erun's own clients hold them: an SSH
-	// checkout records git@github.com:<owner>/erun.git, an HTTPS one records
-	// https://github.com/<owner>/erun. They are the same repository.
+	// SSH and HTTPS remotes of one repository.
 	owner := "spelling-" + unique
 	sshRemote := "git@github.com:" + owner + "/erun.git"
 	httpsRemote := "https://github.com/" + owner + "/erun"
@@ -69,8 +57,6 @@ func TestReviewListFindsOneRepositoryAcrossEverySpellingOfItsRemote(t *testing.T
 	e2eOpenReviewForRepository(t, srv.URL, httpsRemote, "feature-https-"+unique)
 	e2eOpenReviewForRepository(t, srv.URL, otherRemote, "feature-other-"+unique)
 
-	// Whichever spelling the caller holds names every row of the repository,
-	// and no row of another one.
 	for _, spelling := range []string{sshRemote, httpsRemote} {
 		code, listed, body := e2eListReviews(t, srv.URL, "?repository="+url.QueryEscape(spelling))
 		if code != http.StatusOK {
@@ -86,8 +72,6 @@ func TestReviewListFindsOneRepositoryAcrossEverySpellingOfItsRemote(t *testing.T
 		}
 	}
 
-	// The other direction a filter must not widen: a repository holding no
-	// review in the asked-for state still answers nothing.
 	code, listed, body := e2eListReviews(t, srv.URL, "?repository="+url.QueryEscape(otherRemote)+"&status=MERGED")
 	if code != http.StatusOK {
 		t.Fatalf("list by the other repository: HTTP %d: %s", code, body)
@@ -96,9 +80,7 @@ func TestReviewListFindsOneRepositoryAcrossEverySpellingOfItsRemote(t *testing.T
 		t.Fatalf("a repository with no MERGED review answered %v, want none", listed)
 	}
 
-	// The shorthand the report used names no repository -- a bare owner/repo
-	// is a repository on whichever forge the caller had in mind -- so it is
-	// refused rather than answered with the silent subset it matched.
+	// A bare owner/repo names no forge, so it is refused.
 	code, _, body = e2eListReviews(t, srv.URL, "?repository="+url.QueryEscape(owner+"/erun"))
 	if code != http.StatusBadRequest {
 		t.Fatalf("list by a bare shorthand: HTTP %d (%s), want 400", code, body)
@@ -108,17 +90,8 @@ func TestReviewListFindsOneRepositoryAcrossEverySpellingOfItsRemote(t *testing.T
 	}
 }
 
-// TestReviewIssueRefRoundTripsThroughTheStoredColumn is the stored half of the
-// declared issue link, driven through the real API against a real migrated
-// PostgreSQL. The declaration is only worth anything if it survives the write:
-// the column, bun's mapping of it, and `Returning("*")` are three places a
-// value can silently go missing while every in-memory test still passes,
-// because an in-memory stub returns whatever it was handed.
-//
-// Both accepted spellings are covered, and the branch each review proposes
-// names a *different* issue than the one declared, so a review that came back
-// with the branch's number would be visibly wrong rather than accidentally
-// right.
+// TestReviewIssueRefRoundTripsThroughTheStoredColumn: the column, bun mapping, and Returning("*")
+// can each drop the value while in-memory stubs still pass.
 func TestReviewIssueRefRoundTripsThroughTheStoredColumn(t *testing.T) {
 	config := mergeQueueE2EFromEnv(t)
 	srv := startMergeQueueAPI(t, config)
@@ -130,11 +103,8 @@ func TestReviewIssueRefRoundTripsThroughTheStoredColumn(t *testing.T) {
 		issueRef string
 		want     string
 	}{
-		// The branch carries a number the declared reference disagrees with,
-		// so a review that came back with the branch's number would be
-		// visibly wrong rather than accidentally right. Both names carry the
-		// run's own suffix: a scratch database is reused across runs, and a
-		// fixed branch name would list the previous run's rows too.
+		// The branch names a different issue than declared, and names are run-unique because
+		// the scratch database is reused.
 		{branch: "bug/2212-declared-" + unique, issueRef: "issue-ref-" + unique + "/erun#2683", want: "issue-ref-" + unique + "/erun#2683"},
 		{branch: "feature/2213-bare-" + unique, issueRef: "2684", want: "issue-ref-" + unique + "/erun#2684"},
 	}
@@ -152,8 +122,7 @@ func TestReviewIssueRefRoundTripsThroughTheStoredColumn(t *testing.T) {
 		var created listedReview
 		mustNoErr(t, json.Unmarshal([]byte(body), &created), "parse created review")
 
-		// Read back through the listing, which is a fresh row read rather than
-		// the insert's own RETURNING.
+		// The listing is a fresh read, not the insert's RETURNING.
 		_, listed, listBody := e2eListReviews(t, srv.URL, "?sourceBranch="+url.QueryEscape(tc.branch))
 		if len(listed) != 1 {
 			t.Fatalf("list %s = %s, want the review that was just created", tc.branch, listBody)
@@ -171,10 +140,6 @@ func TestReviewIssueRefRoundTripsThroughTheStoredColumn(t *testing.T) {
 	}
 }
 
-// TestReviewIssueRefRefusesAnUnspellableDeclaration is the trust boundary at
-// the same layer: a value that names no issue in either accepted spelling is
-// refused by the real handler, naming the field, rather than stored as a link
-// nothing else on the platform could ever match.
 func TestReviewIssueRefRefusesAnUnspellableDeclaration(t *testing.T) {
 	config := mergeQueueE2EFromEnv(t)
 	srv := startMergeQueueAPI(t, config)

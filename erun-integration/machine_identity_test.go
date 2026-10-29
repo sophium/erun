@@ -20,12 +20,8 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
-// One credential's worth of the machine-identity flow, shared by every scenario
-// that drives it: the platform API that mints the identity, and the tenant's own
-// issuer that has to accept the credential it minted. Both halves live on one
-// server because the identity the platform mints names the issuer its tokens
-// come from, so a scenario that pointed them at two hosts would be exercising a
-// shape that cannot happen.
+// The platform API and the tenant issuer share one server because a minted
+// identity names the issuer its tokens come from.
 const (
 	machineIdentityClientID     = "machine-client"
 	machineIdentityClientSecret = "machine-client-secret"
@@ -33,57 +29,35 @@ const (
 	machineIdentityAccessToken  = "machine-access-token"
 )
 
-// hostPlatformAccessToken is the bearer the host's own signed-in alias presents,
-// matching platform_test.go's requireBearer: the mint is made as that caller, so
-// a scenario proves the platform client attached the host's credential rather
-// than the environment's.
+// hostPlatformAccessToken is the host alias's bearer, matching platform_test.go's requireBearer.
 const hostPlatformAccessToken = "test-access-token"
 
-// machineIdentityRefusal is the status and {code, message} envelope the platform
-// answers a refused call with.
 type machineIdentityRefusal struct {
 	Status int
 	Code   string
 }
 
-// machineIdentityTokenRequest is one token request the stub issuer answered.
 type machineIdentityTokenRequest struct {
 	GrantType string
 	Scope     string
-	// BasicAuth carries the client credential when the request presented it in
-	// the Authorization header, as the client_credentials grant erun provisions
-	// does; FormCredentials carries whatever it put in the body instead.
+	// BasicAuth is set when the credential came in the Authorization header;
+	// FormCredentials when it came in the body.
 	BasicAuth       string
 	FormCredentials string
 }
 
-// machineIdentityStub is what a scenario varies about the double below, and what
-// it observes from it. Every field's zero value is the cooperating answer, so a
-// scenario asserting the happy path names nothing.
+// machineIdentityStub configures the double; zero values cooperate.
 type machineIdentityStub struct {
-	// Environments, when non-nil, answers GET /v1/environments instead of the
-	// default single row naming the environment under test. A non-nil empty
-	// slice means the platform knows of no environment at all.
+	// Environments overrides GET /v1/environments; non-nil empty means none known.
 	Environments []map[string]any
-	// MintRefusal, when set, is what the machine-identity mint answers instead of
-	// an identity.
-	MintRefusal *machineIdentityRefusal
-	// MintOmitCredential makes the mint answer an identity with no client
-	// credential -- a platform that recorded the identity but could not return
-	// its secret, which is the one shape a caller has to refuse rather than
-	// write down.
+	MintRefusal  *machineIdentityRefusal
+	// MintOmitCredential returns an identity without its secret, which callers must refuse.
 	MintOmitCredential bool
-	// TokenRefusal, when set, is the status the token endpoint answers instead of
-	// a token.
-	TokenRefusal int
-	// RejectOrgScope makes the token endpoint refuse the org-claim scope once
-	// before accepting the retry, which is what an issuer that has never heard of
-	// the scope does.
+	TokenRefusal       int
+	// RejectOrgScope refuses the org-claim scope once, as a BYO issuer would.
 	RejectOrgScope bool
-	// RequireClientAuthOnToken makes the token endpoint demand the credential in
-	// the Authorization header. It is opt-in because the failure it pins --
-	// quietly moving a long-lived secret into a request body -- is invisible in
-	// the control flow's own trace, so only the scenario about it needs it.
+	// RequireClientAuthOnToken demands the credential in the Authorization header;
+	// moving it to the body is invisible in the trace.
 	RequireClientAuthOnToken bool
 
 	mu            sync.Mutex
@@ -92,41 +66,48 @@ type machineIdentityStub struct {
 	buildReports  []string
 }
 
-// machineIdentityServer runs the double. Every platform route authenticates with
-// the host's own signed-in bearer, and the token endpoint issues the access
-// token the API's own routes then require, so a scenario proves the credential
-// was exchanged for a token and that the token was attached to the call.
+// machineIdentityServer runs the double.
 func machineIdentityServer(t testing.TB, stub *machineIdentityStub) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/environments", stub.environmentsHandler())
+	mux.HandleFunc("POST /v1/environments/{environment_id}/machine-identity", stub.mintHandler())
+	mux.HandleFunc("GET /.well-known/openid-configuration", stub.discoveryHandler())
+	mux.HandleFunc("POST /oauth/token", stub.tokenHandler())
+	mux.HandleFunc("GET /v1/whoami", stub.whoamiHandler())
+	mux.HandleFunc("POST /v1/builds", stub.buildReportHandler())
 
-	// GET /v1/environments answers two different callers with two different
-	// credentials: `erun init` provisioning an environment asks as the host's
-	// signed-in alias, and the environment's own build asks as itself. Both are
-	// legitimate reads of the same row, so the route accepts either rather than
-	// forcing one caller to present a credential it does not hold.
-	mux.HandleFunc("GET /v1/environments", func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return server
+}
+
+// Accepts both the host's bearer (`erun init`) and the environment's own token (build).
+func (s *machineIdentityStub) environmentsHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Header.Get("Authorization") {
 		case "Bearer " + hostPlatformAccessToken, "Bearer " + machineIdentityAccessToken:
 		default:
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		environments := stub.Environments
+		environments := s.Environments
 		if environments == nil {
 			environments = []map[string]any{{"environmentId": "env-1", "name": "dev", "status": "running"}}
 		}
 		_ = json.NewEncoder(w).Encode(environments)
-	})
+	}
+}
 
-	mux.HandleFunc("POST /v1/environments/{environment_id}/machine-identity", func(w http.ResponseWriter, r *http.Request) {
+func (s *machineIdentityStub) mintHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		if !requireBearer(w, r) {
 			return
 		}
-		stub.mu.Lock()
-		stub.mints++
-		refusal := stub.MintRefusal
-		stub.mu.Unlock()
+		s.mu.Lock()
+		s.mints++
+		refusal := s.MintRefusal
+		s.mu.Unlock()
 		if refusal != nil {
 			w.WriteHeader(refusal.Status)
 			_ = json.NewEncoder(w).Encode(map[string]string{
@@ -135,9 +116,7 @@ func machineIdentityServer(t testing.TB, stub *machineIdentityStub) *httptest.Se
 			})
 			return
 		}
-		// The issuer is this same server: the platform mints an environment's
-		// identity on its tenant's own issuer, so the credential it hands back has
-		// to be exchangeable there and nowhere else.
+		// The credential must be exchangeable only on the tenant's own issuer.
 		identity := map[string]any{
 			"environmentId":   r.PathValue("environment_id"),
 			"environmentName": "dev",
@@ -148,57 +127,63 @@ func machineIdentityServer(t testing.TB, stub *machineIdentityStub) *httptest.Se
 			"userId":          "user-1",
 			"alreadyEnrolled": false,
 		}
-		if stub.MintOmitCredential {
+		if s.MintOmitCredential {
 			delete(identity, "clientId")
 			delete(identity, "clientSecret")
 		}
 		_ = json.NewEncoder(w).Encode(identity)
-	})
+	}
+}
 
-	// The issuer half: discovery, then the grant itself. The API resolving a
-	// tenant from a client-credentials token is why the org claim scope is
-	// requested, and the endpoint is what decides whether it knows that scope.
-	mux.HandleFunc("GET /.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+func (s *machineIdentityStub) discoveryHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"issuer":         "http://" + r.Host,
 			"token_endpoint": "http://" + r.Host + "/oauth/token",
 		})
-	})
-	mux.HandleFunc("POST /oauth/token", func(w http.ResponseWriter, r *http.Request) {
+	}
+}
+
+func (s *machineIdentityStub) tokenHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
 			http.Error(w, "bad form", http.StatusBadRequest)
 			return
 		}
-		if stub.RequireClientAuthOnToken {
-			user, secret, ok := r.BasicAuth()
-			if !ok || user != machineIdentityClientID || secret != machineIdentityClientSecret {
-				http.Error(w, "client credentials must travel in the Authorization header", http.StatusUnauthorized)
-				return
-			}
+		if s.RequireClientAuthOnToken && !presentsMachineClientAuth(r) {
+			http.Error(w, "client credentials must travel in the Authorization header", http.StatusUnauthorized)
+			return
 		}
 		request := machineIdentityTokenRequest{GrantType: r.PostForm.Get("grant_type"), Scope: r.PostForm.Get("scope")}
 		if user, secret, ok := r.BasicAuth(); ok {
 			request.BasicAuth = user + ":" + secret
 		}
 		request.FormCredentials = r.PostForm.Get("client_secret")
-		stub.mu.Lock()
-		stub.tokenRequests = append(stub.tokenRequests, request)
-		refuseScope := stub.RejectOrgScope && request.Scope != "" && len(stub.tokenRequests) == 1
-		stub.mu.Unlock()
+		s.mu.Lock()
+		s.tokenRequests = append(s.tokenRequests, request)
+		refuseScope := s.RejectOrgScope && request.Scope != "" && len(s.tokenRequests) == 1
+		s.mu.Unlock()
 		if refuseScope {
 			w.WriteHeader(http.StatusBadRequest)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid_scope", "error_description": "unknown scope"})
 			return
 		}
-		if stub.TokenRefusal != 0 {
-			w.WriteHeader(stub.TokenRefusal)
+		if s.TokenRefusal != 0 {
+			w.WriteHeader(s.TokenRefusal)
 			_, _ = w.Write([]byte(`{"error":"invalid_client","error_description":"the credential was refused"}`))
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": machineIdentityAccessToken, "expires_in": 3600})
-	})
+	}
+}
 
-	mux.HandleFunc("GET /v1/whoami", func(w http.ResponseWriter, r *http.Request) {
+func presentsMachineClientAuth(r *http.Request) bool {
+	user, secret, ok := r.BasicAuth()
+	return ok && user == machineIdentityClientID && secret == machineIdentityClientSecret
+}
+
+func (s *machineIdentityStub) whoamiHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer "+machineIdentityAccessToken {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
@@ -207,14 +192,13 @@ func machineIdentityServer(t testing.TB, stub *machineIdentityStub) *httptest.Se
 			"tenantId": "tenant-1", "tenantName": "acme", "userId": "user-1",
 			"username": machineIdentitySubject, "issuer": "http://" + r.Host, "subject": machineIdentitySubject,
 		})
-	})
+	}
+}
 
-	// POST /v1/builds is `erun build`'s own unattached self-report. It requires
-	// the *machine* credential specifically, not either: an environment that
-	// fell back to its operator's delegated session would answer here exactly
-	// as it does at the real API, where the two identities are two users and
-	// the environment holds the machine one's role.
-	mux.HandleFunc("POST /v1/builds", func(w http.ResponseWriter, r *http.Request) {
+// Requires the machine credential specifically, so a fallback to the
+// operator's delegated session fails here as it would in production.
+func (s *machineIdentityStub) buildReportHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer "+machineIdentityAccessToken {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
@@ -224,44 +208,34 @@ func machineIdentityServer(t testing.TB, stub *machineIdentityStub) *httptest.Se
 			http.Error(w, "read body", http.StatusBadRequest)
 			return
 		}
-		stub.mu.Lock()
-		stub.buildReports = append(stub.buildReports, string(body))
-		stub.mu.Unlock()
+		s.mu.Lock()
+		s.buildReports = append(s.buildReports, string(body))
+		s.mu.Unlock()
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(map[string]any{"buildId": "build-1", "successful": true})
-	})
-
-	server := httptest.NewServer(mux)
-	t.Cleanup(server.Close)
-	return server
+	}
 }
 
-// tokenRequestLog returns the token requests the stub issuer has answered so far.
 func (s *machineIdentityStub) tokenRequestLog() []machineIdentityTokenRequest {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]machineIdentityTokenRequest(nil), s.tokenRequests...)
 }
 
-// mintCount returns how many machine-identity mint calls the platform received.
 func (s *machineIdentityStub) mintCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.mints
 }
 
-// buildReportLog returns the bodies of the build self-reports the platform
-// received, in order.
 func (s *machineIdentityStub) buildReportLog() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.buildReports...)
 }
 
-// removeCloudSecret deletes the file a secret ref resolves to, leaving any alias
-// entry pointing at a credential that is no longer there. The ref is hashed the
-// way erun-common's file-backed store names it, so this reaches the same file
-// production reads.
+// removeCloudSecret deletes the file a secret ref resolves to, hashed the way
+// erun-common's file-backed store names it.
 func removeCloudSecret(t testing.TB, setup env.Setup, ref string) {
 	t.Helper()
 	sum := sha256.Sum256([]byte(ref))
@@ -271,141 +245,113 @@ func removeCloudSecret(t testing.TB, setup env.Setup, ref string) {
 	}
 }
 
-// seedHostPlatformAccessToken seeds the cached access token the host's own
-// signed-in alias presents to the platform, so the mint call authenticates as
-// that caller without a refresh-token round trip this suite covers elsewhere.
+// seedHostPlatformAccessToken seeds the host alias's cached token to skip a refresh round trip.
 func seedHostPlatformAccessToken(t testing.TB, setup env.Setup, alias string) {
 	t.Helper()
 	seedCachedERunAccessToken(t, setup, alias, hostPlatformAccessToken)
 }
 
-// TestMachineIdentityPlatformAlias covers the client half of a provisioned
-// machine identity: the alias a pod carries once `erun init` minted it one.
-// Where the init-side scenarios assert what such an environment is given, these
-// assert what it does with it -- authenticate as itself, through the
-// client_credentials grant, with no signed-in human anywhere in the flow.
+// TestMachineIdentityPlatformAlias covers a pod authenticating as its machine
+// identity via client_credentials.
 func TestMachineIdentityPlatformAlias(t *testing.T) {
 	t.Parallel()
 
-	t.Run("real_run_mints_a_token_through_client_credentials", func(t *testing.T) {
-		// The pod's own case. The alias carries a client-secret reference and no
-		// refresh-token reference, so the only way it can authenticate is by
-		// presenting that secret to the issuer's token endpoint -- and no cached
-		// access token is seeded, so nothing upstream can answer for it. The
-		// endpoint demands the credential in the Authorization header, which is
-		// the half of Zitadel's BASIC client-auth method a trace line cannot show.
-		stub := &machineIdentityStub{RequireClientAuthOnToken: true}
-		server := machineIdentityServer(t, stub)
-		setup := env.New(t)
-		fixture.SeedMachineIdentityAlias(t, setup, "team", "erun+test@erun", server.URL, machineIdentityClientID, machineIdentityClientSecret)
-
-		result := erun.Run(t, []string{"platform", "whoami"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		requests := stub.tokenRequestLog()
-		if len(requests) != 1 {
-			t.Fatalf("want exactly one token request, got %d: %+v", len(requests), requests)
-		}
-		if requests[0].GrantType != "client_credentials" {
-			t.Fatalf("want the client_credentials grant, got %q", requests[0].GrantType)
-		}
-		if requests[0].FormCredentials != "" {
-			t.Fatalf("the client secret must not travel in the request body: %+v", requests[0])
-		}
-		golden.Equal(t, "platform/machine_identity_whoami_real_run", normalize.Apply(result.Combined, stubServerRule(server, "<IDENTITY_API>")))
-	})
-
-	t.Run("real_run_reports_a_missing_credential_by_name", func(t *testing.T) {
-		// A machine identity whose stored client secret is gone. `cloud login`
-		// cannot fix it -- there is no session to refresh and no human it belongs
-		// to -- so the failure has to name the one remedy that does, rather than
-		// sending the operator to a sign-in that would leave the alias untouched.
-		stub := &machineIdentityStub{}
-		server := machineIdentityServer(t, stub)
-		setup := env.New(t)
-		fixture.SeedMachineIdentityAlias(t, setup, "team", "erun+test@erun", server.URL, machineIdentityClientID, machineIdentityClientSecret)
-		removeCloudSecret(t, setup, "erun/clientsecret/erun+test@erun")
-
-		result := erun.Run(t, []string{"platform", "whoami"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode == 0 {
-			t.Fatalf("a machine identity with no stored credential must not authenticate: %s", result.Combined)
-		}
-		if !strings.Contains(result.Combined, "re-provision") {
-			t.Fatalf("the failure must name re-provisioning as the remedy: %s", result.Combined)
-		}
-		if len(stub.tokenRequestLog()) != 0 {
-			t.Fatalf("a credential that could not be loaded must not reach the issuer: %+v", stub.tokenRequestLog())
-		}
-		golden.Equal(t, "platform/machine_identity_missing_credential_real_run", normalize.Apply(result.Combined, stubServerRule(server, "<IDENTITY_API>")))
-	})
-
-	t.Run("real_run_names_a_credential_the_issuer_refused", func(t *testing.T) {
-		// The identity exists and its secret is stored, but the issuer will not
-		// mint a token from it. The failure has to name the grant that failed
-		// rather than read as a generic platform error: an operator cannot tell a
-		// refused client credential from an unreachable plane by the status alone.
-		stub := &machineIdentityStub{TokenRefusal: http.StatusUnauthorized}
-		server := machineIdentityServer(t, stub)
-		setup := env.New(t)
-		fixture.SeedMachineIdentityAlias(t, setup, "team", "erun+test@erun", server.URL, machineIdentityClientID, machineIdentityClientSecret)
-
-		result := erun.Run(t, []string{"platform", "whoami"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode == 0 {
-			t.Fatalf("a credential the issuer refuses must not authenticate: %s", result.Combined)
-		}
-		if !strings.Contains(result.Combined, "mint machine identity token") {
-			t.Fatalf("the failure must name the grant that failed: %s", result.Combined)
-		}
-		golden.Equal(t, "platform/machine_identity_refused_credential_real_run", normalize.Apply(result.Combined, stubServerRule(server, "<IDENTITY_API>")))
-	})
-
-	t.Run("real_run_retries_an_issuer_that_rejects_the_org_scope", func(t *testing.T) {
-		// erun's own IdP is org-scoped, so the grant asks for the org claim and
-		// the tenant is resolved from it. A tenant's BYO issuer has never heard of
-		// that scope, and a machine identity minted there has to keep working: the
-		// scope is dropped and the grant retried, rather than an environment
-		// losing its platform access to a scope name it never chose.
-		stub := &machineIdentityStub{RejectOrgScope: true}
-		server := machineIdentityServer(t, stub)
-		setup := env.New(t)
-		fixture.SeedMachineIdentityAlias(t, setup, "team", "erun+test@erun", server.URL, machineIdentityClientID, machineIdentityClientSecret)
-
-		result := erun.Run(t, []string{"platform", "whoami"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		requests := stub.tokenRequestLog()
-		if len(requests) != 2 {
-			t.Fatalf("want the refusing scope followed by one retry, got %d requests: %+v", len(requests), requests)
-		}
-		if requests[0].Scope == "" || requests[1].Scope != "" {
-			t.Fatalf("want the org-claim scope dropped on the retry, got %+v", requests)
-		}
-		golden.Equal(t, "platform/machine_identity_org_scope_retry_real_run", normalize.Apply(result.Combined, stubServerRule(server, "<IDENTITY_API>")))
-	})
+	t.Run("real_run_mints_a_token_through_client_credentials", testMachineIdentityPlatformAliasRealRunMintsATokenThroughClientCredentials)
+	t.Run("real_run_reports_a_missing_credential_by_name", testMachineIdentityPlatformAliasRealRunReportsAMissingCredentialByName)
+	t.Run("real_run_names_a_credential_the_issuer_refused", testMachineIdentityPlatformAliasRealRunNamesACredentialTheIssuerRefused)
+	t.Run("real_run_retries_an_issuer_that_rejects_the_org_scope", testMachineIdentityPlatformAliasRealRunRetriesAnIssuerThatRejectsTheOrgScope)
 }
 
-// TestMachineIdentityBuildSelfReport covers the other half of what an
-// environment does with a machine identity: the routine self-report `erun
-// build` makes after every run. Where the scenarios above assert the identity
-// authenticates, this asserts the environment's own unattached build report
-// (POST /v1/builds) is made *as* that identity -- the call the merge-queue
-// split depends on and the one an environment would otherwise have to hand to
-// a credentialed host.
+func testMachineIdentityPlatformAliasRealRunMintsATokenThroughClientCredentials(t *testing.T) {
+	// No cached token, so only the client secret can authenticate.
+	stub := &machineIdentityStub{RequireClientAuthOnToken: true}
+	server := machineIdentityServer(t, stub)
+	setup := env.New(t)
+	fixture.SeedMachineIdentityAlias(t, setup, "team", "erun+test@erun", server.URL, machineIdentityClientID, machineIdentityClientSecret)
+
+	result := erun.Run(t, []string{"platform", "whoami"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+	if result.ExitCode != 0 {
+		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+	}
+	requests := stub.tokenRequestLog()
+	if len(requests) != 1 {
+		t.Fatalf("want exactly one token request, got %d: %+v", len(requests), requests)
+	}
+	if requests[0].GrantType != "client_credentials" {
+		t.Fatalf("want the client_credentials grant, got %q", requests[0].GrantType)
+	}
+	if requests[0].FormCredentials != "" {
+		t.Fatalf("the client secret must not travel in the request body: %+v", requests[0])
+	}
+	golden.Equal(t, "platform/machine_identity_whoami_real_run", normalize.Apply(result.Combined, stubServerRule(server, "<IDENTITY_API>")))
+}
+
+func testMachineIdentityPlatformAliasRealRunReportsAMissingCredentialByName(t *testing.T) {
+	// The remedy named must not be `cloud login`, which cannot fix a machine identity.
+	stub := &machineIdentityStub{}
+	server := machineIdentityServer(t, stub)
+	setup := env.New(t)
+	fixture.SeedMachineIdentityAlias(t, setup, "team", "erun+test@erun", server.URL, machineIdentityClientID, machineIdentityClientSecret)
+	removeCloudSecret(t, setup, "erun/clientsecret/erun+test@erun")
+
+	result := erun.Run(t, []string{"platform", "whoami"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+	if result.ExitCode == 0 {
+		t.Fatalf("a machine identity with no stored credential must not authenticate: %s", result.Combined)
+	}
+	if !strings.Contains(result.Combined, "re-provision") {
+		t.Fatalf("the failure must name re-provisioning as the remedy: %s", result.Combined)
+	}
+	if len(stub.tokenRequestLog()) != 0 {
+		t.Fatalf("a credential that could not be loaded must not reach the issuer: %+v", stub.tokenRequestLog())
+	}
+	golden.Equal(t, "platform/machine_identity_missing_credential_real_run", normalize.Apply(result.Combined, stubServerRule(server, "<IDENTITY_API>")))
+}
+
+func testMachineIdentityPlatformAliasRealRunNamesACredentialTheIssuerRefused(t *testing.T) {
+	// The failure must name the grant, not read as a generic platform error.
+	stub := &machineIdentityStub{TokenRefusal: http.StatusUnauthorized}
+	server := machineIdentityServer(t, stub)
+	setup := env.New(t)
+	fixture.SeedMachineIdentityAlias(t, setup, "team", "erun+test@erun", server.URL, machineIdentityClientID, machineIdentityClientSecret)
+
+	result := erun.Run(t, []string{"platform", "whoami"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+	if result.ExitCode == 0 {
+		t.Fatalf("a credential the issuer refuses must not authenticate: %s", result.Combined)
+	}
+	if !strings.Contains(result.Combined, "mint machine identity token") {
+		t.Fatalf("the failure must name the grant that failed: %s", result.Combined)
+	}
+	golden.Equal(t, "platform/machine_identity_refused_credential_real_run", normalize.Apply(result.Combined, stubServerRule(server, "<IDENTITY_API>")))
+}
+
+func testMachineIdentityPlatformAliasRealRunRetriesAnIssuerThatRejectsTheOrgScope(t *testing.T) {
+	// A BYO issuer does not know the org scope; it is dropped and the grant retried.
+	stub := &machineIdentityStub{RejectOrgScope: true}
+	server := machineIdentityServer(t, stub)
+	setup := env.New(t)
+	fixture.SeedMachineIdentityAlias(t, setup, "team", "erun+test@erun", server.URL, machineIdentityClientID, machineIdentityClientSecret)
+
+	result := erun.Run(t, []string{"platform", "whoami"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+	if result.ExitCode != 0 {
+		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+	}
+	requests := stub.tokenRequestLog()
+	if len(requests) != 2 {
+		t.Fatalf("want the refusing scope followed by one retry, got %d requests: %+v", len(requests), requests)
+	}
+	if requests[0].Scope == "" || requests[1].Scope != "" {
+		t.Fatalf("want the org-claim scope dropped on the retry, got %+v", requests)
+	}
+	golden.Equal(t, "platform/machine_identity_org_scope_retry_real_run", normalize.Apply(result.Combined, stubServerRule(server, "<IDENTITY_API>")))
+}
+
+// TestMachineIdentityBuildSelfReport asserts `erun build` posts POST /v1/builds
+// as the machine identity.
 func TestMachineIdentityBuildSelfReport(t *testing.T) {
 	t.Parallel()
 
 	t.Run("real_run_reports_its_build_through_the_machine_identity", func(t *testing.T) {
-		// The stub platform refuses POST /v1/builds to any bearer other than the
-		// one its token endpoint minted, so a build that reported under the
-		// operator's delegated session -- or not at all -- fails here rather
-		// than passing on a green build with no report behind it. The build
-		// itself runs against the docker stub, so this is a real `erun build`
-		// end to end, not a preview.
-		// The platform knows the environment the build resolves locally, so the
-		// self-report has an environment id to name rather than failing before
-		// it posts anything.
+		// The stub refuses POST /v1/builds to any other bearer.
 		stub := &machineIdentityStub{Environments: []map[string]any{
 			{"environmentId": "env-local", "name": "local", "status": "running"},
 		}}
@@ -445,9 +391,6 @@ func TestMachineIdentityBuildSelfReport(t *testing.T) {
 		if len(reports) != 1 {
 			t.Fatalf("want exactly one build self-report as the machine identity, got %d: %+v", len(reports), reports)
 		}
-		// The report names the environment the run resolved and the commit it
-		// ran against; both come from the run's own state, so a report that
-		// arrived at all but described nothing would still fail here.
 		var report map[string]any
 		if err := json.Unmarshal([]byte(reports[0]), &report); err != nil {
 			t.Fatalf("decode build report %q: %v", reports[0], err)

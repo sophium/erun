@@ -12,10 +12,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-// invite_requests has no RLS and no security context to bind (every method
-// runs under WithinSystemTx — see InviteRequestRepository's own doc), so its
-// one real database-only property is the partial unique index's ON CONFLICT
-// upsert behavior, which only means something against real PostgreSQL.
+// The partial-index ON CONFLICT upsert only means something against real PostgreSQL.
 func inviteRequestsDatabase(t *testing.T) *sql.DB {
 	t.Helper()
 	databaseURL := testpg.URL(t)
@@ -32,12 +29,7 @@ func clearInviteRequestsByIssuer(t *testing.T, db *sql.DB, issuer string) {
 	}
 }
 
-// TestSubmitUpdatesExistingPendingRequestInsteadOfDuplicating locks the
-// issue's §4 abuse bound: one pending request per (issuer, subject),
-// enforced by the schema's partial unique index, not only in application
-// code. A second submission from the same verified identity updates the
-// first request in place — including switching what it asks for — rather
-// than queuing a second row.
+// One pending request per (issuer, subject) is enforced by the schema's partial unique index.
 func TestSubmitUpdatesExistingPendingRequestInsteadOfDuplicating(t *testing.T) {
 	db := inviteRequestsDatabase(t)
 	issuer := "https://issuer.example.com"
@@ -75,11 +67,8 @@ func TestSubmitUpdatesExistingPendingRequestInsteadOfDuplicating(t *testing.T) {
 	}
 }
 
-// TestMarkApprovedRefusesADecidedRequest locks the atomic PENDING guard:
-// once a request has moved past PENDING, a second decision refuses with
-// ErrConflict instead of silently re-deciding it — including a resubmission
-// after approval, which must create a fresh row again (the partial unique
-// index only applies while status = 'PENDING').
+// The partial unique index applies only while PENDING, so a resubmission after
+// approval creates a fresh row.
 func TestMarkApprovedRefusesADecidedRequest(t *testing.T) {
 	db := inviteRequestsDatabase(t)
 	issuer := "https://issuer.example.com"

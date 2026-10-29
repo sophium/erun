@@ -10,21 +10,7 @@ import { store } from '@/app/store';
 
 import { ActivityCard } from './ActivityCard';
 
-// A card's own error used to render as a hand-rolled red line:
-//
-//   <p className="mt-2 break-words rounded-sm border border-destructive/40
-//      bg-destructive/10 px-2 py-1 text-xs text-destructive">{entry.error}</p>
-//
-// It kept the destructive colour and dropped the other half of the shared
-// primitive's contract — the glyph, without which the failure is signalled by
-// colour alone (WCAG 1.4.1), and the wrapping guarantee that stops a long
-// upstream error widening the surface it sits in. That copy-paste is the shape
-// the primitive was written to end, and it had re-diverged at dozens of sites
-// across the frontend.
-//
-// This pins the primitive's contract at the call site: the alert carries a
-// glyph. It is the property a bare element cannot satisfy, so re-hand-rolling
-// the line fails here rather than shipping.
+// The alert must carry a glyph so failure is not signalled by colour alone (WCAG 1.4.1).
 
 function entry(overrides: Partial<ActivityQueueEntry>): ActivityQueueEntry {
   return {
@@ -63,9 +49,6 @@ test('a card error renders through the alert primitive, glyph included', () => {
   );
 });
 
-// The positive control: a card with no error renders no alert at all, so the
-// assertion above is about the error path rather than any alert the card
-// always renders.
 test('a card with no error renders no alert', () => {
   const markup = render(entry({ status: 'running' }));
   assert.ok(!markup.includes('role="alert"'), markup);

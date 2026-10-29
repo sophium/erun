@@ -4,15 +4,7 @@ import * as React from 'react';
 
 import { REVIEW_KEYBOARD_SHORTCUTS } from '@/app/reviewKeyboardShortcuts';
 
-// ReviewKeyboardShortcutsHint is the review surface's discoverability
-// affordance for its keyboard model (erun-ui/AGENTS.md § "The keyboard model
-// the review surface still owes"): the repo has no existing shortcuts-help
-// precedent to follow, and native `title` is not acceptable for meaningful UI
-// (erun-ui/AGENTS.md § "Frontend Component Discovery"), so this is the
-// smallest thing that makes the bindings discoverable -- a labelled icon
-// button that opens a real Popover listing every binding, rendered from both
-// the diff panel (DiffList.tsx) and the review detail dialog
-// (ReviewDetailDialog.tsx) so either entry point teaches the whole model.
+// ReviewKeyboardShortcutsHint lists the review bindings in a Popover; native `title` is not acceptable (erun-ui/AGENTS.md).
 export function ReviewKeyboardShortcutsHint(): React.ReactElement {
   return (
     <Popover>

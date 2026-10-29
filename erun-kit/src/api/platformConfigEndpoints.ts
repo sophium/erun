@@ -1,21 +1,10 @@
-// The one shared RTK Query endpoint definition erun#1283 asks for: written
-// once here, injected into the console's own `createApi` over a real
-// `httpBaseQuery` and, in the desktop's own test suite, over its real
-// `wailsQueryFn`-shaped base query — proving the seam is real rather than two
-// parallel stacks wearing one name. Nothing here calls `fetch` or knows about
-// Wails; the transport is entirely the injected `BaseQuery`.
+// Shared RTK Query endpoints; the transport is entirely the injected BaseQuery.
 import type { BaseQueryFn, EndpointBuilder } from '@reduxjs/toolkit/query';
 
 import { parseTenantConfigView, type TenantConfigView } from '../models/platformConfig';
 
-// PlatformApiRequest is the abstract shape every transport's base query
-// resolves. It intentionally mirrors RTK Query's own `fetchBaseQuery` args
-// (`url`/`method`/`body`) so an HTTP transport needs no translation layer,
-// while a non-HTTP transport (Wails IPC) just routes on `url`. `token` carries
-// the bearer explicitly per request rather than through store state, matching
-// every hand-rolled client this replaces (`fetchConfig(token)`, `createContext
-// (token, input)`, …) so call sites barely change shape. `label` lets an
-// endpoint keep its own "X request failed (status)" wording.
+// PlatformApiRequest mirrors fetchBaseQuery args so HTTP needs no translation; non-HTTP
+// transports route on `url`. `token` is per request, not store state.
 export interface PlatformApiRequest {
   url: string;
   method?: string;
@@ -27,26 +16,15 @@ export interface PlatformApiRequest {
 export interface PlatformApiError {
   message: string;
   status?: number;
-  // code is the backend's machine-readable {code, message} envelope code
-  // (erun-backend-api/internal/routes/errors.go and, for the pre-route auth
-  // layer, auth.go's authErrorEnvelope) when the transport could read one —
-  // e.g. TENANT_UNRESOLVED vs NOT_ENROLLED on a 401, which a caller must
-  // render as two different messages rather than one generic "not enrolled"
-  // (erun#1721). Absent when the response carried no such envelope.
+  // The backend's {code, message} envelope code, e.g. TENANT_UNRESOLVED vs NOT_ENROLLED,
+  // which callers render differently.
   code?: string;
 }
 
 export type PlatformBaseQuery = BaseQueryFn<PlatformApiRequest, unknown, PlatformApiError>;
 
-// buildPlatformConfigEndpoints injects the shared `getConfig` endpoint into
-// any `createApi` instance — the console wires it to a real httpBaseQuery;
-// erun-ui/frontend's suite wires the same factory to a base query built from
-// its own `wailsQueryFn`, both producing an identical TenantConfigView from
-// identical fixture bytes. The injecting api's own tagTypes should include
-// `'Config'` so a caller can invalidate this query after a write that changes
-// what it reads (registering or deploying an environment, provisioning a
-// context); the cast below trades cross-module tag-literal checking for
-// letting any api's own TagTypes union inject this endpoint.
+// buildPlatformConfigEndpoints injects `getConfig`; the injecting api's tagTypes should
+// include 'Config'. The cast trades tag-literal checking for any api's TagTypes.
 export function buildPlatformConfigEndpoints<TagTypes extends string, ReducerPath extends string>(
   builder: EndpointBuilder<PlatformBaseQuery, TagTypes, ReducerPath>,
 ) {

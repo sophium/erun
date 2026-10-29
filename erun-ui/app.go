@@ -3,118 +3,111 @@ package main
 import (
 	"context"
 	"log"
-	"os"
-	"strings"
 	"sync"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam/envstore"
+	"github.com/sophium/erun/erun-common/base/seam/kubeapi"
+	"github.com/sophium/erun/erun-common/base/seam/projectroot"
+	"github.com/sophium/erun/erun-common/command/jobs"
+	"github.com/sophium/erun/erun-common/command/lifecycle/gatewayrouting"
+	"github.com/sophium/erun/erun-common/command/lifecycle/stop"
+	orchestratorpkg "github.com/sophium/erun/erun-common/command/orchestrator"
+	"github.com/sophium/erun/erun-common/command/workspace"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/cloud/cloudcontext"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
+	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
+	activitysvc "github.com/sophium/erun/erun-ui/internal/activity"
+	"github.com/sophium/erun/erun-ui/internal/cloudctx"
+	"github.com/sophium/erun/erun-ui/internal/contribute"
+	"github.com/sophium/erun/erun-ui/internal/envops"
+	"github.com/sophium/erun/erun-ui/internal/investigate"
+	orchestratorsvc "github.com/sophium/erun/erun-ui/internal/orchestrator"
+	"github.com/sophium/erun/erun-ui/internal/runtimeview"
+	settingssvc "github.com/sophium/erun/erun-ui/internal/settings"
+	tenantsvc "github.com/sophium/erun/erun-ui/internal/tenant"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const (
-	terminalOutputEvent           = "terminal-output"
-	terminalExitEvent             = "terminal-exit"
-	appStatusEvent                = "app-status"
-	appNotificationEvent          = "app-notification"
-	appNotificationClearEvent     = "app-notification-clear"
-	mcpReconnectLineEvent         = "mcp-reconnect-line"
-	environmentInitializedEvent   = "environment-initialized"
-	environmentInitFailedEvent    = "environment-init-failed"
-	environmentDeployedEvent      = "environment-deployed"
-	environmentsChangedEvent      = "environments-changed"
-	hostedDefinitionUploadedEvent = "hosted-definition-uploaded"
-	doctorCompletedEvent          = "doctor-completed"
-	sshdInitCompletedEvent        = "sshd-init-completed"
-	aiActivityEvent               = "ai-activity"
-	orchestratorShellEvent        = "orchestrator-shell-activity"
-	envStatusEvent                = "env-status"
-	envActivityEvent              = "env-activity"
-	envUsageEvent                 = "env-usage"
-	envNodeEvent                  = "env-node"
-	appCloseGateEvent             = "app-close-gate"
-	appSessionEnvVar              = eruncommon.DesktopSessionEnvVar
-)
+const appSessionEnvVar = orchestratorpkg.DesktopSessionEnvVar
+
+// workingIssueCommandRunner runs a host command in dir and returns its trimmed stdout.
+type workingIssueCommandRunner func(ctx context.Context, dir, name string, args ...string) (string, error)
 
 type erunUIStore interface {
-	eruncommon.ListStore
-	SaveERunConfig(eruncommon.ERunConfig) error
-	SaveTenantConfig(eruncommon.TenantConfig) error
-	SaveEnvConfig(string, eruncommon.EnvConfig) error
-}
-
-type projectConfigStore interface {
-	LoadProjectConfig(string) (eruncommon.ProjectConfig, string, error)
-	SaveProjectConfig(string, eruncommon.ProjectConfig) error
+	envstore.ListStore
+	SaveERunConfig(config.ERunConfig) error
+	SaveTenantConfig(model.TenantConfig) error
+	SaveEnvConfig(string, config.EnvConfig) error
 }
 
 type erunUIDeps struct {
 	store                  erunUIStore
-	findProjectRoot        eruncommon.ProjectFinderFunc
+	findProjectRoot        projectroot.ProjectFinderFunc
 	resolveCLIPath         func() string
-	resolveBuildInfo       func() eruncommon.BuildInfo
-	resolveImageRegistry   func(context.Context, string, string) (eruncommon.RuntimeRegistryVersions, error)
-	cloudDeps              eruncommon.CloudDependencies
-	cloudContextDeps       eruncommon.CloudContextDependencies
-	deleteNamespace        eruncommon.NamespaceDeleterFunc
+	resolveBuildInfo       func() model.BuildInfo
+	resolveImageRegistry   func(context.Context, string, string) (model.RuntimeRegistryVersions, error)
+	cloudDeps              cloud.CloudDependencies
+	cloudContextDeps       cloudcontext.CloudContextDependencies
+	deleteNamespace        kubeapi.NamespaceDeleterFunc
 	listKubeContexts       func() ([]string, error)
-	loadResourceStatus     func(context.Context, uiRuntimeResourceInput) (uiRuntimeResourceStatus, error)
-	loadClusterRegistry    func(context.Context, uiRuntimeResourceInput) (uiClusterRegistryStatus, error)
-	loadHostedRegistry     func(context.Context) uiHostedRegistryStatus
+	loadResourceStatus     func(context.Context, runtimeview.ResourceInput) (runtimeview.ResourceStatus, error)
+	loadClusterRegistry    func(context.Context, runtimeview.ResourceInput) (runtimeview.ClusterRegistryStatus, error)
+	loadHostedRegistry     func(context.Context) runtimeview.HostedRegistryStatus
 	checkRuntimeDeployed   func(context.Context, string, string, string) (bool, error)
-	stopEnvironmentRuntime func(eruncommon.Context, eruncommon.StopEnvironmentParams) (eruncommon.StopEnvironmentResult, error)
-	readRuntimeRunState    func(eruncommon.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error)
-	ensureMCP              func(context.Context, eruncommon.OpenResult) error
-	reconnectMCP           func(context.Context, eruncommon.OpenResult, func(string)) error
-	ensureSSHD             func(context.Context, eruncommon.OpenResult) error
+	stopEnvironmentRuntime func(core.Context, stop.StopEnvironmentParams) (model.StopEnvironmentResult, error)
+	readRuntimeRunState    func(core.Context, stop.RuntimeScaleTarget) (stop.RuntimeRunState, error)
+	ensureMCP              func(context.Context, config.OpenResult) error
+	reconnectMCP           func(context.Context, config.OpenResult, func(string)) error
+	ensureSSHD             func(context.Context, config.OpenResult) error
 	canConnectLocalPort    func(int) bool
-	// canReachMCPEndpoint answers whether an MCP port carries traffic, which a
-	// dial cannot: a stale port-forward accepts and never answers, so a
-	// dial-gated recovery never fires and the environment stays dead behind a
-	// healthy-looking listener.
+	// canReachMCPEndpoint checks traffic, not a dial: a stale port-forward accepts and never answers.
 	canReachMCPEndpoint       func(int) bool
-	setRemoteCloudAlias       func(context.Context, string, string, string, string, string) (eruncommon.EnvConfig, error)
-	startTerminal             func(startTerminalSessionParams) (terminalSession, error)
-	runIDECommand             func(context.Context, startTerminalSessionParams) (string, error)
+	setRemoteCloudAlias       func(context.Context, string, string, string, string, string) (config.EnvConfig, error)
+	startTerminal             func(terminal.StartParams) (terminal.PTY, error)
+	runIDECommand             func(context.Context, terminal.StartParams) (string, error)
 	launchHostArtifact        func(exePath, dir string) error
 	launchHostOpener          func(executable string, args []string) error
-	resolveOrchestratorLaunch func(launch eruncommon.OrchestratorLaunch, agentID, initialPrompt, mcpConfigPath string) (string, []string, error)
-	// claudeAgents drives the Claude background agents persisted orchestrators
-	// run as, injectable so no test ever starts or stops a real one.
-	claudeAgents claudeAgentCLI
-	// resolveGatewayCredential reads the secret an orchestrator launched through
-	// the gateway sends, injectable so a test never reads the real secret store.
-	resolveGatewayCredential func(*eruncommon.OpenRouterConfig) (string, error)
-	savePastedFile           func(pastedFileSaveParams) (string, error)
-	listAgentOutputs         func(eruncommon.OpenResult, eruncommon.RuntimeOutputsParams) (eruncommon.RuntimeOutputsListResult, error)
-	downloadAgentOutput      func(eruncommon.OpenResult, eruncommon.RuntimeOutputDownloadParams) (eruncommon.RuntimeOutputResult, error)
-	loadDiff                 func(context.Context, string, string, uiDiffOptions) (eruncommon.DiffResult, error)
-	execCommit               func(ctx context.Context, endpoint, bearer, branch, message string) (eruncommon.CommitWorkingTreeResult, error)
-	execPush                 func(ctx context.Context, endpoint, bearer, branch, remote string) (eruncommon.PushWorkingTreeBranchResult, error)
-	loadIdleStatus           func(context.Context, string, string) (eruncommon.EnvironmentIdleStatus, error)
-	loadEnvironmentJobs      func(context.Context, string, string) ([]eruncommon.EnvironmentJob, error)
-	readEnvironmentJobOutput func(context.Context, string, string, eruncommon.ReadEnvironmentJobOutputParams) (eruncommon.EnvironmentJobOutput, error)
-	cancelEnvironmentJob     func(context.Context, string, string, eruncommon.CancelEnvironmentJobParams) (eruncommon.CancelEnvironmentJobResult, error)
-	whipEnvironment          func(context.Context, string, string, string, string) (eruncommon.WhipResult, error)
-	loadAPILog               func(context.Context, uiTenantDashboardInput) (string, error)
-	workspaceSyncReady       func(context.Context, string) error
-	syncWorkspace            func(context.Context, eruncommon.WorkspaceSyncParams) (eruncommon.WorkspaceSyncResult, error)
-	workspaceSyncInterval    time.Duration
-	recordActivity           func(eruncommon.EnvironmentActivityParams) error
-	runWorkingIssueCommand   workingIssueCommandRunner
-	loadPodBranch            func(context.Context, string, string) (string, error)
-	runPodRaw                func(context.Context, string, string, []string) (string, error)
-	execRuntimePod           func(context.Context, uiSelection, string) (string, error)
-	loadRuntimeUsage         func(context.Context, uiSelection) (uiRuntimeUsage, error)
-	stopCloudContext         func(context.Context, string) (eruncommon.CloudContextStatus, error)
-	windowStatePath          string
-	windowMaximised          func(context.Context) bool
-	// skipLoginShellEnv leaves the process environment as the caller gave it.
-	// Set for --headless, whose caller always supplies its environment on
-	// purpose -- the importer exists for launchd's minimal Finder/Dock env.
+	resolveOrchestratorLaunch func(launch orchestratorpkg.OrchestratorLaunch, agentID, initialPrompt, mcpConfigPath string) (string, []string, error)
+	claudeAgents              orchestratorsvc.AgentCLI
+	resolveGatewayCredential  func(*config.OpenRouterConfig) (string, error)
+	savePastedFile            func(terminal.PasteParams) (string, error)
+	listAgentOutputs          func(config.OpenResult, model.RuntimeOutputsParams) (model.RuntimeOutputsListResult, error)
+	downloadAgentOutput       func(config.OpenResult, model.RuntimeOutputDownloadParams) (model.RuntimeOutputResult, error)
+	loadDiff                  func(context.Context, string, string, uimodel.DiffOptions) (model.DiffResult, error)
+	execCommit                func(ctx context.Context, endpoint, bearer, branch, message string) (model.CommitWorkingTreeResult, error)
+	execPush                  func(ctx context.Context, endpoint, bearer, branch, remote string) (model.PushWorkingTreeBranchResult, error)
+	loadIdleStatus            func(context.Context, string, string) (model.EnvironmentIdleStatus, error)
+	loadEnvironmentJobs       func(context.Context, string, string) ([]jobstate.EnvironmentJob, error)
+	readEnvironmentJobOutput  func(context.Context, string, string, model.ReadEnvironmentJobOutputParams) (jobs.EnvironmentJobOutput, error)
+	cancelEnvironmentJob      func(context.Context, string, string, model.CancelEnvironmentJobParams) (jobs.CancelEnvironmentJobResult, error)
+	whipEnvironment           func(context.Context, string, string, string, string) (model.WhipResult, error)
+	loadAPILog                func(context.Context, tenantsvc.DashboardInput) (string, error)
+	readGatewayRouting        func(context.Context, config.EnvConfig, string, *config.OpenRouterConfig) (gatewayrouting.GatewayRouting, bool, error)
+	workspaceSyncReady        func(context.Context, string) error
+	syncWorkspace             func(context.Context, workspace.WorkspaceSyncParams) (model.WorkspaceSyncResult, error)
+	workspaceSyncInterval     time.Duration
+	recordActivity            func(model.EnvironmentActivityParams) error
+	runWorkingIssueCommand    workingIssueCommandRunner
+	loadPodBranch             func(context.Context, string, string) (string, error)
+	runPodRaw                 func(context.Context, string, string, []string) (string, error)
+	execRuntimePod            func(context.Context, uimodel.Selection, string) (string, error)
+	loadRuntimeUsage          func(context.Context, uimodel.Selection) (runtimeview.Usage, error)
+	stopCloudContext          func(context.Context, string) (model.CloudContextStatus, error)
+	windowStatePath           string
+	windowMaximised           func(context.Context) bool
+	// skipLoginShellEnv is set for --headless, whose caller supplies its environment deliberately.
 	skipLoginShellEnv            bool
 	cloneERun                    func(context.Context, string, string) error
 	contributeStatePath          string
+	investigationReportDir       string
 	interruptedActivityPath      string
 	orchestratorRestoreDir       string
 	orchestratorOpenPath         string
@@ -123,12 +116,7 @@ type erunUIDeps struct {
 	relaunchApp                  func() error
 	quitApp                      func()
 	desktopControlMarkerPath     string
-	// runOrchestratorLabelCommand runs the GitHub CLI calls that provision an
-	// orchestrator's claim label. It is the shared host-command runner under a
-	// name of its own, so a test that drives provisioning says which host
-	// boundary it is stubbing instead of stubbing the sidebar's working-issue
-	// probe by accident -- and a test that drives the sidebar does not have to
-	// know a label is being minted somewhere behind it.
+	// runOrchestratorLabelCommand is a separately named seam so tests stub the right boundary.
 	runOrchestratorLabelCommand workingIssueCommandRunner
 }
 
@@ -136,149 +124,41 @@ type App struct {
 	ctx  context.Context
 	deps erunUIDeps
 
-	// identity is the desktop's persistent signing identity: it mints the per-env
-	// MCP bearer and supplies the public key deploy injects so each env's edge can
-	// verify those tokens. nil in unit tests.
+	// identity signs per-env MCP bearers; nil in unit tests.
 	identity *desktopIdentity
 
-	mu         sync.Mutex
-	nextSerial int
-	sessions   map[string]*managedTerminal
-	// sessionWG tracks every streamSession reader goroutine (spawned via
-	// spawnStreamSession) so shutdown can wait for all of them to actually
-	// exit after closing their sessions, rather than assuming a closed fd
-	// means the goroutine reading it is already gone.
-	sessionWG        sync.WaitGroup
-	idleStops        map[string]struct{}
-	intentionalStops map[string]struct{}
-	// runtimeStops latches a per-env `erun stop` the desktop issued. Kept
-	// separate from intentionalStops (which is per cloud context) so the two
-	// stops cannot alias: they have different recoveries, and a runtime stop
-	// flagged as a cloud-context stop would name the wrong one.
-	runtimeStops map[string]struct{}
-	// sessionHeartbeats holds the most recent pod observation per environment:
-	// which persistent sessions still have a live program behind them. It is
-	// what keeps a quiet-but-running AI tab from reading as finished, and what
-	// makes the rendered session count and the running state one observation
-	// rather than two guesses. See session_heartbeat.go.
-	sessionHeartbeats map[string]sessionHeartbeat
-	// aiSessionReadings holds the most recent structured AI-session status per
-	// environment, as the environment's own AI tool reported it. It is what
-	// keeps the sidebar badge from reading a session blocked on the human as
-	// working. See ai_session_status.go.
-	aiSessionReadings map[string]aiSessionReading
-	// envActivity is the last observation published per environment, so the
-	// sweep announces transitions rather than restating a quiet environment
-	// every tick. See environment_activity.go.
-	envActivity map[string]environmentActivityState
-	// envUsage is the last cached usage reading published per environment, kept
-	// so a hover card renders a cached figure with its age rather than
-	// triggering a probe of its own. See environment_usage.go.
-	envUsage map[string]environmentUsageReading
-	// forwardRepairs tracks, per environment, the bounded repair episode for a
-	// port-forward that holds its local port while its edge answers nothing.
-	// See environment_forward_repair.go.
-	forwardRepairs map[string]forwardRepairEpisode
-	// edgeOutages tracks, per environment, an "edge is not answering" entry
-	// logged when an orchestrator wired it, until the sweep sees that edge
-	// answer and logs the matching exit. See orchestrator_edge_recovery.go.
-	edgeOutages    map[string]orchestratorEdgeOutage
-	busyEnvs       map[string]int
-	workspaceSyncs map[string]*workspaceSyncWorker
-	orchestrators  map[string]*orchestratorSession
-	// unmanagedPacingReason is pacingLastReason's counterpart for a configured
-	// orchestrator this desktop holds no session for and therefore has no
-	// orchestratorSession to keep it on: the last pacing reason logged for it,
-	// so the reconciler's decision line covers the whole configured population
-	// without repeating itself every 15s tick. Guarded by a.mu, like the map it
-	// shadows. See orchestratorPacingUnmanagedRows.
-	unmanagedPacingReason map[string]orchestratorPacingReason
-	// investigations bounds how many failure reports become agents, for how
-	// long, and on what input. It holds its own lock; never call into it while
-	// holding a.mu, since it observes session liveness through this App.
-	investigations *investigationRegistry
-	// skillsSourceReported latches the one warning a run posts when the shipped
-	// skills cannot be resolved. The condition is a property of this build, so
-	// restating it on every orchestrator launch would be noise.
-	skillsSourceReported bool
-	// agentsSourceReported is skillsSourceReported's counterpart for the
-	// reusable agents (erun-builder/erun-reviewer).
-	agentsSourceReported      bool
-	credentialRefreshers      map[string]*cloudCredentialsRefresher
-	activityQueue             *activityQueueStore
-	activityStatusPoller      func(activityQueueEntry)
-	activityPollersStop       chan struct{}
-	activityWatchedContextsMu sync.Mutex
-	activityWatchedContexts   map[string]struct{}
-	actionQueueMu             sync.Mutex
-	actionQueues              map[string]*envActionQueue
-	actionCancels             map[string]context.CancelFunc
-	envEnsureMu               sync.Mutex
-	envEnsureInflight         map[string]*envEnsureRun
-	envEnsureDone             map[string]time.Time
-	envEnsureFailNotified     map[string]struct{}
-	// initEmitted dedups the environment-initialized signal per env. `erun init`
-	// emits "==> Initialized" once, but on Windows a ConPTY repaint (triggered by
-	// writing the follow-up deploy command into the same Local shell) re-sends the
-	// buffered line as fresh output, so the trace scanner would re-fire the event —
-	// each re-fire composes another deploy, whose write repaints again: an endless
-	// create→deploy loop. Fire at most once per env; reset on init-failure/delete.
-	initEmittedMu sync.Mutex
-	initEmitted   map[string]struct{}
-	configWatcher *configWatcher
-	// definitionWriteOrigin is the config watcher's origin filter: the env
-	// config writes this desktop made while transferring a definition, so the
-	// watcher stops firing on its own write. See hosted_definition_origin.go.
-	definitionWriteOrigin definitionWriteOrigin
-	contribute            *contributeStore
-	contributeApps        *contributeAppForwards
+	// investigations has its own lock; never call into it while holding the terminal lock.
+	investigations *investigate.Service
 
-	// cloudContextStatuses caches the live AWS-observed power state per cloud
-	// context. The persisted config no longer carries Status (it is operational
-	// state, not configuration), so any code path that needs "is this context
-	// running right now?" must consult this map.
-	cloudContextStatusesMu sync.RWMutex
-	cloudContextStatuses   map[string]cloudContextCacheEntry
-	cloudContextPollerStop chan struct{}
-
-	// envNodes is the last node reading published per environment, so the sweep
-	// announces transitions rather than restating an unchanged node every tick.
-	// See environment_node.go.
-	envNodesMu sync.Mutex
-	envNodes   map[string]uiEnvironmentNodeSnapshot
-
-	// closeConfirmed latches the operator's explicit "close anyway" choice from
-	// the running-work confirmation, so the second beforeClose pass that
-	// wailsruntime.Quit triggers proceeds instead of prompting again.
+	// closeConfirmed lets the second beforeClose pass from wailsruntime.Quit
+	// proceed without prompting. It is guarded by the terminal lock
+	// (terminal.WithLock) until the window-close concern moves out of main.
 	closeConfirmed bool
 
-	// workingIssueCache memoizes the resolved working issue per env so the sidebar
-	// hover card doesn't re-run git + gh on every hover.
-	workingIssueMu    sync.Mutex
-	workingIssueCache map[string]workingIssueCacheEntry
-
-	// emitMu guards emitFn. Two independent reasons, both real: NewApp starts
-	// the activity queue's notify loop before a caller gets a chance to call
-	// SetEmitter, so emit() can race SetEmitter from that goroutine; and
-	// SetEmitter can be called after other background goroutines (session
-	// streamers among them) are already emitting through it.
+	// emitMu guards emitFn: the notify loop and session streamers may emit while SetEmitter runs.
 	emitMu sync.RWMutex
-	emitFn func(name string, args ...any)
+	emitFn uimodel.Emitter
 
-	// restartControlMarkerMu guards the control record against this process's
-	// own shutdown, so an adoption still waiting for a previous owner to exit
-	// cannot republish an endpoint after shutdown has removed it.
+	// restartControlMarkerMu keeps an adoption from republishing an endpoint after shutdown removed it.
 	restartControlMarkerMu       sync.Mutex
 	restartControlMarkerReleased bool
 
-	// restartControl is the loopback server a CLI-triggered restart talks
-	// to (see restart_control.go). nil when the bind failed or startup has not
-	// run yet (unit tests that construct an App directly).
+	// restartControl is nil when the bind failed or startup has not run.
 	restartControl *restartControlServer
+
+	tenant *tenantsvc.Service
+	// cloudContexts is the live power state; config no longer persists it.
+	cloudContexts *cloudctx.Service
+	settings      *settingssvc.Service
+	runtime       *runtimeview.Service
+	envops        *envops.Service
+	terminal      *terminal.Service
+	activity      *activitysvc.Service
+	contribute    *contribute.Service
+	orchestrator  *orchestratorsvc.Service
 }
 
-// SetEmitter overrides how the App emits frontend events; the headless server
-// uses it to redirect events to SSE subscribers instead of the Wails runtime.
+// SetEmitter overrides event emission; headless uses it for SSE.
 func (a *App) SetEmitter(emit func(name string, args ...any)) {
 	a.emitMu.Lock()
 	a.emitFn = emit
@@ -301,50 +181,113 @@ func (a *App) emit(name string, args ...any) {
 	runtime.EventsEmit(a.ctx, name, wailsArgs...)
 }
 
+// context is the Wails context once startup has run, and context.Background()
+// before it. Services built in NewApp read it through this func, never a
+// captured value, because startup (or the headless path) sets a.ctx later.
+func (a *App) context() context.Context {
+	if a.ctx != nil {
+		return a.ctx
+	}
+	return context.Background()
+}
+
 func NewApp(deps erunUIDeps) *App {
 	deps = withDefaultCoreDeps(deps)
 	deps = withDefaultCloudDeps(deps)
 	deps = withDefaultRuntimeDeps(deps)
 	deps = withDefaultUIDeps(deps)
-	app := &App{
-		deps:                  deps,
-		sessions:              make(map[string]*managedTerminal),
-		idleStops:             make(map[string]struct{}),
-		intentionalStops:      make(map[string]struct{}),
-		runtimeStops:          make(map[string]struct{}),
-		sessionHeartbeats:     make(map[string]sessionHeartbeat),
-		busyEnvs:              make(map[string]int),
-		workspaceSyncs:        make(map[string]*workspaceSyncWorker),
-		orchestrators:         make(map[string]*orchestratorSession),
-		unmanagedPacingReason: make(map[string]orchestratorPacingReason),
-		credentialRefreshers:  make(map[string]*cloudCredentialsRefresher),
-		workingIssueCache:     make(map[string]workingIssueCacheEntry),
-		envUsage:              loadPersistedEnvironmentUsage(deps.environmentUsageHistoryPath),
-	}
-	app.investigations = newInvestigationRegistry(defaultInvestigationReportDir())
-	app.investigations.live = func(id string) bool {
-		_, running := app.runningOrchestratorInfo(id)
-		return running
-	}
-	app.investigations.onExpire = app.finishExpiredInvestigation
-	app.activityQueue = newActivityQueueStore(
-		func(entry activityQueueEntry) {
-			app.emitActivityState(entry)
-		},
-		nil,
-	)
-	app.activityStatusPoller = func(entry activityQueueEntry) {
-		go app.pollActivityContainerStatuses(context.Background(), entry)
-	}
-	app.contribute = newContributeStore(deps.contributeStatePath)
+	app := &App{deps: deps}
+	app.investigations = app.newInvestigationService(nil, nil)
+	app.activity = app.newActivityService()
+	app.contribute = app.newContributeService()
+	app.tenant = tenantsvc.New(tenantsvc.Deps{
+		Store:                 deps.store,
+		Cloud:                 deps.cloudDeps,
+		Context:               app.context,
+		MCPBearer:             app.mcpBearer,
+		LoadAPILog:            deps.loadAPILog,
+		ConfiguredERunAliases: func() ([]string, error) { return app.orchestrator.ConfiguredERunAliases() },
+	})
+	app.cloudContexts = app.newCloudContextService(time.Now)
+	app.envops = app.newEnvopsService()
+	app.terminal = app.newTerminalService()
+	app.settings = app.newSettingsService()
+	app.runtime = app.newRuntimeService()
+	app.orchestrator = app.newOrchestratorService()
 	if app.identity == nil {
-		app.identity = newDesktopIdentity(eruncommon.DefaultDesktopIdentityDir())
+		app.identity = newDesktopIdentity(core.DefaultDesktopIdentityDir())
 	}
 	return app
 }
 
-// mcpBearer returns "" on a nil identity (unit tests) or a signing failure; an
-// auth-enabled env then rejects the empty bearer with 401, which is correct.
+// newCloudContextService takes the cache clock so a test can age entries.
+func (a *App) newCloudContextService(now func() time.Time) *cloudctx.Service {
+	return cloudctx.New(cloudctx.Deps{
+		Store:        a.deps.store,
+		Cloud:        a.deps.cloudDeps,
+		ContextDeps:  a.deps.cloudContextDeps,
+		MCPBearer:    a.mcpBearer,
+		MCPReachable: a.deps.canReachMCPEndpoint,
+		MCPEndpoint:  mcpEndpointForOpenResult,
+		MCPTransport: func(endpoint, bearer string) mcpsdk.Transport {
+			return mcpClientTransport(endpoint, bearer, false)
+		},
+		ClientVersion:        func() string { return currentBuildInfo().Version },
+		NotifyRefreshFailure: a.notifyCredentialRefreshFailure,
+		OnStatusChange:       func() { a.runtime.RefreshNodeStatuses() },
+		Now:                  now,
+	})
+}
+
+// newSettingsService reads the deps funcs and the tenant service per call, so a
+// test that builds App by hand or swaps a dep after NewApp still reaches its fake.
+func (a *App) newSettingsService() *settingssvc.Service {
+	return settingssvc.New(settingssvc.Deps{
+		Store:         a.deps.store,
+		Cloud:         a.deps.cloudDeps,
+		ContextDeps:   a.deps.cloudContextDeps,
+		Context:       a.context,
+		Emit:          a.emit,
+		CloudStatuses: a.cloudContexts,
+		StopCloudContext: func(ctx context.Context, name string) (model.CloudContextStatus, error) {
+			return a.deps.stopCloudContext(ctx, name)
+		},
+		MarkIntentionalStop:  func(name string) { a.terminal.MarkIntentionalStopForCloudContext(name) },
+		ClearIntentionalStop: func(name string) { a.terminal.ClearIntentionalStopForCloudContext(name) },
+		ClearIdleStops:       func(name string) { a.terminal.ClearIdleStopsForCloudContext(name) },
+		RecordManualStop: func(ctx context.Context, name string) {
+			a.terminal.RecordManualStopForCloudContext(ctx, name)
+		},
+		EnsureMCPAvailable: func(ctx context.Context, result config.OpenResult) error {
+			return a.terminal.EnsureMCPAvailable(ctx, result)
+		},
+		MCPEndpoint: mcpEndpointForOpenResult,
+		MCPBearer:   a.mcpBearer,
+		SetRemoteCloudAlias: func(ctx context.Context, endpoint, bearer, tenant, environment, alias string) (config.EnvConfig, error) {
+			return a.deps.setRemoteCloudAlias(ctx, endpoint, bearer, tenant, environment, alias)
+		},
+		ReconcileWorkspaceSync: func(selection uimodel.Selection, enabled bool) {
+			a.envops.ReconcileWorkspaceSync(selection, enabled)
+		},
+		WorkspaceSyncStatus: func(selection uimodel.Selection) (string, string) {
+			status := a.envops.WorkspaceSyncStatus(selection)
+			return status.Status, status.Message
+		},
+		PlatformReady: func(tenant string) bool {
+			resolution, err := a.tenant.Platform(tenant, "")
+			return err == nil && resolution.State == tenantsvc.StateReady
+		},
+		PlatformClient: func(ctx context.Context, tenant string) (*platformclient.PlatformClient, context.Context, context.CancelFunc, error) {
+			return a.tenant.Client(ctx, tenant)
+		},
+		PlatformRequestTimeout: tenantsvc.RequestTimeout,
+		ReadGatewayRouting: func(ctx context.Context, env config.EnvConfig, tenant string, catalog *config.OpenRouterConfig) (gatewayrouting.GatewayRouting, bool, error) {
+			return a.deps.readGatewayRouting(ctx, env, tenant, catalog)
+		},
+	})
+}
+
+// mcpBearer returns "" without an identity; an auth-enabled env then answers 401.
 func (a *App) mcpBearer(tenant, environment string) string {
 	if a.identity == nil {
 		return ""
@@ -357,368 +300,37 @@ func (a *App) mcpBearer(tenant, environment string) string {
 	return token
 }
 
-func withDefaultCoreDeps(deps erunUIDeps) erunUIDeps {
-	if deps.store == nil {
-		deps.store = eruncommon.ConfigStore{}
-	}
-	if deps.findProjectRoot == nil {
-		deps.findProjectRoot = eruncommon.FindProjectRoot
-	}
-	if deps.resolveCLIPath == nil {
-		deps.resolveCLIPath = resolveCLIExecutable
-	}
-	if deps.resolveBuildInfo == nil {
-		deps.resolveBuildInfo = func() eruncommon.BuildInfo {
-			return resolveCurrentBuildInfo(deps.resolveCLIPath)
-		}
-	}
-	if deps.resolveImageRegistry == nil {
-		deps.resolveImageRegistry = eruncommon.ResolveRuntimeImageRegistryVersions
-	}
-	if deps.deleteNamespace == nil {
-		deps.deleteNamespace = eruncommon.DeleteKubernetesNamespace
-	}
-	return deps
-}
-
-// withDefaultCloudDeps supplies the one cloud default erun-common cannot fill
-// itself: CloudSecretStore has no usable zero value (it needs a real backing
-// directory), so Cloudflare token operations fail unless it is wired here.
-func withDefaultCloudDeps(deps erunUIDeps) erunUIDeps {
-	if deps.cloudDeps.CloudSecretStore == nil {
-		deps.cloudDeps.CloudSecretStore = eruncommon.DefaultCloudDependencies().CloudSecretStore
-	}
-	return deps
-}
-
-func withDefaultRuntimeDeps(deps erunUIDeps) erunUIDeps {
-	deps = withDefaultRuntimeResolutionDeps(deps)
-	deps = withDefaultRuntimeSessionDeps(deps)
-	deps = withDefaultOrchestratorLaunchDeps(deps)
-	return deps
-}
-
-func withDefaultRuntimeResolutionDeps(deps erunUIDeps) erunUIDeps {
-	if deps.listKubeContexts == nil {
-		deps.listKubeContexts = listKubernetesContexts
-	}
-	if deps.loadResourceStatus == nil {
-		deps.loadResourceStatus = loadRuntimeResourceStatus
-	}
-	if deps.loadClusterRegistry == nil {
-		deps.loadClusterRegistry = loadClusterRegistry
-	}
-	if deps.loadHostedRegistry == nil {
-		deps.loadHostedRegistry = loadHostedRegistryWithTestOverride
-	}
-	if deps.checkRuntimeDeployed == nil {
-		deps.checkRuntimeDeployed = checkRuntimeDeployed
-	}
-	if deps.stopEnvironmentRuntime == nil {
-		deps.stopEnvironmentRuntime = eruncommon.RunStopEnvironment
-	}
-	if deps.readRuntimeRunState == nil {
-		deps.readRuntimeRunState = eruncommon.ReadRuntimeRunState
-	}
-	deps = withDefaultReachabilityDeps(deps)
-	if deps.setRemoteCloudAlias == nil {
-		deps.setRemoteCloudAlias = setEnvironmentCloudAliasViaMCP
-	}
-	return deps
-}
-
-func withDefaultOrchestratorLaunchDeps(deps erunUIDeps) erunUIDeps {
-	if deps.resolveOrchestratorLaunch == nil {
-		deps.resolveOrchestratorLaunch = orchestratorLaunchCommand
-	}
-	if deps.claudeAgents == nil {
-		deps.claudeAgents = newDefaultClaudeAgents()
-	}
-	if deps.resolveGatewayCredential == nil {
-		deps.resolveGatewayCredential = eruncommon.ResolveGatewayCredential
-	}
-	return deps
-}
-
-// withDefaultReachabilityDeps supplies the two distinct liveness questions the
-// app asks: whether a local port is held at all, and whether an MCP port
-// actually carries traffic. They are separate because a stale port-forward
-// answers the first yes and the second no.
-//
-// Both probe a raw TCP port on the host, which is not namespaced by HOME/XDG:
-// the headless Playwright harness's isolated config store computes local
-// port ranges purely from its own (seeded) tenant/env list, so a seeded env
-// can land on the same port range a real environment on the same host has
-// genuinely bound (its own MCP/SSH forwards). Unforced, that reads as a real
-// answer about a seeded env that was never deployed.
-// ERUN_LOCAL_PORT_REACHABILITY_OVERRIDE pins both probes to a fixed answer
-// for exactly that reason; it is set only by playwright/fixtures/seedRoot.ts,
-// never in production.
-func withDefaultReachabilityDeps(deps erunUIDeps) erunUIDeps {
-	if deps.canConnectLocalPort == nil {
-		deps.canConnectLocalPort = func(port int) bool {
-			if override, ok := localPortReachabilityOverride(); ok {
-				return override
-			}
-			return canConnectLocalTCP(port)
-		}
-	}
-	if deps.canReachMCPEndpoint == nil {
-		deps.canReachMCPEndpoint = func(port int) bool {
-			if override, ok := localPortReachabilityOverride(); ok {
-				return override
-			}
-			return eruncommon.CanReachLocalMCPEndpoint(port)
-		}
-	}
-	return deps
-}
-
-// localPortReachabilityOverride parses ERUN_LOCAL_PORT_REACHABILITY_OVERRIDE
-// ("0" or "1"). See withDefaultReachabilityDeps for why the harness needs it.
-func localPortReachabilityOverride() (bool, bool) {
-	raw := strings.TrimSpace(os.Getenv("ERUN_LOCAL_PORT_REACHABILITY_OVERRIDE"))
-	if raw == "" {
-		return false, false
-	}
-	return raw == "1", true
-}
-
-// loadHostedRegistryWithTestOverride is the default loadHostedRegistry dep:
-// the test override wins when set, otherwise it defers to the real probe.
-func loadHostedRegistryWithTestOverride(ctx context.Context) uiHostedRegistryStatus {
-	available, ok := hostedRegistryReachabilityOverride()
-	if !ok {
-		return loadHostedRegistry(ctx)
-	}
-	status := uiHostedRegistryStatus{Host: eruncommon.HostedRegistryHost, Available: available}
-	if !available {
-		status.Reason = "does not resolve"
-		status.Recovery = "Choose a different registry instead."
-	}
-	return status
-}
-
-// hostedRegistryReachabilityOverride parses ERUN_HOSTED_REGISTRY_PROBE_OVERRIDE
-// ("0" or "1"), pinning the new-environment dialog's hosted-registry probe to
-// a fixed answer instead of a real network call to registry.erunpaas.com.
-// Set only by playwright/fixtures/seedRoot.ts, never in production — the
-// headless harness has no route to stub a Go-side outbound HTTP call the way
-// page.route stubs a Wails method, so without this every spec that opens the
-// dialog would depend on real DNS/network behavior.
-func hostedRegistryReachabilityOverride() (bool, bool) {
-	raw := strings.TrimSpace(os.Getenv("ERUN_HOSTED_REGISTRY_PROBE_OVERRIDE"))
-	if raw == "" {
-		return false, false
-	}
-	return raw == "1", true
-}
-
-func withDefaultRuntimeSessionDeps(deps erunUIDeps) erunUIDeps {
-	if deps.ensureMCP == nil {
-		deps.ensureMCP = func(ctx context.Context, result eruncommon.OpenResult) error {
-			return ensureMCPViaOpenCommand(ctx, deps.resolveCLIPath(), result)
-		}
-	}
-	if deps.reconnectMCP == nil {
-		deps.reconnectMCP = func(ctx context.Context, result eruncommon.OpenResult, onLine func(string)) error {
-			return runOpenForReconnect(ctx, deps.resolveCLIPath(), result, onLine)
-		}
-	}
-	if deps.ensureSSHD == nil {
-		deps.ensureSSHD = func(ctx context.Context, result eruncommon.OpenResult) error {
-			return ensureSSHDViaOpenCommand(ctx, deps.resolveCLIPath(), result)
-		}
-	}
-	if deps.startTerminal == nil {
-		deps.startTerminal = startTerminalSession
-	}
-	if deps.runIDECommand == nil {
-		deps.runIDECommand = runIDECommand
-	}
-	if deps.launchHostArtifact == nil {
-		deps.launchHostArtifact = launchHostArtifactDetached
-	}
-	if deps.launchHostOpener == nil {
-		deps.launchHostOpener = launchHostOpenerDetached
-	}
-	return deps
-}
-
-func withDefaultUIDeps(deps erunUIDeps) erunUIDeps {
-	deps = withDefaultWorkspaceDeps(deps)
-	deps = withDefaultPodDeps(deps)
-	deps = withDefaultWindowAndContributeDeps(deps)
-	deps = withDefaultOrchestratorDeps(deps)
-	return deps
-}
-
-// withDefaultOrchestratorDeps fills in what an orchestrator's own state —
-// where its durable records live, and the GitHub boundary its claim label is
-// provisioned through — defaults to.
-func withDefaultOrchestratorDeps(deps erunUIDeps) erunUIDeps {
-	if deps.orchestratorRestoreDir == "" {
-		deps.orchestratorRestoreDir = defaultOrchestratorRestoreDir()
-	}
-	if deps.orchestratorOpenPath == "" {
-		deps.orchestratorOpenPath = defaultOrchestratorOpenPath()
-	}
-	if deps.orchestratorNudgeHistoryPath == "" {
-		deps.orchestratorNudgeHistoryPath = defaultOrchestratorNudgeHistoryPath()
-	}
-	if deps.runOrchestratorLabelCommand == nil {
-		deps.runOrchestratorLabelCommand = execWorkingIssueCommand
-	}
-	return deps
-}
-
-func withDefaultWorkspaceDeps(deps erunUIDeps) erunUIDeps {
-	if deps.savePastedFile == nil {
-		deps.savePastedFile = savePastedFileToRuntime
-	}
-	if deps.listAgentOutputs == nil {
-		deps.listAgentOutputs = listAgentOutputsViaRuntime
-	}
-	if deps.downloadAgentOutput == nil {
-		deps.downloadAgentOutput = downloadAgentOutputViaRuntime
-	}
-	if deps.loadDiff == nil {
-		deps.loadDiff = loadDiffFromMCP
-	}
-	deps = withDefaultExecWriteDeps(deps)
-	if deps.loadIdleStatus == nil {
-		deps.loadIdleStatus = loadIdleStatusFromMCP
-	}
-	deps = withDefaultEnvironmentJobDeps(deps)
-	if deps.loadAPILog == nil {
-		deps.loadAPILog = loadAPILog
-	}
-	if deps.workspaceSyncReady == nil {
-		deps.workspaceSyncReady = eruncommon.WorkspaceSyncSSHReady
-	}
-	if deps.syncWorkspace == nil {
-		deps.syncWorkspace = eruncommon.SyncWorkspaceOnce
-	}
-	if deps.workspaceSyncInterval <= 0 {
-		deps.workspaceSyncInterval = defaultWorkspaceSyncInterval
-	}
-	return deps
-}
-
-func withDefaultEnvironmentJobDeps(deps erunUIDeps) erunUIDeps {
-	if deps.loadEnvironmentJobs == nil {
-		deps.loadEnvironmentJobs = loadEnvironmentJobsFromMCP
-	}
-	if deps.readEnvironmentJobOutput == nil {
-		deps.readEnvironmentJobOutput = readEnvironmentJobOutputFromMCP
-	}
-	if deps.cancelEnvironmentJob == nil {
-		deps.cancelEnvironmentJob = cancelEnvironmentJobFromMCP
-	}
-	if deps.whipEnvironment == nil {
-		deps.whipEnvironment = whipEnvironmentViaMCP
-	}
-	return deps
-}
-
-func withDefaultPodDeps(deps erunUIDeps) erunUIDeps {
-	if deps.runWorkingIssueCommand == nil {
-		deps.runWorkingIssueCommand = execWorkingIssueCommand
-	}
-	if deps.loadPodBranch == nil {
-		deps.loadPodBranch = loadPodBranchFromMCP
-	}
-	if deps.runPodRaw == nil {
-		deps.runPodRaw = runPodRawFromMCP
-	}
-	if deps.execRuntimePod == nil {
-		deps.execRuntimePod = func(ctx context.Context, selection uiSelection, script string) (string, error) {
-			return execInRuntimePodViaKubectl(ctx, selection, deps.store, script)
-		}
-	}
-	if deps.loadRuntimeUsage == nil {
-		deps.loadRuntimeUsage = func(ctx context.Context, selection uiSelection) (uiRuntimeUsage, error) {
-			return loadRuntimeUsageViaKubectl(ctx, deps.store, selection)
-		}
-	}
-	if deps.environmentUsageHistoryPath == "" {
-		deps.environmentUsageHistoryPath = defaultEnvironmentUsageHistoryPath()
-	}
-	if deps.recordActivity == nil {
-		deps.recordActivity = eruncommon.RecordEnvironmentActivity
-	}
-	if deps.stopCloudContext == nil {
-		deps.stopCloudContext = func(_ context.Context, name string) (eruncommon.CloudContextStatus, error) {
-			return eruncommon.StopCloudContext(eruncommon.Context{}, deps.store, eruncommon.CloudContextParams{Name: name}, deps.cloudContextDeps)
-		}
-	}
-	return deps
-}
-
-func withDefaultWindowAndContributeDeps(deps erunUIDeps) erunUIDeps {
-	if deps.windowStatePath == "" {
-		deps.windowStatePath = defaultAppWindowStatePath()
-	}
-	if deps.windowMaximised == nil {
-		deps.windowMaximised = runtime.WindowIsMaximised
-	}
-	if deps.cloneERun == nil {
-		deps.cloneERun = cloneERunViaMCP
-	}
-	if deps.contributeStatePath == "" {
-		deps.contributeStatePath = defaultContributeStatePath()
-	}
-	if deps.interruptedActivityPath == "" {
-		deps.interruptedActivityPath = defaultInterruptedActivityPath()
-	}
-	if deps.desktopControlMarkerPath == "" {
-		deps.desktopControlMarkerPath = eruncommon.DefaultDesktopControlMarkerPath()
-	}
-	return deps
-}
-
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	// macOS GUI launches (Finder/Dock) inherit launchd's minimal env — no
-	// Homebrew PATH, no KUBECONFIG, no AWS_* — so pull a short allowlist from the
-	// user's login shell, and do it first so every later shell-out sees the same
-	// state the user's terminal does.
+	// GUI launches inherit launchd's minimal env, so import an allowlist from the
+	// login shell before any shell-out.
 	if !a.deps.skipLoginShellEnv {
 		importLoginShellEnv()
 	}
 	configureAppIdentity("ERun")
 	observeAppActivation()
 	a.startActivityPollers()
-	a.startCloudContextStatusPoller()
-	a.startConfigWatcher()
+	a.cloudContexts.Start()
+	a.settings.StartConfigWatcher()
 	a.startRestartControl()
-	// Migrate whatever changed while this desktop was closed. Off the startup
-	// path: it is per-environment config and network I/O, and nothing on screen
-	// waits for it. See hosted_definition_upload.go.
-	go a.catchUpHostedDefinitions()
-	// Populate and keep live every linked orchestrator mirror, not only envs
-	// opened this session. Off the startup path so config/network I/O per env
-	// does not delay first paint.
-	go a.reconcileWorkspaceSyncForConfiguredEnvs()
+	go a.settings.CatchUpHostedDefinitions()
+	// Off the startup path so per-env I/O does not delay first paint.
+	go a.envops.ReconcileConfiguredWorkspaceSyncs()
 }
 
 func (a *App) shutdown(context.Context) {
-	a.stopConfigWatcher()
-	a.stopActivityPollers()
-	a.stopCloudContextStatusPoller()
-	a.stopActionRunners()
-	a.investigations.stopTimers()
+	a.settings.StopConfigWatcher()
+	a.activity.StopPollers()
+	a.cloudContexts.Stop()
+	a.activity.StopActionRunners()
+	a.investigations.StopTimers()
 	a.restartControl.Close()
 	a.releaseRestartControlMarker()
-	a.mu.Lock()
-	a.stopAllWorkspaceSyncsLocked()
-	a.stopAllCloudCredentialsRefreshersLocked()
-	a.closeAllSessionsLocked()
-	a.mu.Unlock()
-	// Every closed session's reader goroutine takes a.mu itself (via
-	// currentSessionFor) on its way out, so this must wait outside the lock
-	// above or it would deadlock against them.
-	a.sessionWG.Wait()
+	// The refreshers' and sync workers' own locks are leaves, so stop them before taking the terminal lock.
+	a.cloudContexts.StopAllRefreshers()
+	a.envops.StopAllWorkspaceSyncs()
+	a.terminal.CloseAll()
+	a.terminal.Wait()
 }
 
 func (a *App) beforeClose(ctx context.Context) bool {

@@ -9,37 +9,12 @@ import {
   setOpenRouterCatalog,
 } from '../../../fixtures/seedRoot.js';
 
-// OrchestratorConfig.UseGateway/Model/Effort ship with a reader (`erun list`),
-// CLI writers (`erun orchestrator set-gateway/set-model/set-effort`) and these
-// dialog controls. This locks the desktop half: the controls default to the
-// orchestrator's fixed defaults, persist across a real
-// CreateOrchestrator/UpdateOrchestrator round trip, survive an unrelated edit,
-// and clear back to defaults; the gateway switch is offered only once an
-// erun-level catalog exists; and a running session whose settings changed
-// under it asks for a restart.
-//
-// What a launch actually does with the settings is not observable here: the
-// inert claude stub records neither argv nor environment, and the gateway
-// credential lives in the operator secret store this harness must not touch.
-// The Go tests in erun-ui/orchestrator_launch_settings_test.go own that branch:
-// TestAnOrchestratorWithNoSettingsLaunchesExactlyAsBefore (the default command
-// and env, byte for byte), TestEveryEffortLevelReachesTheLaunchFlags,
-// TestAConfiguredModelReachesTheLaunchAndItsSubagents,
-// TestAGatewayLaunchDeliversItsCredentialOnlyThroughTheEnvironment,
-// TestAGatewayLaunchWithoutACredentialRefusesToStart,
-// TestAGatewayWithNoCatalogRefusesToStartAndKeepsTheRunningSession and
-// TestChangingLaunchSettingsOnARunningOrchestratorAsksForARestart.
-//
-// Each case creates a throwaway orchestrator and removes it again, the same
-// isolation orchestrator-platform-alias.spec.ts uses; a staged catalog is
-// restored in the same finally block so nothing leaks into a later spec on
-// this worker's root config.
+// What a launch does with these settings is not observable here; Go tests own
+// that. Each case uses a throwaway orchestrator and restores any staged catalog.
 const DEFAULT_MODEL_LABEL = 'Default (opus)';
 const DEFAULT_EFFORT_LABEL = 'Default (ultracode)';
 
-// The catalog lists a model erun knows its lanes cannot drive alongside two it
-// can. The picker must leave that one out: choosing it would be refused at
-// save, and its listing would otherwise read as an offer.
+// The picker must omit models erun cannot drive: choosing one is refused at save.
 const UNDRIVEABLE_MODEL = 'deepseek/deepseek-v4.1-flash';
 const CATALOG = {
   baseUrl: 'https://gateway.example.test/api',
@@ -60,8 +35,6 @@ test.describe('the orchestrator dialog sets how its session launches', () => {
       await app.orchestratorDialog.waitForOpen();
       await app.orchestratorDialog.toggleEnv(SEED_TENANT, SEED_ENV_ALPHA);
 
-      // The defaults are shown as defaults, naming what they resolve to, never
-      // as a value silently chosen for the operator.
       await expect(app.orchestratorDialog.gatewayCheckbox()).not.toBeChecked();
       await expect(app.orchestratorDialog.modelInput()).toHaveValue('');
       await expect(app.orchestratorDialog.modelInput()).toHaveAttribute(
@@ -75,14 +48,12 @@ test.describe('the orchestrator dialog sets how its session launches', () => {
       await app.orchestratorDialog.create(name);
       await app.orchestratorDialog.waitForClosed();
 
-      // Reopening reloads from the persisted config, which is what proves the
-      // settings survived the real CreateOrchestrator round trip.
+      // Reopening reloads from the persisted config.
       await app.sidebar.openOrchestratorDialog(name);
       await expect(app.orchestratorDialog.modelInput('Edit orchestrator')).toHaveValue('sonnet');
       await expect(app.orchestratorDialog.effortTrigger('Edit orchestrator')).toHaveText('high');
 
-      // The save replaces the whole entry, so settings the dialog did not send
-      // back would be erased by an edit that touches only the name.
+      // The save replaces the whole entry, so unsent settings would be erased.
       await app.orchestratorDialog.nameInput('Edit orchestrator').fill(renamed);
       await app.orchestratorDialog.save();
       await app.orchestratorDialog.waitForClosed('Edit orchestrator');
@@ -92,7 +63,6 @@ test.describe('the orchestrator dialog sets how its session launches', () => {
       await expect(app.orchestratorDialog.modelInput('Edit orchestrator')).toHaveValue('sonnet');
       await expect(app.orchestratorDialog.effortTrigger('Edit orchestrator')).toHaveText('high');
 
-      // Clearing both persists too: the writer is not one-way.
       await app.orchestratorDialog.modelResetButton('Edit orchestrator').click();
       await app.orchestratorDialog.setEffort(DEFAULT_EFFORT_LABEL, 'Edit orchestrator');
       await app.orchestratorDialog.save();
@@ -110,9 +80,6 @@ test.describe('the orchestrator dialog sets how its session launches', () => {
     }
   });
 
-  // A model that would reach --model as a flag is flagged where it is typed,
-  // and the save is refused with the backend's own reason rather than stored
-  // and dropped at launch.
   test('a model the launch guard refuses is flagged and its save refused', async ({ app }) => {
     const name = 'launch-settings-invalid-model';
 
@@ -127,7 +94,6 @@ test.describe('the orchestrator dialog sets how its session launches', () => {
 
       await app.orchestratorDialog.create(name);
       await expect(app.orchestratorDialog.errorAlert()).toContainText('invalid model');
-      // Still open, so the operator can correct the value they typed.
       await expect(app.orchestratorDialog.modelInput()).toBeVisible();
       await app.orchestratorDialog.cancel();
     } finally {
@@ -135,9 +101,6 @@ test.describe('the orchestrator dialog sets how its session launches', () => {
     }
   });
 
-  // `erun orchestrator set-model <id> --model default` clears the model, in any
-  // case. Typed into the free-entry field the same word must clear it too,
-  // never be stored as a literal model the launch would then refuse.
   test('typing the clearing word as the model saves the default', async ({ app }) => {
     const name = 'launch-settings-typed-default';
 
@@ -171,9 +134,7 @@ test.describe('the orchestrator dialog sets how its session launches', () => {
   test('the gateway is offered only once an erun-level catalog exists', async ({ app }) => {
     const name = 'launch-settings-gateway';
 
-    // The baseline configures no catalog. Turning the gateway on would be
-    // refused at save and at launch, so the switch is disabled and says where
-    // the catalog is configured.
+    // The baseline configures no catalog, so the gateway switch is disabled.
     await app.sidebar.newOrchestratorButton().click();
     await app.orchestratorDialog.waitForOpen();
     await expect(app.orchestratorDialog.gatewayCheckbox()).toBeDisabled();
@@ -193,8 +154,6 @@ test.describe('the orchestrator dialog sets how its session launches', () => {
 
       await app.orchestratorDialog.gatewayCheckbox().check();
 
-      // Through the gateway the model is a pick from the catalog, and the
-      // default names the catalog's own default rather than opus.
       await expect(app.orchestratorDialog.modelTrigger()).toHaveText(
         `Default (${CATALOG.defaultModel})`,
       );
@@ -212,7 +171,6 @@ test.describe('the orchestrator dialog sets how its session launches', () => {
       await expect(app.orchestratorDialog.gatewayCheckbox('Edit orchestrator')).toBeChecked();
       await expect(app.orchestratorDialog.modelTrigger('Edit orchestrator')).toHaveText(chosen);
 
-      // Off the gateway the stored model stays visible, now as free entry.
       await app.orchestratorDialog.gatewayCheckbox('Edit orchestrator').uncheck();
       await expect(app.orchestratorDialog.modelInput('Edit orchestrator')).toHaveValue(chosen);
       await app.orchestratorDialog.cancel('Edit orchestrator');
@@ -223,10 +181,6 @@ test.describe('the orchestrator dialog sets how its session launches', () => {
   });
 });
 
-// A running session fixes its gateway, model and effort when it launches. The
-// backend's comparison of what it launched with against what is configured is
-// covered by TestChangingLaunchSettingsOnARunningOrchestratorAsksForARestart;
-// this covers the rendering and the control the operator gets to resolve it.
 const RUNNING_SESSION_ID = 7474;
 
 function runningSnapshot(overrides: Record<string, unknown> = {}) {
@@ -274,8 +228,7 @@ test.describe('a running orchestrator whose launch settings changed under it', (
     await stubOrchestratorList(page, runningSnapshot());
     await app.reboot();
 
-    // Not a scope change, so the sidebar keeps its plain running light: the
-    // session still holds every tool it should.
+    // Not a scope change, so the sidebar keeps its plain running light.
     await expect(app.sidebar.orchestratorStatusDot(SEED_ORCHESTRATOR, 'running')).toBeVisible();
 
     await app.sidebar.openOrchestratorDialog(SEED_ORCHESTRATOR);
@@ -283,7 +236,6 @@ test.describe('a running orchestrator whose launch settings changed under it', (
     await expect(app.orchestratorDialog.launchSettingsRestartNowButton()).toBeVisible();
     await expect(app.orchestratorDialog.restartRequiredNotice()).toHaveCount(0);
     await expect(app.orchestratorDialog.footerRestartButton()).toHaveText('Restart to apply');
-    // The form shows the configured value, not what the session launched with.
     await expect(app.orchestratorDialog.effortTrigger('Edit orchestrator')).toHaveText('high');
 
     let restartedID = '';
@@ -324,9 +276,6 @@ test.describe('a running orchestrator whose launch settings changed under it', (
   });
 });
 
-// The dialog reads the catalog when it opens. A read that fails is reported
-// once, in the backend's own words, with a way to recover in place; and a
-// stored model the catalog names as undriveable reads as that before a save.
 const CATALOG_READ_ERROR =
   'cannot read the gateway catalog from the ERun settings: yaml: line 4: did not find expected key';
 
@@ -363,12 +312,11 @@ test.describe('the orchestrator dialog reports what the gateway catalog cannot o
     await expect(
       app.orchestratorDialog.textOccurrences('Correct the gateway settings', mode),
     ).toBeVisible();
-    // A stored "on" stays switchable off: turning it off needs no catalog.
+    // Turning the gateway off needs no catalog.
     await expect(app.orchestratorDialog.gatewayCheckbox(mode)).toBeChecked();
     await expect(app.orchestratorDialog.gatewayCheckbox(mode)).toBeEnabled();
 
-    // The real read answers the retry: the baseline has no catalog, so the
-    // stored "on" now reads as the problem it is instead of a read failure.
+    // The baseline has no catalog, so the retry reports that instead of a read failure.
     await app.orchestratorDialog.gatewayRetryButton(mode).click();
     await expect(app.orchestratorDialog.gatewayHelp(mode)).toContainText(
       'No gateway catalog is configured, so this orchestrator cannot start through it',
@@ -411,7 +359,6 @@ test.describe('the orchestrator dialog reports what the gateway catalog cannot o
         `The gateway cannot drive ${UNDRIVEABLE_MODEL}`,
       );
 
-      // Choosing a model the gateway can drive clears the flag.
       await app.orchestratorDialog.setGatewayModel(DRIVEABLE_MODELS[0] ?? '', mode);
       await expect(app.orchestratorDialog.modelTrigger(mode)).toHaveAttribute(
         'aria-invalid',

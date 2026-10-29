@@ -4,40 +4,61 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/adrg/xdg"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/command/lifecycle/stop"
+	"github.com/sophium/erun/erun-common/infra/activity/records"
+	"github.com/sophium/erun/erun-common/infra/kube"
+	"github.com/sophium/erun/erun-ui/internal/envops"
+	"github.com/sophium/erun/erun-ui/internal/runtimeview"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
-
-// These tests lock the repair for the failure that has no other witness: an
-// environment that was open loses the port-forward carrying its MCP edge, and
-// nothing starts a replacement. Both shapes are covered, because both produce
-// the same silence. The pod replacement usually makes kubectl exit outright and
-// free the local port (dropped), which every check reads as an environment
-// nobody opened; occasionally the listener outlives its far end (stale), which
-// every check that stops at the listener reads as healthy.
-//
-// The behaviours below are the contract: a dropped forward and a bound-but-dead
-// one are both re-established, a working one is left alone, an environment that
-// was never opened is not touched at all, a repair that cannot succeed reports
-// instead of looping, and an environment the operator stopped is not woken by
-// any of it.
 
 const forwardRepairTestPort = 17500
 
-// forwardRepairProbe is the environment's side of the sweep: whether anything
-// holds its local port, whether its edge answers, and how many rebinds the
-// desktop has asked for. hold, when set, keeps a rebind in flight until the
-// test releases it; repairs, when set, makes a rebind actually work, which is
-// what `erun open --reconnect` does when the runtime is there to reconnect to.
+func seedMCPForward(t *testing.T, tenant, environment string, port int) {
+	t.Helper()
+	// Redirect both roots os.UserConfigDir consults.
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("HOME", root)
+	// adrg/xdg caches ConfigHome at init, so Reload is needed; the
+	// environmentIsConfigured guard reads the real on-disk ConfigStore.
+	xdg.Reload()
+	t.Cleanup(xdg.Reload)
+	if err := config.SaveEnvConfig(tenant, config.EnvConfig{Name: environment}); err != nil {
+		t.Fatalf("SaveEnvConfig: %v", err)
+	}
+	path, err := kube.PortForwardStatePath("mcp", tenant, environment)
+	if err != nil {
+		t.Fatalf("PortForwardStatePath: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	data, err := json.Marshal(model.PortForwardState{
+		Tenant: tenant, Environment: environment, LocalPort: port,
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+}
+
+// hold keeps a rebind in flight until released; repairs makes a rebind succeed.
 type forwardRepairProbe struct {
-	mu sync.Mutex
-	// forwardDropped is the ordinary shape of the failure: kubectl exited with
-	// the pod it targeted, so nothing holds the local port at all. The zero
-	// value is the rarer one — a listener that is still bound.
+	mu             sync.Mutex
 	forwardDropped bool
 	edgeAnswers    bool
 	repairs        bool
@@ -87,19 +108,18 @@ func (p *forwardRepairProbe) reconnect() error {
 func forwardRepairTestApp(
 	t *testing.T,
 	probe *forwardRepairProbe,
-	readRunState func(eruncommon.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error),
+	readRunState func(core.Context, stop.RuntimeScaleTarget) (stop.RuntimeRunState, error),
 ) (*App, *capturedEmits) {
 	t.Helper()
 	seedMCPForward(t, "erun", "remote", forwardRepairTestPort)
 	emits := newCapturedEmits()
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
-			// "fresh" is configured and has no recorded forward: the environment
-			// nobody opened, which the sweep must leave entirely alone.
+		envs: map[string]config.EnvConfig{
+			// "fresh" has no recorded forward: never opened here.
 			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
 			"erun/fresh":  {Name: "fresh", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
 		},
@@ -110,27 +130,22 @@ func forwardRepairTestApp(
 		resolveCLIPath:      func() string { return "/tmp/erun" },
 		canConnectLocalPort: func(int) bool { return probe.bound() },
 		canReachMCPEndpoint: func(int) bool { return probe.answers() },
-		loadIdleStatus: func(context.Context, string, string) (eruncommon.EnvironmentIdleStatus, error) {
+		loadIdleStatus: func(context.Context, string, string) (model.EnvironmentIdleStatus, error) {
 			if !probe.answers() {
-				return eruncommon.EnvironmentIdleStatus{}, errors.New("edge did not answer")
+				return model.EnvironmentIdleStatus{}, errors.New("edge did not answer")
 			}
-			return eruncommon.EnvironmentIdleStatus{
-				Markers: []eruncommon.EnvironmentIdleMarker{{Name: eruncommon.ActivityKindProcess, Idle: true}},
+			return model.EnvironmentIdleStatus{
+				Markers: []model.EnvironmentIdleMarker{{Name: records.ActivityKindProcess, Idle: true}},
 			}, nil
 		},
-		reconnectMCP: func(context.Context, eruncommon.OpenResult, func(string)) error {
+		reconnectMCP: func(context.Context, config.OpenResult, func(string)) error {
 			return probe.reconnect()
 		},
 		readRuntimeRunState: readRunState,
-		// Only "erun/fresh" (no seeded forward) ever reaches this: every other
-		// selection in this file has a forward state file seeded above, so it
-		// resolves through the reachable/outage branches this file exists to
-		// test and never falls back to a pod probe. Idle-and-not-busy is a
-		// neutral default so that fallback answering does not itself look like
-		// a failure in tests that do not care about it.
-		execRuntimePod: func(context.Context, uiSelection, string) (string, error) {
-			data, err := json.Marshal(eruncommon.EnvironmentIdleStatus{
-				Markers: []eruncommon.EnvironmentIdleMarker{{Name: eruncommon.ActivityKindProcess, Idle: true}},
+		// Only "erun/fresh" reaches the pod fallback; answer idle as a neutral default.
+		execRuntimePod: func(context.Context, uimodel.Selection, string) (string, error) {
+			data, err := json.Marshal(model.EnvironmentIdleStatus{
+				Markers: []model.EnvironmentIdleMarker{{Name: records.ActivityKindProcess, Idle: true}},
 			})
 			if err != nil {
 				return "", err
@@ -138,37 +153,31 @@ func forwardRepairTestApp(
 			return string(data), nil
 		},
 	})
-	// A non-nil ctx un-gates the rebind (it no-ops while ctx is nil); the
-	// emitter must be stubbed alongside it or emits reach the real Wails
-	// runtime outside a lifecycle context.
+	// A non-nil ctx un-gates the rebind; stub the emitter so emits avoid the real
+	// Wails runtime.
 	app.ctx = context.Background()
 	app.SetEmitter(emits.fn())
 	t.Cleanup(func() { app.shutdown(context.Background()) })
 	return app, emits
 }
 
-func forwardRepairSelection() uiSelection {
-	return uiSelection{Tenant: "erun", Environment: "remote"}
+func forwardRepairSelection() uimodel.Selection {
+	return uimodel.Selection{Tenant: "erun", Environment: "remote"}
 }
 
-// sweepUntilRebindSettles runs one sweep and waits for whatever rebind it
-// started to finish, so the next sweep is not silently suppressed by the
-// in-flight latch. Bounded by a real condition, never by a fixed sleep.
-func sweepUntilRebindSettles(t *testing.T, app *App) environmentActivityState {
+// sweepUntilRebindSettles waits for the started rebind so the in-flight latch
+// does not suppress the next sweep.
+func sweepUntilRebindSettles(t *testing.T, app *App) runtimeview.ActivityState {
 	t.Helper()
 	return sweepEnvUntilRebindSettles(t, app, forwardRepairSelection())
 }
 
-func sweepEnvUntilRebindSettles(t *testing.T, app *App, selection uiSelection) environmentActivityState {
+func sweepEnvUntilRebindSettles(t *testing.T, app *App, selection uimodel.Selection) runtimeview.ActivityState {
 	t.Helper()
-	state := app.observeEnvironmentActivity(selection).state
-	key := selectionKey(selection)
+	state := app.runtime.ObserveActivity(selection)
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		app.envEnsureMu.Lock()
-		_, inflight := app.envEnsureInflight[key]
-		app.envEnsureMu.Unlock()
-		if !inflight {
+		if !app.envops.EnsureInFlight(selection) {
 			return state
 		}
 		time.Sleep(5 * time.Millisecond)
@@ -189,52 +198,39 @@ func waitForReconnects(t *testing.T, probe *forwardRepairProbe, want int) {
 	t.Fatalf("rebind count = %d, want %d", probe.count(), want)
 }
 
-// TestDroppedForwardIsRestarted is the common case, and the one that used to be
-// silent: a pod replacement takes the forward with it, so the local port is
-// free and the environment answers nobody. The sweep that finds it starts a
-// replacement, and once that lands the environment is reachable again with the
-// episode closed behind it.
 func TestDroppedForwardIsRestarted(t *testing.T) {
 	probe := &forwardRepairProbe{forwardDropped: true, repairs: true}
 	app, emits := forwardRepairTestApp(t, probe, nil)
 
 	state := sweepUntilRebindSettles(t, app)
-	if state.reachable {
+	if state.Reachable {
 		t.Fatal("a forward whose port nothing holds is not reachable")
 	}
-	if state.outage {
+	if state.Outage {
 		t.Fatal("the first failing sweep restarts the forward; it does not yet diagnose it")
 	}
 	waitForReconnects(t, probe, 1)
 
-	// The replacement is up. The environment answers again, and no further
-	// rebinds are spent on it.
 	state = sweepUntilRebindSettles(t, app)
-	if !state.reachable || !state.observed {
+	if !state.Reachable || !state.Observed {
 		t.Fatalf("a restarted forward makes the environment reachable and observed, got %+v", state)
 	}
 	if got := probe.count(); got != 1 {
 		t.Fatalf("restarting one dropped forward took %d rebinds, want 1", got)
 	}
-	if got := notificationsFromSource(emits, notificationSourceForwardOutage); len(got) != 0 {
+	if got := notificationsFromSource(emits, envops.SourceForwardOutage); len(got) != 0 {
 		t.Fatalf("a forward that was restarted reported %d outages, want 0", len(got))
 	}
 }
 
-// TestDroppedForwardIsNotRestartedTwiceByOverlappingSweeps is the idempotency
-// half: two sweeps landing while one repair is still running must not put two
-// forwards on one local port.
 func TestDroppedForwardIsNotRestartedTwiceByOverlappingSweeps(t *testing.T) {
 	probe := &forwardRepairProbe{forwardDropped: true, hold: make(chan struct{})}
 	app, _ := forwardRepairTestApp(t, probe, nil)
 
-	app.observeEnvironmentActivity(forwardRepairSelection())
+	app.runtime.ObserveActivity(forwardRepairSelection())
 	waitForReconnects(t, probe, 1)
 
-	// The repair is still in flight. A second sweep must not race it for the
-	// port — one rebind per environment at a time is what keeps two forwards
-	// off one local port.
-	app.observeEnvironmentActivity(forwardRepairSelection())
+	app.runtime.ObserveActivity(forwardRepairSelection())
 	close(probe.hold)
 	waitForReconnects(t, probe, 1)
 	if got := probe.count(); got != 1 {
@@ -242,60 +238,46 @@ func TestDroppedForwardIsNotRestartedTwiceByOverlappingSweeps(t *testing.T) {
 	}
 }
 
-// TestUnopenedEnvironmentIsProbedButNeverRebound is the guard the dropped case
-// makes load-bearing: "no forward is bound" describes an environment nobody
-// opened here and an environment whose forward just died equally well, and
-// only the second may trigger the rebind/reconnect machinery this file exists
-// to test. It no longer describes "reports nothing" — an environment nobody
-// opened here can still be busy right now (a CLI orchestrator, an agent
-// driving it over MCP from another machine), so the sweep asks it directly
-// over its runtime pod instead of leaving it silent. What must stay true is
-// that this read-only ask never feeds the forward-repair episode: no rebind,
-// no outage, because there was never a forward here to repair.
+// An unopened environment may be asked over its pod but never feeds a repair.
 func TestUnopenedEnvironmentIsProbedButNeverRebound(t *testing.T) {
 	probe := &forwardRepairProbe{forwardDropped: true, repairs: true}
 	app, emits := forwardRepairTestApp(t, probe, nil)
-	unopened := uiSelection{Tenant: "erun", Environment: "fresh"}
+	unopened := uimodel.Selection{Tenant: "erun", Environment: "fresh"}
 
-	for range forwardRepairAttempts + 2 {
+	for range envops.ForwardRepairAttempts + 2 {
 		state := sweepEnvUntilRebindSettles(t, app, unopened)
-		if state.outage || state.checkFailed {
+		if state.Outage || state.CheckFailed {
 			t.Fatalf("a successful pod probe is neither an outage nor a failed check, got %+v", state)
 		}
-		if !state.reachable || !state.observed || state.busy {
+		if !state.Reachable || !state.Observed || state.Busy {
 			t.Fatalf("an idle pod probe reports the environment idle, got %+v", state)
 		}
 	}
 	if got := probe.count(); got != 0 {
 		t.Fatalf("an environment with no recorded forward was rebound %d times, want 0", got)
 	}
-	if got := notificationsFromSource(emits, notificationSourceForwardOutage); len(got) != 0 {
+	if got := notificationsFromSource(emits, envops.SourceForwardOutage); len(got) != 0 {
 		t.Fatalf("an environment with no recorded forward reported %d outages, want 0", len(got))
 	}
 }
 
-// TestStaleForwardIsReestablishedWithoutDuplicatingIt is the rarer shape: the
-// forward keeps its local port bound while its far end is gone, so every check
-// that stops at the listener calls it healthy. The sweep re-establishes it, and
-// a second sweep landing while that repair is still running does not start a
-// competing one for the same local port.
 func TestStaleForwardIsReestablishedWithoutDuplicatingIt(t *testing.T) {
 	probe := &forwardRepairProbe{hold: make(chan struct{})}
 	app, _ := forwardRepairTestApp(t, probe, nil)
 
-	state := app.observeEnvironmentActivity(forwardRepairSelection()).state
-	if !state.reachable {
+	state := app.runtime.ObserveActivity(forwardRepairSelection())
+	if !state.Reachable {
 		t.Fatal("a forward whose port is held is still reachable; that is exactly what makes it deceptive")
 	}
-	if state.observed {
+	if state.Observed {
 		t.Fatal("an edge that answers nothing has not answered the idle question")
 	}
-	if state.outage {
+	if state.Outage {
 		t.Fatal("the first failing sweep repairs the forward; it does not yet diagnose it as unrepairable")
 	}
 	waitForReconnects(t, probe, 1)
 
-	app.observeEnvironmentActivity(forwardRepairSelection())
+	app.runtime.ObserveActivity(forwardRepairSelection())
 	close(probe.hold)
 	waitForReconnects(t, probe, 1)
 	if got := probe.count(); got != 1 {
@@ -303,21 +285,16 @@ func TestStaleForwardIsReestablishedWithoutDuplicatingIt(t *testing.T) {
 	}
 }
 
-// TestServingForwardIsLeftAlone covers the other half of "detect it honestly":
-// a forward that carries traffic is never restarted, including when the idle
-// question itself fails. An edge that replies at all is a live tunnel, and
-// restarting one on the strength of a failed query would trade an outage
-// nobody repairs for an outage the desktop causes.
 func TestServingForwardIsLeftAlone(t *testing.T) {
 	probe := &forwardRepairProbe{edgeAnswers: true}
 	app, _ := forwardRepairTestApp(t, probe, nil)
 
 	for range 3 {
 		state := sweepUntilRebindSettles(t, app)
-		if !state.reachable || !state.observed {
+		if !state.Reachable || !state.Observed {
 			t.Fatalf("an environment that answered is reachable and observed, got %+v", state)
 		}
-		if state.outage {
+		if state.Outage {
 			t.Fatal("an environment that answered is not a broken forward")
 		}
 	}
@@ -325,17 +302,15 @@ func TestServingForwardIsLeftAlone(t *testing.T) {
 		t.Fatalf("a working forward was restarted %d times, want 0", got)
 	}
 
-	// The fussy-edge case: the tunnel carries traffic, but the idle query
-	// against it fails. That is a question the environment declined, not a
-	// forward pointed at a vanished pod.
-	app.deps.loadIdleStatus = func(context.Context, string, string) (eruncommon.EnvironmentIdleStatus, error) {
-		return eruncommon.EnvironmentIdleStatus{}, errors.New("401 unauthorized")
+	// The tunnel carries traffic but the idle query fails.
+	app.deps.loadIdleStatus = func(context.Context, string, string) (model.EnvironmentIdleStatus, error) {
+		return model.EnvironmentIdleStatus{}, errors.New("401 unauthorized")
 	}
 	state := sweepUntilRebindSettles(t, app)
-	if !state.reachable || state.observed {
+	if !state.Reachable || state.Observed {
 		t.Fatalf("a declined idle query is reachable without a verdict, got %+v", state)
 	}
-	if state.outage {
+	if state.Outage {
 		t.Fatal("an edge that replies is not a broken forward")
 	}
 	if got := probe.count(); got != 0 {
@@ -343,48 +318,38 @@ func TestServingForwardIsLeftAlone(t *testing.T) {
 	}
 }
 
-// TestUnrepairableForwardReportsInsteadOfLooping locks the bound, on the shape
-// that produces it most often: a dropped forward the repair cannot bring back
-// stops being retried and starts being reported — once — and the row renders it
-// as an outage rather than as an environment nobody opened. Recovering ends the
-// episode and retires the report.
 func TestUnrepairableForwardReportsInsteadOfLooping(t *testing.T) {
 	probe := &forwardRepairProbe{forwardDropped: true}
 	app, emits := forwardRepairTestApp(t, probe, nil)
 
-	for attempt := range forwardRepairAttempts {
-		if state := sweepUntilRebindSettles(t, app); state.outage {
+	for attempt := range envops.ForwardRepairAttempts {
+		if state := sweepUntilRebindSettles(t, app); state.Outage {
 			t.Fatalf("sweep %d diagnosed the forward while attempts remained", attempt+1)
 		}
 	}
-	if got := probe.count(); got != forwardRepairAttempts {
-		t.Fatalf("rebind count = %d, want the episode's bound of %d", got, forwardRepairAttempts)
+	if got := probe.count(); got != envops.ForwardRepairAttempts {
+		t.Fatalf("rebind count = %d, want the episode's bound of %d", got, envops.ForwardRepairAttempts)
 	}
 
-	// Attempts are spent. From here the sweep reports and stops spending.
 	for range 3 {
 		state := sweepUntilRebindSettles(t, app)
-		if !state.outage {
+		if !state.Outage {
 			t.Fatal("an exhausted episode must render the environment as unreachable, not as unopened")
 		}
-		if state.reachable {
+		if state.Reachable {
 			t.Fatal("a dropped forward is not reachable; the outage is what carries the row")
 		}
 	}
-	if got := probe.count(); got != forwardRepairAttempts {
-		t.Fatalf("the repair kept looping: %d rebinds, want it bounded at %d", got, forwardRepairAttempts)
+	if got := probe.count(); got != envops.ForwardRepairAttempts {
+		t.Fatalf("the repair kept looping: %d rebinds, want it bounded at %d", got, envops.ForwardRepairAttempts)
 	}
 
-	// The message has to name which failure it is: a port nothing holds and a
-	// port held by something silent send a reader to different places.
 	assertOneOutageNotification(t, emits, "is gone and nothing holds the port")
 }
 
-// assertOneOutageNotification checks the one report an episode gets, and that
-// it describes the fault it found rather than the family it belongs to.
 func assertOneOutageNotification(t *testing.T, emits *capturedEmits, fault string) {
 	t.Helper()
-	notes := notificationsFromSource(emits, notificationSourceForwardOutage)
+	notes := notificationsFromSource(emits, envops.SourceForwardOutage)
 	if len(notes) != 1 {
 		t.Fatalf("outage notification posted %d times, want exactly 1 per episode", len(notes))
 	}
@@ -396,53 +361,43 @@ func assertOneOutageNotification(t *testing.T, emits *capturedEmits, fault strin
 	}
 }
 
-// TestUnrepairableStaleForwardReportsItsOwnFault is the sibling: the same bound
-// and the same single report, described as the fault it actually is.
 func TestUnrepairableStaleForwardReportsItsOwnFault(t *testing.T) {
 	probe := &forwardRepairProbe{}
 	app, emits := forwardRepairTestApp(t, probe, nil)
 
-	for range forwardRepairAttempts + 1 {
+	for range envops.ForwardRepairAttempts + 1 {
 		sweepUntilRebindSettles(t, app)
 	}
 	assertOneOutageNotification(t, emits, "holds the local port but its edge never answers")
 }
 
-// TestRecoveredForwardEndsTheEpisode is the other side of the bound: an
-// exhausted episode must not be a permanent verdict. A forward that carries
-// traffic again retires its report, and the next failure is repaired from zero
-// rather than reported on sight.
 func TestRecoveredForwardEndsTheEpisode(t *testing.T) {
 	probe := &forwardRepairProbe{}
 	app, emits := forwardRepairTestApp(t, probe, nil)
 
-	for range forwardRepairAttempts + 1 {
+	for range envops.ForwardRepairAttempts + 1 {
 		sweepUntilRebindSettles(t, app)
 	}
 
 	probe.setAnswers(true)
-	if state := sweepUntilRebindSettles(t, app); state.outage {
+	if state := sweepUntilRebindSettles(t, app); state.Outage {
 		t.Fatal("a forward that carries traffic again is not broken")
 	}
-	if got := len(clearedNotificationSources(emits, notificationSourceForwardOutage)); got != 1 {
+	if got := len(clearedNotificationSources(emits, envops.SourceForwardOutage)); got != 1 {
 		t.Fatalf("recovery cleared the outage notification %d times, want 1", got)
 	}
 
 	probe.setAnswers(false)
-	if state := sweepUntilRebindSettles(t, app); state.outage {
+	if state := sweepUntilRebindSettles(t, app); state.Outage {
 		t.Fatal("a fresh failure must be repaired before it is reported")
 	}
-	if got := probe.count(); got != forwardRepairAttempts+1 {
+	if got := probe.count(); got != envops.ForwardRepairAttempts+1 {
 		t.Fatalf("rebind count = %d, want a fresh episode's first attempt", got)
 	}
 }
 
-// TestStoppedEnvironmentIsNotResurrected is the guard on the repair's blast
-// radius, and it applies to the dropped shape most of all: stopping an
-// environment frees its local port, so a stop is indistinguishable from the
-// failure this repair exists for unless the cluster is asked. A stopped
-// environment's forward is *supposed* to be dead, and repairing it would undo
-// the operator's own stop and rewrite it as an outage.
+// A stop frees the local port exactly like the failure, so only the cluster
+// can tell them apart.
 func TestStoppedEnvironmentIsNotResurrected(t *testing.T) {
 	for _, testCase := range []struct {
 		name    string
@@ -454,29 +409,29 @@ func TestStoppedEnvironmentIsNotResurrected(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			probe := &forwardRepairProbe{forwardDropped: testCase.dropped}
 			app, emits := forwardRepairTestApp(t, probe,
-				func(eruncommon.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error) {
-					return eruncommon.RuntimeRunState{Present: true, DesiredReplicas: 0}, nil
+				func(core.Context, stop.RuntimeScaleTarget) (stop.RuntimeRunState, error) {
+					return stop.RuntimeRunState{Present: true, DesiredReplicas: 0}, nil
 				})
 
-			for range forwardRepairAttempts + 2 {
-				if state := sweepUntilRebindSettles(t, app); state.outage {
+			for range envops.ForwardRepairAttempts + 2 {
+				if state := sweepUntilRebindSettles(t, app); state.Outage {
 					t.Fatal("a stopped environment is stopped, not an unreachable one")
 				}
 			}
 			if got := probe.count(); got != 0 {
 				t.Fatalf("a stopped environment was woken by %d rebinds, want 0", got)
 			}
-			if got := notificationsFromSource(emits, notificationSourceForwardOutage); len(got) != 0 {
+			if got := notificationsFromSource(emits, envops.SourceForwardOutage); len(got) != 0 {
 				t.Fatalf("a stopped environment reported %d outages, want 0", len(got))
 			}
 		})
 	}
 }
 
-func notificationsFromSource(emits *capturedEmits, source string) []appNotificationPayload {
-	var out []appNotificationPayload
-	for _, event := range emits.events(appNotificationEvent) {
-		note, ok := event.(appNotificationPayload)
+func notificationsFromSource(emits *capturedEmits, source string) []uimodel.AppNotificationPayload {
+	var out []uimodel.AppNotificationPayload
+	for _, event := range emits.events(uimodel.AppNotificationEvent) {
+		note, ok := event.(uimodel.AppNotificationPayload)
 		if ok && note.Source == source {
 			out = append(out, note)
 		}
@@ -484,10 +439,10 @@ func notificationsFromSource(emits *capturedEmits, source string) []appNotificat
 	return out
 }
 
-func clearedNotificationSources(emits *capturedEmits, source string) []appNotificationClearPayload {
-	var out []appNotificationClearPayload
-	for _, event := range emits.events(appNotificationClearEvent) {
-		cleared, ok := event.(appNotificationClearPayload)
+func clearedNotificationSources(emits *capturedEmits, source string) []uimodel.AppNotificationClearPayload {
+	var out []uimodel.AppNotificationClearPayload
+	for _, event := range emits.events(uimodel.AppNotificationClearEvent) {
+		cleared, ok := event.(uimodel.AppNotificationClearPayload)
 		if ok && cleared.Source == source {
 			out = append(out, cleared)
 		}

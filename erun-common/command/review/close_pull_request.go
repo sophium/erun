@@ -1,0 +1,237 @@
+package review
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/infra/registry"
+)
+
+// ClosePullRequestHeadMovedError reports that the pull request head no longer
+// matches GatedCommit, so closing would discard unbuilt work.
+type ClosePullRequestHeadMovedError struct {
+	Branch, GatedCommit, ActualHead string
+	Number                          int
+}
+
+func (e *ClosePullRequestHeadMovedError) Error() string {
+	return fmt.Sprintf(
+		"refusing to close pull request #%d for %s: its head is %s, not %s -- the commit the gate actually tested. Something pushed to %s after the gate fetched it, so the gated content is not what closing would discard.",
+		e.Number, e.Branch, e.ActualHead, e.GatedCommit, e.Branch,
+	)
+}
+
+// ClosePullRequestDependencies are the HTTP and gh token seams.
+type ClosePullRequestDependencies struct {
+	Client       *http.Client
+	ResolveToken func(owner string) (string, bool)
+}
+
+func normalizeClosePullRequestDependencies(deps ClosePullRequestDependencies) ClosePullRequestDependencies {
+	if deps.Client == nil {
+		deps.Client = &http.Client{Timeout: 15 * time.Second}
+	}
+	if deps.ResolveToken == nil {
+		deps.ResolveToken = resolveGitHubAPIToken
+	}
+	return deps
+}
+
+type closePullRequestInputs struct {
+	branch, target, gatedCommit, landingCommit string
+	owner, repo                                string
+}
+
+func resolveClosePullRequestInputs(ctx core.Context, params model.ClosePullRequestParams) (closePullRequestInputs, error) {
+	ctx.Trace("close-pr: resolving inputs")
+	inputs := closePullRequestInputs{
+		branch:        strings.TrimSpace(params.Branch),
+		target:        strings.TrimSpace(params.TargetBranch),
+		gatedCommit:   strings.TrimSpace(params.GatedCommit),
+		landingCommit: strings.TrimSpace(params.LandingCommit),
+	}
+	if inputs.branch == "" || inputs.target == "" || inputs.gatedCommit == "" || inputs.landingCommit == "" {
+		ctx.Trace("close-pr: input resolution failed: branch, target branch, gated commit, and landing commit are all required")
+		return closePullRequestInputs{}, fmt.Errorf("branch, target branch, gated commit, and landing commit are all required")
+	}
+
+	ctx.Trace("close-pr: resolving owner/repo from remote-url")
+	owner, repo, err := parseGitHubOwnerRepo(params.RemoteURL)
+	if err != nil {
+		ctx.Trace("close-pr: remote-url resolution failed: " + err.Error())
+		return closePullRequestInputs{}, err
+	}
+	ctx.Trace(fmt.Sprintf("close-pr: owner = %s, repo = %s", owner, repo))
+	inputs.owner, inputs.repo = owner, repo
+	return inputs, nil
+}
+
+// ClosePullRequest comments LandingCommit on Branch's open pull request and
+// closes it, unless its head moved past GatedCommit.
+func ClosePullRequest(ctx core.Context, params model.ClosePullRequestParams, deps ClosePullRequestDependencies) (model.ClosePullRequestResult, error) {
+	inputs, err := resolveClosePullRequestInputs(ctx, params)
+	if err != nil {
+		return model.ClosePullRequestResult{}, err
+	}
+	deps = normalizeClosePullRequestDependencies(deps)
+	result := model.ClosePullRequestResult{Owner: inputs.owner, Repo: inputs.repo, Branch: inputs.branch}
+
+	listURL := githubListPullRequestsURL(inputs.owner, inputs.repo, inputs.branch, inputs.target)
+	ctx.Trace("github: GET " + listURL)
+	if ctx.DryRun {
+		return result, nil
+	}
+
+	ctx.Trace("close-pr: resolving a github token")
+	token, ok := deps.ResolveToken(inputs.owner)
+	if !ok {
+		ctx.Trace("close-pr: token resolution failed: no gh CLI session or GITHUB_TOKEN/GH_TOKEN set")
+		return model.ClosePullRequestResult{}, fmt.Errorf(
+			"no GitHub token available to close a pull request; run 'gh auth login' or set GITHUB_TOKEN")
+	}
+	return findAndClosePullRequest(ctx, deps, listURL, token, inputs, result)
+}
+
+func findAndClosePullRequest(ctx core.Context, deps ClosePullRequestDependencies, listURL, token string, inputs closePullRequestInputs, result model.ClosePullRequestResult) (model.ClosePullRequestResult, error) {
+	pulls, err := listOpenGitHubPullRequests(context.Background(), deps.Client, token, listURL, inputs.owner, inputs.repo)
+	if err != nil {
+		return model.ClosePullRequestResult{}, err
+	}
+	if len(pulls) == 0 {
+		ctx.Trace(fmt.Sprintf("close-pr: no open pull request for %s -> %s, nothing to close", inputs.branch, inputs.target))
+		return result, nil
+	}
+	if len(pulls) > 1 {
+		return model.ClosePullRequestResult{}, fmt.Errorf(
+			"found %d open pull requests for %s -> %s; expected at most one", len(pulls), inputs.branch, inputs.target)
+	}
+	pull := pulls[0]
+	result.Number = pull.Number
+
+	if pull.Head.SHA != inputs.gatedCommit {
+		return model.ClosePullRequestResult{}, &ClosePullRequestHeadMovedError{
+			Branch: inputs.branch, GatedCommit: inputs.gatedCommit, ActualHead: pull.Head.SHA, Number: pull.Number,
+		}
+	}
+
+	comment := fmt.Sprintf("Merged via the erun merge queue as %s on %s.", inputs.landingCommit, inputs.target)
+	if err := postGitHubIssueComment(context.Background(), deps.Client, token, inputs.owner, inputs.repo, pull.Number, comment); err != nil {
+		return model.ClosePullRequestResult{}, err
+	}
+	if err := closeGitHubPullRequest(context.Background(), deps.Client, token, inputs.owner, inputs.repo, pull.Number); err != nil {
+		return model.ClosePullRequestResult{}, err
+	}
+
+	result.Found = true
+	result.Closed = true
+	return result, nil
+}
+
+type githubPullRequest struct {
+	Number int `json:"number"`
+	Head   struct {
+		SHA string `json:"sha"`
+	} `json:"head"`
+}
+
+func githubListPullRequestsURL(owner, repo, branch, target string) string {
+	query := url.Values{
+		"head":  {owner + ":" + branch},
+		"base":  {target},
+		"state": {"open"},
+	}
+	return fmt.Sprintf("%srepos/%s/%s/pulls?%s", registry.GithubAPIBaseURL, owner, repo, query.Encode())
+}
+
+func listOpenGitHubPullRequests(ctx context.Context, client *http.Client, token, listURL, owner, repo string) ([]githubPullRequest, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, listURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build github list pull requests request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("list pull requests from github: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		var respBody bytes.Buffer
+		_, _ = respBody.ReadFrom(resp.Body)
+		return nil, fmt.Errorf("github returned %d listing pull requests for %s/%s: %s",
+			resp.StatusCode, owner, repo, strings.TrimSpace(respBody.String()))
+	}
+	var pulls []githubPullRequest
+	if err := json.NewDecoder(resp.Body).Decode(&pulls); err != nil {
+		return nil, fmt.Errorf("decode github pull requests response: %w", err)
+	}
+	return pulls, nil
+}
+
+func postGitHubIssueComment(ctx context.Context, client *http.Client, token, owner, repo string, number int, body string) error {
+	encoded, err := json.Marshal(struct {
+		Body string `json:"body"`
+	}{Body: body})
+	if err != nil {
+		return fmt.Errorf("encode pull request comment body: %w", err)
+	}
+	url := fmt.Sprintf("%srepos/%s/%s/issues/%d/comments", registry.GithubAPIBaseURL, owner, repo, number)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(encoded))
+	if err != nil {
+		return fmt.Errorf("build github issue comment request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("post pull request comment to github: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		var respBody bytes.Buffer
+		_, _ = respBody.ReadFrom(resp.Body)
+		return fmt.Errorf("github returned %d commenting on %s/%s#%d: %s",
+			resp.StatusCode, owner, repo, number, strings.TrimSpace(respBody.String()))
+	}
+	return nil
+}
+
+func closeGitHubPullRequest(ctx context.Context, client *http.Client, token, owner, repo string, number int) error {
+	encoded, err := json.Marshal(struct {
+		State string `json:"state"`
+	}{State: "closed"})
+	if err != nil {
+		return fmt.Errorf("encode pull request close body: %w", err)
+	}
+	url := fmt.Sprintf("%srepos/%s/%s/pulls/%d", registry.GithubAPIBaseURL, owner, repo, number)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, url, bytes.NewReader(encoded))
+	if err != nil {
+		return fmt.Errorf("build github close pull request request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("close pull request on github: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		var respBody bytes.Buffer
+		_, _ = respBody.ReadFrom(resp.Body)
+		return fmt.Errorf("github returned %d closing %s/%s#%d: %s",
+			resp.StatusCode, owner, repo, number, strings.TrimSpace(respBody.String()))
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return nil
+}

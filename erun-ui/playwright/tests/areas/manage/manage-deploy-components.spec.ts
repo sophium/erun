@@ -4,11 +4,8 @@ import { artifactPath } from '../../../fixtures/artifacts.js';
 import { boundingBoxOf } from '../../../fixtures/boundingBox.js';
 import { test, expect } from '../../../fixtures/erunApp.js';
 
-// Stub the version-suggestion RPC so the picker offers deterministic versions.
-// On open the dialog snaps a typed version not among the suggestions to the
-// latest one; a real ghcr.io lookup returns the build's own version, which would
-// clobber what the test picks. These three versions also drive the per-version
-// chart-availability probe pinned by ERUN_CHART_AVAILABILITY_OVERRIDE.
+// A real ghcr.io lookup returns the build's own version, which the dialog would
+// snap to; these versions also key ERUN_CHART_AVAILABILITY_OVERRIDE.
 async function stubVersionSuggestions(page: Page): Promise<void> {
   await page.route('**/__erun_invoke', async (route, request) => {
     const body = JSON.parse(request.postData() ?? '{}') as { method: string };
@@ -31,13 +28,8 @@ async function stubVersionSuggestions(page: Page): Promise<void> {
   });
 }
 
-// The "Components to deploy" checklist lets the operator control what `erun deploy`
-// rolls out and save it as the env's default. It lives inside the "Version to
-// deploy" picker: the charts are that version's, so the checklist is gated on a
-// picked version exactly like Deploy. The headless baseline vendors no local
-// component charts, so only the runtime item is reachable for a local env;
-// deploy-set resolution and the config round-trip are covered by erun-common
-// goldens (deploy_test.go) and erun-ui Go tests.
+// The headless baseline vendors no local component charts, so only the runtime
+// item is reachable for a local env.
 test.describe('manage dialog — components to deploy (#718)', () => {
   test('runtime is pre-checked, toggling gates Set as default, and it persists', async ({
     app,
@@ -50,12 +42,8 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     await app.manageDialog.waitForOpen();
     await app.manageDialog.selectTab('Runtime');
 
-    // Deploy installs a chosen version by reference, so with no version picked
-    // yet it stays disabled — never an implicit build.
     await expect(app.manageDialog.deployButton()).toBeDisabled();
 
-    // The checklist is gated on a picked version for every env type (uniform):
-    // before one is chosen it shows the prompt, not selectable charts.
     await app.manageDialog.openVersionPicker();
     await expect(app.manageDialog.deployComponentsHint()).toBeVisible();
     await expect(app.manageDialog.deployComponentCheckbox(runtimeName)).toHaveCount(0);
@@ -66,8 +54,6 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     const runtime = app.manageDialog.deployComponentCheckbox(runtimeName);
     const saveDefault = app.manageDialog.saveDeployComponentsButton();
 
-    // The heading is version-scoped for every env type — the experience matches a
-    // runtime env (see #737 below), not a version-free local-only variant.
     await expect(app.manageDialog.deployComponentsHeading()).toHaveText(
       'Components in 1.0.0 to deploy',
     );
@@ -76,10 +62,7 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     await expect(runtime).toBeChecked();
     await expect(saveDefault).toBeDisabled();
 
-    // The checklist is a published-version view: a local-agent env shows the same
-    // canonical component charts published at 1.0.0 as a runtime env would (#737),
-    // never its local working-tree chart directories. The version, not the env's
-    // source, decides which charts exist.
+    // The version, not the env's source, decides which charts exist.
     for (const component of [
       'pw-backend-postgres',
       'pw-backend-db',
@@ -90,9 +73,6 @@ test.describe('manage dialog — components to deploy (#718)', () => {
       await expect(app.manageDialog.deployComponentCheckbox(component)).toBeVisible();
     }
 
-    // The label must name the published erun-devops chart and present <tenant>-devops
-    // only as the release name, never as a chart of its own — keeping the checklist
-    // consistent with the versions the "Version to deploy" picker offers.
     await expect(runtime).toHaveAccessibleName(
       `Runtime — published erun-devops chart (released as ${runtimeName})`,
     );
@@ -105,8 +85,6 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     await expect(runtime).toBeChecked();
     await expect(saveDefault).toBeDisabled();
 
-    // Changing the component selection alters what a redeploy rolls out, so saving it
-    // must raise the pending-redeploy banner.
     await runtime.click();
     await expect(saveDefault).toBeEnabled();
     await saveDefault.click();
@@ -114,10 +92,7 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     await expect(app.manageDialog.redeployBanner()).toBeVisible();
     await expect(saveDefault).toBeDisabled();
 
-    // This save stored an empty selection (the runtime was the only box checked),
-    // which leaves the banner's own deploy with nothing to roll out. It reads the
-    // same checklist as the Runtime tab's Deploy, so it refuses on the same
-    // grounds rather than falling through to the runtime chart alone.
+    // The banner's deploy reads the same checklist, so an empty selection refuses there too.
     await expect(app.manageDialog.redeployNowButton()).toBeDisabled();
     await expect(app.manageDialog.redeployBanner()).toContainText('no charts are checked');
   });
@@ -127,24 +102,8 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     page,
     seededEnv,
   }) => {
-    // The panel is where the operator works, and it stays open across a save
-    // (see the "keeps the popover open after a pick" contract). Focus leaving it
-    // is not a dismissal, and the reported failure is the one input where that
-    // distinction was load-dependent: the save disables the very button it was
-    // invoked from, the browser hands focus back to the document body, and the
-    // dialog's focus scope re-focuses the dialog container — a focusin outside
-    // this subtree — on the re-render that follows. Radix turns that into a
-    // dismiss, and the only thing swallowing it was the `busy` guard on
-    // setManageVersionChoicesOpen. Whether the re-focus beats the save clearing
-    // `busy` therefore decided the outcome, which is what made it show up only
-    // in contended runs.
-    //
-    // Driving the move after the save has settled exercises that losing branch
-    // on every run instead of once in a contended one: the save is complete
-    // (the panel is open, the banner is up), focus is inside the panel, and it
-    // then leaves — with no pointer anywhere, which is the only input that ever
-    // reached the dismissal. Asserting the panel is still there — and that its
-    // own control is still rendered — is the whole contract.
+    // The save disables its own button and focus falls to the dialog container;
+    // focus leaving the panel without a pointer must not dismiss it.
     await stubVersionSuggestions(page);
     const runtimeName = `${seededEnv.tenant}-devops`;
     await app.sidebar.openManageDialogViaKeyboard(seededEnv.tenant, seededEnv.environment);
@@ -162,12 +121,9 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     await app.manageDialog.waitForRedeployBanner();
     await expect(saveDefault).toBeDisabled();
 
-    // Focus inside the panel, then out of it, with no pointer in between.
     await app.manageDialog.versionPickerSearchInput().focus();
     await app.manageDialog.locator().focus();
 
-    // The reported failure lands here: the control the save was pressed on is
-    // no longer in the DOM, so there is nothing left to be disabled.
     await expect(saveDefault).toBeDisabled();
     await expect(app.manageDialog.deployComponentsHeading()).toBeVisible();
   });
@@ -178,9 +134,6 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     seededRuntimeEnv,
   }) => {
     await stubVersionSuggestions(page);
-    // A runtime env has no local charts (RemoteRepo), so the checklist offers
-    // each published platform component (deployed by reference) plus the
-    // runtime — the operator can select them without any local umbrella.
     await app.sidebar.openManageDialogViaKeyboard(
       seededRuntimeEnv.tenant,
       seededRuntimeEnv.environment,
@@ -188,8 +141,6 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     await app.manageDialog.waitForOpen();
     await app.manageDialog.selectTab('Runtime');
 
-    // No version picked yet: Deploy is disabled and the checklist shows the
-    // prompt rather than charts (they are that version's).
     await expect(app.manageDialog.deployButton()).toBeDisabled();
     await app.manageDialog.openVersionPicker();
     await expect(app.manageDialog.deployComponentsHint()).toBeVisible();
@@ -216,10 +167,7 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     page,
     seededRuntimeEnv,
   }) => {
-    // Version-aware checklist: charts a version never published must not be
-    // offered (deploying one would fail). Chart availability per version is
-    // pinned by ERUN_CHART_AVAILABILITY_OVERRIDE (backendEnv) so the probe is
-    // offline and deterministic. The runtime item is always kept.
+    // Chart availability is pinned by ERUN_CHART_AVAILABILITY_OVERRIDE so the probe is offline.
     await stubVersionSuggestions(page);
 
     const runtimeName = `${seededRuntimeEnv.tenant}-devops`;
@@ -237,7 +185,6 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     await app.manageDialog.waitForOpen();
     await app.manageDialog.selectTab('Runtime');
 
-    // No version picked yet: Deploy disabled, checklist gated behind the prompt.
     await expect(app.manageDialog.deployButton()).toBeDisabled();
     await app.manageDialog.openVersionPicker();
     await expect(app.manageDialog.deployComponentsHint()).toBeVisible();
@@ -249,12 +196,7 @@ test.describe('manage dialog — components to deploy (#718)', () => {
       animations: 'disabled',
     });
 
-    // 1.0.0 published every component chart. Picking a version from the picker
-    // keeps the panel open so its component checklist is reachable in one flow,
-    // and a sourceless env version-scopes the heading (contrast the local env
-    // above, which stays plain).
     await app.manageDialog.pickVersion('1.0.0');
-    // A chosen version enables Deploy (installs that version by reference).
     await expect(app.manageDialog.deployButton()).toBeEnabled();
     await expect(app.manageDialog.deployComponentsHeading()).toHaveText(
       'Components in 1.0.0 to deploy',
@@ -268,7 +210,7 @@ test.describe('manage dialog — components to deploy (#718)', () => {
       animations: 'disabled',
     });
 
-    // 1.0.90 published only postgres + db; the other three drop off, runtime stays.
+    // 1.0.90 published only postgres + db.
     await app.manageDialog.pickVersion('1.0.90');
     await expect(app.manageDialog.deployComponentCheckbox('pw-backend-api')).toHaveCount(0);
     await expect(app.manageDialog.deployComponentCheckbox('pw-powerdns')).toHaveCount(0);
@@ -277,7 +219,7 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     await expect(app.manageDialog.deployComponentCheckbox('pw-backend-db')).toBeVisible();
     await expect(app.manageDialog.deployComponentCheckbox(runtimeName)).toBeVisible();
 
-    // 1.0.50 published no component charts; only the runtime item remains.
+    // 1.0.50 published no component charts.
     await app.manageDialog.pickVersion('1.0.50');
     for (const component of platform) {
       await expect(app.manageDialog.deployComponentCheckbox(component)).toHaveCount(0);
@@ -290,11 +232,7 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     seededEnv,
     page,
   }) => {
-    // The offline harness can't make ghcr return a real 401, so stub the RPC to
-    // carry a notice. The auth-vs-unreachable classification is owned by Go unit
-    // tests (TestLoadVersionSuggestionsSurfacesAuthNoticeForPrivateImage /
-    // TestLoadVersionSuggestionsMarksUnreachableRegistry in erun-ui/app_test.go);
-    // this locks the rendered, actionable affordance the operator sees.
+    // The offline harness can't make ghcr return a real 401.
     await page.route('**/__erun_invoke', async (route, request) => {
       const body = JSON.parse(request.postData() ?? '{}') as { method: string };
       if (body.method === 'LoadVersionSuggestions') {
@@ -326,9 +264,6 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     page,
     seededRuntimeEnv,
   }) => {
-    // A shorter window forces the version list + full component checklist to
-    // exceed the viewport; the popover must cap to the visible height and scroll
-    // rather than clip the last components off-screen.
     const viewportHeight = 720;
     await stubVersionSuggestions(page);
     await page.setViewportSize({ width: 1440, height: viewportHeight });
@@ -341,21 +276,17 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     await app.manageDialog.openVersionPicker();
     await app.manageDialog.pickVersion('1.0.0');
 
-    // The popover fits: its bottom edge stays on-screen.
     const box = await boundingBoxOf(
       app.manageDialog.versionPickerPopover(),
       'version picker popover',
     );
     expect(box.y + box.height).toBeLessThanOrEqual(viewportHeight + 1);
 
-    // The last component (runtime is first now) is reachable by scrolling the popover.
     const lastComponent = app.manageDialog.deployComponentCheckbox('pw-docs');
     await lastComponent.scrollIntoViewIfNeeded();
     await expect(lastComponent).toBeInViewport();
   });
 
-  // Stub the picker plus a single runtime deploy row whose publishedChart is fixed,
-  // so the runtime row's label reflects the chart the deploy actually installs.
   async function stubRuntimeDeployRow(page: Page, publishedChart: string): Promise<void> {
     await page.route('**/__erun_invoke', async (route, request) => {
       const body = JSON.parse(request.postData() ?? '{}') as { method: string };
@@ -371,10 +302,6 @@ test.describe('manage dialog — components to deploy (#718)', () => {
         return route.fulfill({
           contentType: 'application/json',
           body: JSON.stringify({
-            // LoadDeployComponents answers with the checklist *and* which chart the
-            // runtime would be installed from -- the coordinate the version does not
-            // name. This stub keeps the plan resolved (canonical, present) so the
-            // label under test is the only thing in play.
             data: {
               components: [
                 {
@@ -406,9 +333,6 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     page,
     seededEnv,
   }) => {
-    // The tenant's own pw-devops chart is published at the version, so the runtime
-    // row names it — the label must reflect the chart the deploy installs, not the
-    // canonical erun-devops fallback it used to always claim.
     await stubRuntimeDeployRow(page, 'pw-devops');
     await app.sidebar.openManageDialogViaKeyboard(seededEnv.tenant, seededEnv.environment);
     await app.manageDialog.waitForOpen();
@@ -421,10 +345,7 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     ).toBeVisible();
   });
 
-  // Stub the picker plus a checklist shaped like the reported one: the runtime
-  // checked by default, alongside component charts the operator has not checked.
-  // A resolved runtimeChart keeps runtimeChartBlocksDeploy out of the way, so the
-  // empty checklist is the only thing that can disable Deploy.
+  // A resolved runtimeChart leaves the empty checklist as the only thing that can disable Deploy.
   async function stubChecklistOfComponents(page: Page): Promise<void> {
     await page.route('**/__erun_invoke', async (route, request) => {
       const body = JSON.parse(request.postData() ?? '{}') as { method: string };
@@ -467,13 +388,7 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     });
   }
 
-  // The checklist's helper promises "Deploy rolls out exactly the checked charts",
-  // and an empty selection was the one state it could not keep that in. The
-  // desktop threads no --components flag for it, so `erun deploy` read it as an
-  // omitted flag -- "unspecified" -- and fell through the precedence tiers to the
-  // runtime chart alone (bootstrap/heal). Unchecking the runtime and pressing
-  // Deploy rolled out the one chart the operator had just declined, and a runtime
-  // upgrade restarts the environment's pod (#2384).
+  // An empty selection passes no --components, which `erun deploy` reads as "runtime only".
   test('an emptied checklist disables Deploy rather than rolling the runtime chart alone (#2384)', async ({
     app,
     page,
@@ -490,12 +405,8 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     await expect(app.manageDialog.deployComponentCheckbox('pw-backend-api')).not.toBeChecked();
     await expect(app.manageDialog.deployButton()).toBeEnabled();
 
-    // Unchecking the only checked chart leaves nothing to roll out. The button
-    // must refuse it and say so, rather than falling through to the runtime.
     await runtime.click();
     await expect(runtime).not.toBeChecked();
-    // This is the reported defect: the button stayed enabled and the deploy went
-    // through, rolling out the runtime chart the operator had just declined.
     await expect(app.manageDialog.deployButton()).toBeDisabled();
     const panelNotice = app.manageDialog.deployComponentsEmptyPanelNotice();
     await expect(panelNotice).toContainText('No charts are checked');
@@ -504,15 +415,11 @@ test.describe('manage dialog — components to deploy (#718)', () => {
       animations: 'disabled',
     });
 
-    // The guard is the empty set itself, not the act of unchecking: restoring a
-    // chart restores the button, so an operator recovers in one click.
     await runtime.click();
     await expect(runtime).toBeChecked();
     await expect(app.manageDialog.deployButton()).toBeEnabled();
     await expect(panelNotice).toHaveCount(0);
 
-    // Emptying it again, then closing the panel: the same statement sits under the
-    // version row, beside Deploy, and the button points at it for assistive tech.
     await runtime.click();
     await expect(app.manageDialog.deployButton()).toBeDisabled();
     await page.keyboard.press('Escape');
@@ -531,8 +438,6 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     page,
     seededEnv,
   }) => {
-    // No tenant chart at the version → the deploy falls back to the canonical
-    // erun-devops chart, installed under the pw-devops release name; the label says so.
     await stubRuntimeDeployRow(page, 'erun-devops');
     await app.sidebar.openManageDialogViaKeyboard(seededEnv.tenant, seededEnv.environment);
     await app.manageDialog.waitForOpen();

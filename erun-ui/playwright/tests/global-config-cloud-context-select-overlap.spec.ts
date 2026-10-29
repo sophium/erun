@@ -2,28 +2,9 @@ import { boundingBoxOf, type ElementBox } from '../fixtures/boundingBox.js';
 import { expect, test } from '../fixtures/erunApp.js';
 import type { AppShell } from '../pages/AppShell.js';
 
-// Regression coverage for the Cloud provider `SelectField` wrapper
-// inside GlobalConfigDialog.CloudContexts.tsx's `grid gap-2 sm:grid-cols-2`
-// is a grid item that defaults to `min-width: auto`, so it refused to shrink
-// below its own long alias text and bled across the column boundary into the
-// Region trigger next to it -- covering its left side (the report's example:
-// "eu-west-2 (London)" read as "u-west-2 (London)"). `SelectField` itself now
-// carries `min-w-0` (on its wrapper, its trigger, and the trigger's
-// select-value child), and erun-kit's theme.css adds a defensive default for
-// any child of a `grid-cols-*` container, so this asserts the actual failure
-// mode -- no overlap between the two triggers -- rather than only that the
-// dialog renders.
-//
-// The `sm:` breakpoint is keyed off the *viewport*, not the dialog's own
-// (fixed ~512px) width, so 630px/640px straddle the real transition between
-// the fields stacking (single column, no overlap possible, covered by the
-// first describe block below) and sitting side by side (two columns, where
-// the historical bleed happened, covered by the second).
-//
-// Most widths this spec uses sit below the shell's own sidebar
-// auto-collapse breakpoint (758px, `narrow-viewport-shell.spec.ts`), so the
-// sidebar starts collapsed there and its "Open ERun settings" trigger is not
-// reachable until `Titlebar.toggleSidebar()` opens it back up first.
+// A grid item defaults to `min-width: auto`, so a long Cloud provider value
+// could bleed into the Region trigger. `sm:` keys off the viewport, so 630px
+// stacks and 640px+ sits side by side. Below 758px the sidebar auto-collapses.
 const SIDEBAR_COLLAPSE_BREAKPOINT = 758;
 
 const LONG_PROVIDER_VALUE = 'Rihards.Freimanis+0203626script06330@aws-eu-west-2-production-account';
@@ -47,18 +28,8 @@ async function setLongProviderValue(page: import('@playwright/test').Page): Prom
   }, LONG_PROVIDER_VALUE);
 }
 
-// The one path every width case measures through -- the shared case below and
-// each of the four width cases.
-//
-// The long value this assertion is about is written straight into a
-// React-owned span, so it is the render, not the write, that decides what the
-// trigger carries: a remount of the draft form puts React's own (short) alias
-// back. Geometry read after such a revert describes a trigger with nothing
-// long in it, and "no overlap" would be reported while the condition the
-// report described -- a long alias bleeding into the Region field -- never
-// existed. Asserting the value is still rendered in the same step that takes
-// the geometry is what keeps the measurements about the reported condition:
-// a reverted trigger fails here rather than being measured as if it were short.
+// Assert the long value is still rendered when measuring: a remount restores
+// React's short alias, and "no overlap" would then pass vacuously.
 async function measureProviderAgainstRegion(
   app: AppShell,
   label: string,
@@ -88,9 +59,7 @@ for (const width of [630]) {
 
       const { providerBox, regionBox } = await measureProviderAgainstRegion(app, `at ${width}px`);
 
-      // Below the breakpoint the section is a single column: the fields
-      // stack instead of sitting side by side, so there is no shared row
-      // for one to bleed into.
+      // Single column: no shared row to bleed into.
       expect(regionBox.y).toBeGreaterThanOrEqual(providerBox.y + providerBox.height);
 
       await app.globalConfigDialog.cancel();
@@ -113,13 +82,8 @@ for (const width of [640, 700, 1440]) {
 
       const { providerBox, regionBox } = await measureProviderAgainstRegion(app, `at ${width}px`);
 
-      // Side by side: the provider trigger's own right edge must not reach
-      // past the region trigger's left edge. This is the literal reported
-      // symptom -- the provider's rendered content covering the region
-      // trigger's left side -- not just "the dialog didn't overflow".
       expect(providerBox.x + providerBox.width).toBeLessThanOrEqual(regionBox.x);
 
-      // And neither trigger may spill past the dialog's own clamped card.
       const card = await boundingBoxOf(
         app.globalConfigDialog.locator(),
         `ERun settings dialog at ${width}px`,
@@ -133,12 +97,7 @@ for (const width of [640, 700, 1440]) {
   });
 }
 
-// A provider value put back by a render -- which is what a remount of the draft
-// form does -- leaves the trigger carrying the short seeded alias, and every
-// geometry assertion above is then true for a reason the report never
-// described: there is no long value to bleed. The measurement refuses that
-// state, and this pins the refusal: without it the four width cases above go
-// green on a trigger that has already reverted.
+// Pins that a reverted (short) value fails the measurement instead of passing.
 test('a reverted Cloud provider value is refused rather than measured as short', async ({
   app,
   page,
@@ -151,7 +110,7 @@ test('a reverted Cloud provider value is refused rather than measured as short',
   const trigger = app.globalConfigDialog.cloudContextProviderTrigger();
   await expect(trigger).toContainText(LONG_PROVIDER_VALUE);
 
-  // React's own value back, exactly as a remount of the draft form leaves it.
+  // Restore React's value, as a remount would.
   await trigger.evaluate((btn) => {
     const span = btn.querySelector('[data-slot="select-value"]');
     if (span instanceof HTMLElement) {

@@ -10,16 +10,12 @@ import (
 	"testing"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/mcpauth"
+	"github.com/sophium/erun/erun-common/infra/mcptools"
 )
 
-// TestSignerMintsPerEnvToken proves a minted token carries the claims the
-// deployed edge enforces (the fixed in-pod file:// issuer, the per-env
-// audience, the ERun-user sub, a bounded lifetime) and that its signature
-// verifies against the backend's public key — the key the deploy injects at
-// the issuer's path so the edge accepts it with no live IdP.
 func TestSignerMintsPerEnvToken(t *testing.T) {
-	privatePEM, publicPEM, err := eruncommon.GenerateDesktopIdentity()
+	privatePEM, publicPEM, err := mcpauth.GenerateDesktopIdentity()
 	if err != nil {
 		t.Fatalf("generate identity: %v", err)
 	}
@@ -28,7 +24,7 @@ func TestSignerMintsPerEnvToken(t *testing.T) {
 		t.Fatalf("new signer: %v", err)
 	}
 	now := time.Unix(1_700_000_000, 0)
-	token, audience, err := signer.Sign("acme", "prod", "user-1", string(eruncommon.MCPCapabilityAttach), now)
+	token, audience, err := signer.Sign("acme", "prod", "user-1", string(mcptools.MCPCapabilityAttach), now)
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}
@@ -38,8 +34,8 @@ func TestSignerMintsPerEnvToken(t *testing.T) {
 
 	claims := decodeClaims(t, token)
 	assertEnforcedClaims(t, claims, audience, now)
-	if claims.Scope != string(eruncommon.MCPCapabilityAttach) {
-		t.Fatalf("scope claim = %q, want %q", claims.Scope, eruncommon.MCPCapabilityAttach)
+	if claims.Scope != string(mcptools.MCPCapabilityAttach) {
+		t.Fatalf("scope claim = %q, want %q", claims.Scope, mcptools.MCPCapabilityAttach)
 	}
 
 	if !verifySignature(t, token, publicPEM) {
@@ -47,13 +43,10 @@ func TestSignerMintsPerEnvToken(t *testing.T) {
 	}
 }
 
-// assertEnforcedClaims checks every claim the deployed edge enforces on a minted
-// token: the fixed in-pod file:// issuer, the per-env audience, the ERun-user
-// sub, and a bounded lifetime.
-func assertEnforcedClaims(t *testing.T, claims eruncommon.MCPTokenClaims, audience string, now time.Time) {
+func assertEnforcedClaims(t *testing.T, claims mcpauth.MCPTokenClaims, audience string, now time.Time) {
 	t.Helper()
-	if claims.Issuer != eruncommon.DesktopMCPIssuer() {
-		t.Fatalf("iss = %q, want %q", claims.Issuer, eruncommon.DesktopMCPIssuer())
+	if claims.Issuer != mcpauth.DesktopMCPIssuer() {
+		t.Fatalf("iss = %q, want %q", claims.Issuer, mcpauth.DesktopMCPIssuer())
 	}
 	if claims.Audience != audience {
 		t.Fatalf("aud claim = %q, want %q", claims.Audience, audience)
@@ -75,7 +68,7 @@ func TestNewSignerRejectsInvalidKey(t *testing.T) {
 	}
 }
 
-func decodeClaims(t *testing.T, token string) eruncommon.MCPTokenClaims {
+func decodeClaims(t *testing.T, token string) mcpauth.MCPTokenClaims {
 	t.Helper()
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
@@ -85,7 +78,7 @@ func decodeClaims(t *testing.T, token string) eruncommon.MCPTokenClaims {
 	if err != nil {
 		t.Fatalf("decode claims segment: %v", err)
 	}
-	var claims eruncommon.MCPTokenClaims
+	var claims mcpauth.MCPTokenClaims
 	if err := json.Unmarshal(raw, &claims); err != nil {
 		t.Fatalf("unmarshal claims: %v", err)
 	}

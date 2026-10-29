@@ -9,7 +9,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	apirepository "github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/service"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 type ReviewRepository interface {
@@ -29,19 +29,12 @@ type ReviewService interface {
 	// PrepareCreate normalizes a new review's status and repository identity,
 	// refusing a repository it cannot canonicalize.
 	PrepareCreate(review model.Review) (model.Review, error)
-	// AdvanceMergeQueue and OverrideAdvanceMergeQueue act on one repository's
-	// queue. An empty repository is one queue spanning every repository the
-	// tenant serves, which is what a target branch alone has always meant.
+	// AdvanceMergeQueue treats an empty repository as one queue spanning every repository the tenant serves.
 	AdvanceMergeQueue(ctx context.Context, repository, targetBranch string) (model.Review, error)
-	// OverrideAdvanceMergeQueue is the one deliberate, audited escape from
-	// AdvanceMergeQueue's unresolved-thread gate: it refuses a blank reason and
-	// fails closed if audit logging is not configured, rather than promoting
-	// anyway.
+	// OverrideAdvanceMergeQueue bypasses the unresolved-thread gate; it requires a reason and fails
+	// closed without audit logging.
 	OverrideAdvanceMergeQueue(ctx context.Context, repository, targetBranch, reason string) (model.Review, error)
-	// UpdateStatus applies a caller-reported status transition. remoteURL is
-	// used only when status is MERGED: the remote the caller pushed the merge
-	// to, fetched to verify the reported build's commit against the real
-	// repository — see AGENTS.md "Merge Queue".
+	// UpdateStatus uses remoteURL only for MERGED, to verify the reported build's commit against the real repository.
 	UpdateStatus(ctx context.Context, reviewID string, status model.ReviewStatus, buildID string, remoteURL string) (model.Review, error)
 }
 
@@ -57,10 +50,7 @@ func RegisterReviewRoutes(register ProtectedRouteRegistrar, reviews ReviewReposi
 	register(http.MethodPost, "/v1/reviews", http.HandlerFunc(routes.createReview))
 	register(http.MethodGet, "/v1/reviews/merge-queue", http.HandlerFunc(routes.listMergeQueue))
 	register(http.MethodPost, "/v1/reviews/merge-queue/advance", http.HandlerFunc(routes.advanceMergeQueue))
-	// A distinct path (rather than a `force` flag on /advance) so a tenant can
-	// grant the override to a narrower set of roles than ordinary advance
-	// through the same permission-by-path mechanism every other route uses —
-	// see AGENTS.md "Merge Queue".
+	// A distinct path, not a flag, so the override can be granted to fewer roles.
 	register(http.MethodPost, "/v1/reviews/merge-queue/override-advance", http.HandlerFunc(routes.overrideAdvanceMergeQueue))
 	register(http.MethodGet, "/v1/reviews/{review_id}", http.HandlerFunc(routes.getReview))
 	register(http.MethodPatch, "/v1/reviews/{review_id}/status", http.HandlerFunc(routes.updateReviewStatus))
@@ -72,16 +62,10 @@ func RegisterReviewRoutes(register ProtectedRouteRegistrar, reviews ReviewReposi
 type updateReviewStatusRequest struct {
 	Status  model.ReviewStatus `json:"status"`
 	BuildID string             `json:"buildId"`
-	// RemoteURL is required only for a MERGED report: the git remote the
-	// caller pushed the merge to, which the platform fetches to verify the
-	// reported build's commit against the real repository.
+	// RemoteURL is required only for a MERGED report.
 	RemoteURL string `json:"remoteUrl"`
 }
 
-// advanceMergeQueueRequest addresses one repository's queue. An empty
-// repository is a queue spanning every repository the tenant serves, which is
-// the pre-repository-identity meaning of a target branch alone; erun's own
-// clients always name the repository they are standing in.
 type advanceMergeQueueRequest struct {
 	Repository   string `json:"repository"`
 	TargetBranch string `json:"targetBranch"`
@@ -93,9 +77,6 @@ type overrideAdvanceMergeQueueRequest struct {
 	Reason       string `json:"reason"`
 }
 
-// unresolvedThreadsResponse is what a blocked /merge-queue/advance reports: not
-// just that it refused, but how many threads and on which review, so a caller
-// can route the operator straight to them instead of a dead end.
 type unresolvedThreadsResponse struct {
 	Error             string `json:"error"`
 	Message           string `json:"message"`
@@ -107,78 +88,35 @@ type addReviewerRequest struct {
 	UserID string `json:"userId"`
 }
 
-// createReviewRequest is the whole of what a caller may state about a new
-// review, and deliberately not model.Review, which also carries fields the
-// platform owns.
-//
-// IssueRef is a declaration, not a derivation: `issueRef` is the issue the
-// review's work belongs to, and stating it is exactly what makes the link
-// authoritative. The other half of that pair, IssueRefSource, stays absent
-// deliberately. It is derived on read — a reference parsed out of a branch
-// name is marked inferred, and never written back as if it were declared —
-// so a body carrying `issueRefSource: "DECLARED"` would be echoed back
-// verbatim as though the platform had established it, including on a branch
-// outside the convention where nothing would otherwise have produced a
-// source at all. That is precisely the claim the whole derivation exists to
-// keep honest. A request struct cannot hold the field, so a forged one has
-// nowhere on the wire to arrive from, rather than merely nowhere to be read
-// from after decoding.
-//
-// Status is absent for the same reason one step removed: it belongs to the
-// platform (PrepareCreate opens a review OPEN), and accepting it let a caller
-// create a review already at MERGE, past the merge queue that is the only
-// thing permitted to promote one there.
+// createReviewRequest is deliberately not model.Review: IssueRefSource and Status are platform-owned
+// and must have nowhere on the wire to arrive from.
 type createReviewRequest struct {
 	Repository   string `json:"repository"`
 	Name         string `json:"name"`
 	TargetBranch string `json:"targetBranch"`
 	SourceBranch string `json:"sourceBranch"`
-	// IssueRef is the issue this work belongs to: the canonical
-	// owner/repo#number, or the bare number the branch convention already
-	// teaches, which PrepareCreate joins to the review's own repository.
+	// IssueRef is owner/repo#number or a bare number joined to the review's repository.
 	IssueRef string `json:"issueRef"`
 }
 
-// canonicalRepositoryParam canonicalizes a repository a caller named for this
-// call -- the `?repository=` filter on both listings, the body's repository on
-// the two queue advances -- into the identity the rows it is matched against
-// were recorded under.
-//
-// It is the same canonicalization `PrepareCreate` applies to a new review's
-// repository, and the same function: a review records its repository through
-// eruncommon.RepositoryIdentity, so a filter compared verbatim against that
-// column only ever finds the rows a caller happened to spell exactly as this
-// one did. An SSH remote and its HTTPS form name one repository, so a filter
-// holding either has to reach both -- otherwise the caller is handed a silent
-// subset of the repository they named, which is what `--repository owner/repo`
-// and `--repository git@host:owner/repo` each did. A value that names no
-// repository is refused here rather than passed through, for the same reason
-// an unrecognised `?status=` is: an unusable filter must not answer as an
-// empty one. An absent or blank one still narrows nothing, which is what a
-// target branch alone has always meant.
+// canonicalRepositoryParam applies PrepareCreate's canonicalization so every remote spelling reaches
+// the same rows; an unusable value is refused rather than answered as empty.
 func canonicalRepositoryParam(repository string) (string, error) {
 	if strings.TrimSpace(repository) == "" {
 		return "", nil
 	}
-	identity, err := eruncommon.RepositoryIdentity(repository)
+	identity, err := core.RepositoryIdentity(repository)
 	if err != nil {
 		return "", err
 	}
 	return identity, nil
 }
 
-// listReviews answers GET /v1/reviews. The `?status=` filter is normalized and
-// then validated before it reaches the repository: an unrecognised value
-// matches no row, so passing one through answered `200` with an empty list a
-// caller reads as "no reviews" -- the conclusion an operator acts on when they
-// check whether anything is waiting on them. The membership check is the shared
-// eruncommon.NormalizeReviewStatus, the same refusal `erun review list` makes
-// before it ever calls the platform, so both surfaces accept the same
-// spellings and name the same accepted values.
+// An unrecognised status must be refused, not answered as an empty list.
 func (r ReviewRoutes) listReviews(w http.ResponseWriter, req *http.Request) {
 	query := req.URL.Query()
 	status := model.ReviewStatus(strings.ToUpper(strings.TrimSpace(query.Get("status"))))
-	if _, err := eruncommon.NormalizeReviewStatus(string(status)); err != nil {
+	if _, err := core.NormalizeReviewStatus(string(status)); err != nil {
 		writeErrorCode(w, http.StatusBadRequest, "INVALID_QUERY", err.Error())
 		return
 	}
@@ -237,10 +175,6 @@ func (r ReviewRoutes) removeReviewer(w http.ResponseWriter, req *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// writeReviewPrepareError names which part of a new review the platform could
-// not accept. The two refusals share a status and a shape but not a field: a
-// caller told only INVALID_REPOSITORY for a mistyped --issue would go and
-// change a repository that was never the problem.
 func writeReviewPrepareError(w http.ResponseWriter, err error) {
 	var invalidIssueRef *service.InvalidIssueRefError
 	if errors.As(err, &invalidIssueRef) {
@@ -256,9 +190,7 @@ func (r ReviewRoutes) createReview(w http.ResponseWriter, req *http.Request) {
 		writeErrorCode(w, http.StatusBadRequest, "INVALID_BODY", err.Error())
 		return
 	}
-	// Assembled field by field from createReviewRequest: these five are the
-	// only values a caller can put into a review, and the fields it has no
-	// request-side counterpart for start zeroed rather than caller-set.
+	// Only these request fields reach a review; platform-owned fields start zeroed.
 	prepared, err := r.service.PrepareCreate(model.Review{
 		Repository:       input.Repository,
 		Name:             input.Name,
@@ -331,14 +263,6 @@ func (r ReviewRoutes) overrideAdvanceMergeQueue(w http.ResponseWriter, req *http
 	writeJSON(w, http.StatusOK, withReviewIssueRef(review))
 }
 
-// writeAdvanceMergeQueueError reports an unresolved-thread block as a 409 with
-// the count and the review to route the operator to, rather than the bare
-// status text writeRepositoryError gives every other conflict, and gives the
-// merge-queue-specific machine codes documented in collaboration/reviews.md.
-// An occupied MERGE slot is the same shape of refusal for the same reason:
-// naming the review already holding the branch is what makes the advance worth
-// retrying, so it gets its own code rather than the generic not-found it would
-// otherwise fall through to.
 func writeAdvanceMergeQueueError(w http.ResponseWriter, req *http.Request, err error) {
 	var occupied *service.MergeQueueOccupiedError
 	if errors.As(err, &occupied) {
@@ -370,15 +294,9 @@ func writeAdvanceMergeQueueError(w http.ResponseWriter, req *http.Request, err e
 			"targetBranch": ambiguous.TargetBranch,
 			"repositories": ambiguous.Repositories,
 		}
-		// Named separately from the repositories because they are not one: a
-		// caller told only the repositories would have to work out for itself
-		// which waiting rows belong to none of them. Always present, so a
-		// client rendering the refusal has one shape to read.
 		unrecorded := ambiguous.UnrecordedReviewIDs
 		if unrecorded == nil {
-			// An empty array, not null: "none" and "the platform cannot say"
-			// are different answers, and a client iterating the field must not
-			// have to guard one of them.
+			// An empty array, not null: "none" differs from "the platform cannot say".
 			unrecorded = []string{}
 		}
 		details["unrecordedRepositoryReviewIds"] = unrecorded
@@ -416,10 +334,6 @@ func (r ReviewRoutes) updateReviewStatus(w http.ResponseWriter, req *http.Reques
 	writeJSON(w, http.StatusOK, withReviewIssueRef(review))
 }
 
-// writeUpdateStatusError gives PATCH .../status's documented business codes
-// their exact machine code and details shape; every other failure (not
-// found, missing security context, ...) falls through to the generic
-// status-derived code.
 func writeUpdateStatusError(w http.ResponseWriter, req *http.Request, err error) {
 	var invalidTransition *service.InvalidTransitionError
 	if errors.As(err, &invalidTransition) {

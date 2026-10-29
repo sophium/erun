@@ -6,7 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
-	eruncommon "github.com/sophium/erun/erun-common"
+	modelpkg "github.com/sophium/erun/erun-common/base/model"
 )
 
 type WhoamiUserRepository interface {
@@ -14,28 +14,18 @@ type WhoamiUserRepository interface {
 	RoleNames(ctx context.Context, userID string) ([]string, error)
 }
 
-// WhoamiTenantRepository resolves the caller's own tenant record off the
-// exact same tenants.name column and TenantRepository.Current method that
-// GET /v1/tenants reads (whoami used to carry no tenant name at
-// all, and its plain-text line put the caller's own username where an
-// operator naturally reads a tenant name, which is what made an ordinary
-// username look like a tenant list disagreement). Reusing the identical read
-// path is what makes the two answers structurally unable to diverge.
+// WhoamiTenantRepository reuses GET /v1/tenants' read path so whoami's tenant name cannot diverge from it.
 type WhoamiTenantRepository interface {
 	Current(ctx context.Context) (model.Tenant, error)
 }
 
-// WhoamiCapabilityResolver narrows a candidate route set to the ones the caller
-// may reach. The authorization middleware's own authorizer implements it, so
-// the capability set a client renders from is computed by the code that
-// enforces it rather than derived a second time.
+// WhoamiCapabilityResolver is implemented by the authorizer itself, so capabilities come from the enforcing code.
 type WhoamiCapabilityResolver interface {
-	PermittedRoutes(ctx context.Context, candidates []eruncommon.PlatformCapability) ([]eruncommon.PlatformCapability, error)
+	PermittedRoutes(ctx context.Context, candidates []modelpkg.PlatformCapability) ([]modelpkg.PlatformCapability, error)
 }
 
-// WhoamiRouteCatalog reports every registered route, evaluated per request so
-// registration order cannot leave routes out of the answer.
-type WhoamiRouteCatalog func() []eruncommon.PlatformCapability
+// WhoamiRouteCatalog is evaluated per request so registration order cannot drop routes.
+type WhoamiRouteCatalog func() []modelpkg.PlatformCapability
 
 type WhoamiRoutes struct {
 	users        WhoamiUserRepository
@@ -50,22 +40,15 @@ func RegisterWhoamiRoute(register ProtectedRouteRegistrar, users WhoamiUserRepos
 }
 
 type whoamiResponse struct {
-	TenantID string `json:"tenantId"`
-	// TenantName is the tenant's name exactly as GET /v1/tenants reports it
-	// for this same TenantID -- see WhoamiTenantRepository.
+	TenantID   string   `json:"tenantId"`
 	TenantName string   `json:"tenantName,omitempty"`
 	UserID     string   `json:"userId"`
 	Username   string   `json:"username,omitempty"`
 	Roles      []string `json:"roles,omitempty"`
-	// Capabilities is what a client gates its surfaces on. Roles is
-	// descriptive: a role's name says nothing about what a tenant granted it.
-	//
-	// Deliberately not omitempty. A caller who may do nothing has to receive an
-	// empty set rather than no field, because a client treats a missing set as
-	// "this platform cannot tell me" and falls back to attempting every call.
-	Capabilities eruncommon.PlatformCapabilities `json:"capabilities"`
-	Issuer       string                          `json:"issuer"`
-	Subject      string                          `json:"subject"`
+	// Capabilities is not omitempty: a missing set means "platform cannot tell" to a client, which then attempts every call.
+	Capabilities modelpkg.PlatformCapabilities `json:"capabilities"`
+	Issuer       string                        `json:"issuer"`
+	Subject      string                        `json:"subject"`
 }
 
 func (routes WhoamiRoutes) handleWhoami(w http.ResponseWriter, r *http.Request) {
@@ -103,10 +86,7 @@ func (routes WhoamiRoutes) handleWhoami(w http.ResponseWriter, r *http.Request) 
 		}
 		response.Roles = roles
 	}
-	// A capability set that cannot be resolved fails the request rather than
-	// answering without one: an omitted set is indistinguishable from "you may
-	// do nothing", and a client that degrades on it would hide surfaces the
-	// caller can actually use.
+	// An unresolvable capability set fails the request; omitting it would read as "you may do nothing".
 	if routes.capabilities != nil && routes.catalog != nil {
 		capabilities, err := routes.capabilities.PermittedRoutes(r.Context(), routes.catalog())
 		if err != nil {

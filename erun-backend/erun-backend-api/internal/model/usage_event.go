@@ -6,7 +6,6 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// UsageEventType classifies a metered environment lifecycle event.
 type UsageEventType string
 
 const (
@@ -15,10 +14,7 @@ const (
 	UsageEventEnvironmentDeleted     UsageEventType = "environment_deleted"
 )
 
-// UsageEvent is one append-only per-tenant metering record: a resource-affecting
-// environment lifecycle transition, snapshotting the resource caps that applied
-// at the time. It is the metering hook for #605 — a small, honest usage trail,
-// not a billing engine.
+// UsageEvent is an append-only metering record snapshotting the caps in effect.
 type UsageEvent struct {
 	bun.BaseModel `bun:"table:usage_events,alias:ue"`
 	UsageEventID  string    `json:"usageEventId" bun:"usage_event_id,pk,scanonly"`

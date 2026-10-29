@@ -23,18 +23,12 @@ cd "$SCRIPT_DIR"
 
 mkdir -p "$(dirname "$TARGET")"
 
-# Builds only: the lint and test gates live in the component's test stage
-# (erun-devops/linux/erun-ui/Dockerfile), and a developer runs them by hand.
-# The binding generator compiles this package, whose production assets embed
-# frontend/dist, so the directory has to exist before the bundle does.
+# Builds only; lint and test gates run in the component's test stage.
+# The binding generator compiles this package, whose embedded assets need frontend/dist.
 mkdir -p frontend/dist
 go tool wails generate module
 
-# Installed from the repo-root workspace lockfile, not frontend/yarn.lock:
-# erun-ui/frontend is a Yarn workspace member, and a plain `cd frontend &&
-# yarn install` resolves against frontend's own stale, pre-workspaces
-# lockfile instead, silently dropping deps the root lockfile hoists
-# (e.g. radix-ui) from node_modules.
+# Install from the root workspace lockfile, the only one the frontend resolves against.
 (cd "$SCRIPT_DIR/.." && yarn install --frozen-lockfile --prefer-offline --network-timeout 600000)
 (cd "$SCRIPT_DIR/frontend" && yarn build)
 
@@ -43,14 +37,8 @@ if [ -f "$VERSION_FILE" ]; then
 	BUILD_VERSION=$(tr -d '\n' < "$VERSION_FILE")
 fi
 
-# The stamp has to describe the artifact, not the last commit. These scripts
-# exist to build from a working checkout, so an uncommitted change is the normal
-# case — and HEAD alone then names a commit the binary does not contain, which is
-# exactly the question `erun version` is asked to answer. A dirty build says so.
-#
-# BUILD_DATE is when the binary was built, not when HEAD was authored: a fresh
-# build off an older commit otherwise reports a stale-looking timestamp and reads
-# as the wrong binary.
+# The stamp describes the artifact: a dirty tree says so, and BUILD_DATE is build
+# time, not commit time.
 BUILD_COMMIT=
 BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 if git -C "$SCRIPT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -60,35 +48,20 @@ if git -C "$SCRIPT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 	fi
 fi
 
-# The macOS bundle's own "Get Info" / About panel is the one place a released
-# build ever surfaces its version with no way to also ask `erun version` for
-# the commit — so a build that shipped from a stale checkout would look
-# exactly as legitimate there as one that did not. CFBundleVersion carries the
-# commit alongside the marketing version for that reason; CFBundleShortVersionString
-# stays the plain version so it keeps reading as one everywhere else it is used.
+# The About panel is the only version a released bundle shows, so CFBundleVersion
+# carries the commit too.
 BUNDLE_VERSION="$BUILD_VERSION"
 if [ -n "$BUILD_COMMIT" ]; then
 	BUNDLE_VERSION="${BUILD_VERSION}+${BUILD_COMMIT}"
 fi
 
-# Where this build's skills come from. The desktop installs them for a host
-# orchestrator, and the binary it runs is routinely copied out of the checkout
-# (a dev build runs from ~/.cache/erun), so nothing above the running bundle
-# names a source tree. Stamping the path is what keeps an installed skill
-# tracking the checkout this binary was built from; on a machine that does not
-# carry that checkout the resolution falls back to the layout it runs in.
-# Single-quoted so a checkout path containing spaces survives -ldflags splitting.
+# Stamped because the binary runs outside its checkout; single-quoted so a path
+# with spaces survives -ldflags splitting.
 SKILLS_SOURCE="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd -P)/erun-skills/skills"
 
-# Same reasoning as SKILLS_SOURCE above, for the reusable agent definitions
-# (erun-builder/erun-reviewer) the desktop installs into ~/.claude/agents.
 AGENTS_SOURCE="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd -P)/erun-skills/agents"
 
-# `main.`, not the module path. -X addresses a symbol by package path, and these
-# vars are declared in package main, whose symbols the compiler names `main.x`
-# whatever the module is called. A path nothing declares is not an error — the
-# linker drops it in silence and the binary keeps its default, which is how the
-# desktop shipped build info and a skills source it never actually carried.
+# `main.`, not the module path: -X silently ignores a path no package declares.
 LDFLAGS="-s -w -X main.buildVersion=${BUILD_VERSION} -X main.buildCommit=${BUILD_COMMIT} -X main.buildDate=${BUILD_DATE} -X 'main.buildSkillsSource=${SKILLS_SOURCE}' -X 'main.buildAgentsSource=${AGENTS_SOURCE}'"
 if [ "$TARGET_GOOS" = "windows" ]; then
 	LDFLAGS="${LDFLAGS} -H windowsgui"
@@ -105,12 +78,8 @@ fi
 
 printf '>> rebuilding erun desktop binary (%s)... ' "$BUILD_VERSION" >&2
 build_started_at=$(date +%s)
-# `webkit2_41` opts Wails into webkit2gtk-4.1 + libsoup-3.0 via pkg-config
-# instead of the legacy 4.0 / libsoup-2.4 defaults. Ubuntu Noble (and the
-# runtime image built on top of it) ships 4.1; without this tag the in-pod
-# CGO build aborts with "Package 'webkit2gtk-4.0', required by
-# 'virtual:world', not found". Harmless on macOS / Windows because the
-# matching build-constraints only fire on Linux.
+# webkit2_41 selects webkit2gtk-4.1/libsoup-3, which Noble ships; the tag only
+# affects Linux builds.
 go build \
 	-tags "desktop,production,webkit2_41" \
 	-ldflags "$LDFLAGS" \
@@ -169,12 +138,8 @@ EOF
 	plutil -lint "$APP_CONTENTS/Info.plist" >/dev/null
 fi
 
-# Sign with erun's own stable identity rather than leaving the linker's ad-hoc
-# signature in place: macOS pins a privacy grant to the signing identity, and an
-# ad-hoc one has none, so TCC pins this build's code-directory hash and the next
-# rebuild drops the grant in silence. Signing is not a build gate — the artifact
-# runs either way, and codesign.sh has already said what an unsigned-by-identity
-# build costs and how to recover — and it is a no-op off macOS.
+# A stable identity keeps macOS privacy grants across rebuilds. Not a build gate;
+# a no-op off macOS.
 if [ "$TARGET_GOOS" = "darwin" ]; then
 	"$SCRIPT_DIR/codesign.sh" "$APP_BUNDLE" "$TARGET" || true
 else

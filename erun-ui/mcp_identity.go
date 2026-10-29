@@ -2,19 +2,17 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/mcpauth"
 )
 
-// desktopIdentity is the desktop's persistent Ed25519 identity: it signs the
-// per-env MCP bearer tokens each env's edge verifies, and supplies the public
-// key the deploy injects into the pod so that edge can trust them. Where the
-// identity lives, and how a token for an env is shaped, is owned by
-// `erun-common` so the CLI mints tokens the same deployed edges already trust.
+// desktopIdentity is the desktop's Ed25519 identity that signs per-env MCP tokens;
+// its storage and token shape are owned by erun-common so CLI tokens match.
 type desktopIdentity struct {
 	dir        string
 	mu         sync.Mutex
@@ -26,11 +24,11 @@ func newDesktopIdentity(dir string) *desktopIdentity {
 }
 
 func (d *desktopIdentity) keyPath() string {
-	return eruncommon.DesktopIdentityKeyPath(d.dir)
+	return mcpauth.DesktopIdentityKeyPath(d.dir)
 }
 
 func (d *desktopIdentity) publicKeyPath() string {
-	return eruncommon.DesktopIdentityPublicKeyPath(d.dir)
+	return mcpauth.DesktopIdentityPublicKeyPath(d.dir)
 }
 
 func (d *desktopIdentity) ensure() error {
@@ -44,12 +42,12 @@ func (d *desktopIdentity) ensure() error {
 	}
 	switch data, err := os.ReadFile(d.keyPath()); {
 	case err == nil:
-		if _, derr := eruncommon.DesktopPublicKeyPEM(data); derr != nil {
+		if _, derr := mcpauth.DesktopPublicKeyPEM(data); derr != nil {
 			return fmt.Errorf("persisted desktop identity is invalid: %w", derr)
 		}
 		d.privatePEM = data
 	case os.IsNotExist(err):
-		priv, _, gerr := eruncommon.GenerateDesktopIdentity()
+		priv, _, gerr := mcpauth.GenerateDesktopIdentity()
 		if gerr != nil {
 			return gerr
 		}
@@ -67,7 +65,7 @@ func (d *desktopIdentity) ensure() error {
 }
 
 func (d *desktopIdentity) writePublicKeyLocked() error {
-	pub, err := eruncommon.DesktopPublicKeyPEM(d.privatePEM)
+	pub, err := mcpauth.DesktopPublicKeyPEM(d.privatePEM)
 	if err != nil {
 		return err
 	}
@@ -77,8 +75,7 @@ func (d *desktopIdentity) writePublicKeyLocked() error {
 	return nil
 }
 
-// Returns "" with no error when no identity dir is configured, so a deploy from
-// such a desktop stays unauthenticated rather than failing.
+// Returns "" with no error when no identity dir is configured: the deploy stays unauthenticated.
 func (d *desktopIdentity) ensurePublicKeyPath() (string, error) {
 	if d == nil || strings.TrimSpace(d.dir) == "" {
 		return "", nil
@@ -99,5 +96,22 @@ func (d *desktopIdentity) signToken(tenant, environment string, now time.Time) (
 	d.mu.Lock()
 	priv := d.privatePEM
 	d.mu.Unlock()
-	return eruncommon.SignDesktopMCPToken(priv, tenant, environment, now)
+	return mcpauth.SignDesktopMCPToken(priv, tenant, environment, now)
+}
+
+// appendMCPAuthPublicKeyFlag requires the desktop-signed MCP bearer; on failure it
+// omits the flag, since an unauthenticated env is recoverable and a blocked deploy is not.
+func (a *App) appendMCPAuthPublicKeyFlag(args []string) []string {
+	if a.identity == nil {
+		return args
+	}
+	path, err := a.identity.ensurePublicKeyPath()
+	if err != nil {
+		log.Printf("erun-app: resolve MCP auth public key for deploy: %v", err)
+		return args
+	}
+	if path == "" {
+		return args
+	}
+	return append(args, "--mcp-auth-public-key", path)
 }

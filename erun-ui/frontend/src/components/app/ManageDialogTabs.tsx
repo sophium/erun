@@ -121,10 +121,7 @@ function DirtyAwareTabsTrigger({
   dialog: ManageDialogState;
 }): React.ReactElement {
   const dirty = manageDialogTabHasUnsavedChanges(value, dialog.config, dialog.initialConfig);
-  // The Runtime tab is the only tab with field validation today; surface its
-  // state on the trigger so a disabled Save points the user to the right tab
-  // (NN #6 recognition over recall). Icon shape — not just color — distinguishes
-  // error/warning from the unsaved-changes dot (WCAG 1.4.1 use of color).
+  // Only the Runtime tab validates; flag it on the trigger with an icon, not colour alone.
   const { blockingError, capacityWarning } =
     value === 'runtime'
       ? runtimeResourceValidation(dialog.config.runtimePod, dialog.resourceStatus)
@@ -155,8 +152,6 @@ function DirtyAwareTabsTrigger({
 function RedeployBanner({ dialog }: { dialog: ManageDialogState }): React.ReactElement {
   const dispatch = useAppDispatch();
   const deploying = dialog.busyAction === 'save' || dialog.busy;
-  // "Redeploy now" reads the same checklist as the Runtime tab's Deploy, so an
-  // emptied one leaves it nothing to roll out either.
   const noComponents = deployComponentsEmptySelection(dialog);
   return (
     <div
@@ -168,9 +163,7 @@ function RedeployBanner({ dialog }: { dialog: ManageDialogState }): React.ReactE
         className="size-[18px] text-amber-700 dark:text-amber-400"
         aria-hidden="true"
       />
-      {/* `minmax(0,1fr)` and `min-w-0` let this column shrink; on their own
-          they do not give the text anywhere to break, so an unbreakable run in
-          the copy still overflows the track it was sized to. */}
+      {/* overflow-wrap gives unbreakable runs somewhere to break. */}
       <div className="min-w-0 [overflow-wrap:anywhere]">
         <div className="font-semibold text-foreground">Pending redeploy</div>
         <div className="text-muted-foreground">

@@ -11,8 +11,9 @@ cluster the erun test harness uses) inside a **WSL2** Ubuntu distro, alongside a
 registry and a Docker engine, then wires an erun `local-agent` environment at it.
 
 This whole procedure was validated end-to-end on Windows 11 24H2: k3s v1.36, Ubuntu 26.04, no Docker
-Desktop. Commands are driven from Windows (PowerShell); in-cluster steps run inside the distro via
-`wsl`. Windows-side installs use **Scoop**.
+Desktop, with the 2.x registry. The registry 3.1.2 configuration in Step 3 has not yet been re-run on
+Windows; run **Verify** after Step 3 to confirm it. Commands are driven from Windows (PowerShell);
+in-cluster steps run inside the distro via `wsl`. Windows-side installs use **Scoop**.
 
 ## Architecture (why it's shaped this way)
 
@@ -100,7 +101,8 @@ Verify systemd is init: `wsl -d Ubuntu -u root -- bash -lc 'ps -p 1 -o comm='` p
 Save this as a script and run it with `wsl -d Ubuntu -u root -- bash /mnt/c/…/setup-k3s.sh` (write it
 LF-terminated). It installs iptables (k3s needs it), works around WSL2's missing `/dev/kmsg`, tells
 containerd that `localhost:5000` is plain HTTP, drops in a **hostNetwork** registry (binds the node's
-`:5000` directly — no CNI hostPort/portmap, which is unreliable on WSL2), and installs k3s.
+`:5000` directly — no CNI hostPort/portmap, which is unreliable on WSL2), and installs k3s. The
+registry is distribution 3.1.2: the 2.x line ends at 2.8.3 and gets no security fixes.
 
 ```bash
 #!/usr/bin/env bash
@@ -147,6 +149,8 @@ metadata:
   namespace: kube-system
 spec:
   replicas: 1
+  # The pod holds the node's :5000, so its replacement can only start once it has stopped.
+  strategy: { type: Recreate }
   selector:
     matchLabels: { app: erun-registry }
   template:
@@ -156,9 +160,17 @@ spec:
       hostNetwork: true
       containers:
         - name: registry
-          image: registry:2
+          image: registry:3.1.2
           env:
             - { name: REGISTRY_HTTP_ADDR, value: "0.0.0.0:5000" }
+            # The image's bundled config would also serve pprof and metrics on :5001 (on
+            # hostNetwork that is every node interface, and a port Windows may already hold in
+            # mirrored mode, which kills the registry), allow deletes, log at debug and drop the
+            # nosniff header. These keep the 2.x behaviour.
+            - { name: REGISTRY_HTTP_DEBUG_ADDR, value: "" }
+            - { name: REGISTRY_STORAGE_DELETE_ENABLED, value: "false" }
+            - { name: REGISTRY_LOG_LEVEL, value: "info" }
+            - { name: REGISTRY_HTTP_HEADERS_X-CONTENT-TYPE-OPTIONS, value: "[nosniff]" }
           ports:
             - { containerPort: 5000 }
           volumeMounts:
@@ -380,6 +392,7 @@ kubectl run hello-erun --image=localhost:5000/hello:test --restart=Never
 kubectl wait --for=jsonpath='{.status.phase}'=Succeeded pod/hello-erun --timeout=90s   # k3s pulled it
 & "$env:SystemRoot\System32\curl.exe" -sS --noproxy '*' http://localhost:5000/v2/_catalog   # {"repositories":["hello"]}
 kubectl delete pod hello-erun
+wsl -d Ubuntu -u root -- ss -ltnH sport = :5001                     # prints nothing: no registry debug listener
 ```
 
 A push from Windows that k3s then pulls into a running pod proves the exact build→push→pull path erun
@@ -398,6 +411,10 @@ uses.
 - **Registry pulls fail** → re-apply `registries.yaml` + the hostNetwork registry manifest (Step 3),
   `wsl -d Ubuntu -u root systemctl restart k3s`.
 - **Upgrade k3s** → re-run the Step 3 install line inside the distro.
+- **Upgrade the registry** (including a 2.x `registry:2` install) → re-write Step 3's
+  `erun-registry.yaml`; k3s re-applies a changed manifest. `Recreate` stops the old pod before the new
+  one binds `:5000`, and the `/var/lib/erun-registry` store carries over (distribution 3 keeps the 2.x
+  on-disk layout). Then run **Verify**.
 - **Teardown** (destructive):
   ```powershell
   wsl -d Ubuntu -u root /usr/local/bin/k3s-uninstall.sh

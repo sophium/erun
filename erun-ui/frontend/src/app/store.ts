@@ -1,4 +1,4 @@
-// Endpoints must be imported to inject themselves into wailsApi.
+// Side-effect imports register endpoints on wailsApi.
 import './api/stateApi';
 import './api/environmentApi';
 import './api/tenantApi';
@@ -99,8 +99,6 @@ export const store = configureStore({
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({
       thunk: { extraArgument: thunkExtra },
-      // State stays serializable; Sets are rebuilt only at consumer
-      // boundaries, so the default serializable check needs no Set whitelist.
     })
       .concat(wailsApi.middleware)
       .concat(persistenceMiddleware.middleware)

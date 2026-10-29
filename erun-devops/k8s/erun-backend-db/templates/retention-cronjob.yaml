@@ -21,16 +21,8 @@
 {{- if hasKey $retention "dryRun" -}}
 {{- $retentionDryRun = $retention.dryRun -}}
 {{- end -}}
-# Runs the erun-backend-db retention sweeps (erun-backend-db/retention/*.sql)
-# once a day. Off by default (retention.enabled=false) -- a fresh deploy of
-# this chart must never start deleting rows on its own, and turning it on
-# defaults to dry_run=true (retention.dryRun=true) so a misconfigured bound
-# is caught by reading a report before an operator opts into real deletion
-# with retention.dryRun=false. Pruning has no urgency the way schema-drift
-# repair does, so a daily cadence is enough once enabled. Each policy file
-# reports the rows it would delete before deleting them and records the
-# outcome in retention_runs, so both the CronJob's own log and a queryable
-# table are a per-run audit trail.
+# Off by default, and dry-run by default once enabled, so a fresh deploy never
+# deletes rows until an operator sets retention.dryRun=false.
 {{- if $retentionEnabled }}
 apiVersion: batch/v1
 kind: CronJob
@@ -45,12 +37,7 @@ spec:
   failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
-      # See the repair CronJob's ttlSecondsAfterFinished for why age needs a
-      # bound of its own. Three days, not that Job's hour: this runs daily, so
-      # the next attempt -- and its own evidence -- is 24h away, and a shorter
-      # TTL would delete a failed sweep's log before anyone could read it. That
-      # is also why retention_runs, the durable record of the same runs, is
-      # deliberately left with no pruning policy.
+      # Three days: a daily job's failed log must outlive the next run.
       backoffLimit: 0
       ttlSecondsAfterFinished: 259200
       template:

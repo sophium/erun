@@ -37,11 +37,7 @@ import {
 import { wailsApi } from './wailsApi';
 import { wailsQueryFn } from './wailsBaseQuery';
 
-// previewPlatformEnvironmentEndpoint is defined outside the endpoints
-// factory (rather than inlined like its neighbours) purely to keep that
-// factory under eslint's max-lines-per-function cap — its own generics are
-// too long to fit Prettier's line width in the inline shape every other
-// endpoint here uses.
+// Outside the factory to keep it under max-lines-per-function.
 const previewPlatformEnvironmentEndpoint = {
   queryFn: wailsQueryFn<UIRegisterPlatformEnvironmentInput, UIPlatformProvisionResult>((input) =>
     PreviewPlatformEnvironment(input),
@@ -79,8 +75,7 @@ export const tenantApi = wailsApi.injectEndpoints({
       queryFn: wailsQueryFn<UIAdvanceMergeQueueInput, UITenantDashboardReview>((input) =>
         AdvanceMergeQueue(input),
       ),
-      // A blocked result changed nothing on the platform, so there is nothing
-      // to refetch; only a real promotion invalidates the dashboard.
+      // A blocked result changed nothing, so only a promotion invalidates.
       invalidatesTags: (result, _error, input) =>
         result && !result.blocked ? [{ type: 'TenantDashboard', id: input.tenant }] : [],
     }),

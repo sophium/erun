@@ -8,12 +8,10 @@ CREATE TABLE tenant_issuers (
   FOREIGN KEY (tenant_id) REFERENCES tenants (tenant_id),
   FOREIGN KEY (issuer) REFERENCES issuers (issuer),
   CONSTRAINT tenant_issuers_name_check CHECK (length(trim(name)) > 0),
-  -- Identity is (tenant_id, issuer): a tenant maps a given issuer once. Kept as
-  -- a UNIQUE (not promoted to PK) so user_external_ids' (tenant_id, issuer) FK
-  -- keeps depending on this exact constraint and the migration needn't rebuild
-  -- it. Replaces the old global `issuer` PK so one issuer can serve many tenants.
+  -- A tenant maps a given issuer once. UNIQUE, not PK, because
+  -- user_external_ids' (tenant_id, issuer) FK depends on this constraint.
   CONSTRAINT tenant_issuers_tenant_issuer_key UNIQUE (tenant_id, issuer),
-  -- Resolution key: a token's (iss, org-claim value) maps to exactly one tenant.
-  -- NULLS NOT DISTINCT so a single-tenant issuer (NULL org) maps to one tenant.
+  -- A token's (iss, org-claim value) resolves to one tenant; NULLS NOT DISTINCT
+  -- covers a single-tenant issuer (NULL org).
   CONSTRAINT tenant_issuers_issuer_org_key UNIQUE NULLS NOT DISTINCT (issuer, org_field_value)
 );

@@ -7,9 +7,7 @@ import (
 	"testing"
 )
 
-// configuredPlatformInfo is every field an operator can set, so a field added
-// to the struct without being carried through the handler shows up as a
-// zero-valued round trip rather than passing unnoticed.
+// configuredPlatformInfo sets every field so a dropped field shows up as zero.
 var configuredPlatformInfo = PlatformInfo{
 	Issuer:          "https://auth.example.test",
 	APIURL:          "https://api.example.test",
@@ -44,10 +42,7 @@ func TestPlatformRouteServesConfiguredValues(t *testing.T) {
 	}
 }
 
-// The response's key set is the contract a client parses against, so it is
-// asserted on the raw body rather than through PlatformInfo: a client field
-// with no server counterpart silently resolves to a bundled default, which is
-// exactly the failure this locks down.
+// Asserted on the raw body: a missing key silently resolves to a client default.
 func TestPlatformRouteBodyCarriesEveryDiscoveryKey(t *testing.T) {
 	mux := http.NewServeMux()
 	RegisterPlatformRoute(mux, configuredPlatformInfo)
@@ -78,10 +73,6 @@ func TestPlatformRouteBodyCarriesEveryDiscoveryKey(t *testing.T) {
 	}
 }
 
-// An unset field is an empty string in the body, never an omitted key: a
-// client cannot distinguish "this platform sets no tagline" from "this
-// platform is too old to have one" if the key disappears, and both must fall
-// back to the bundled default rather than fail.
 func TestPlatformRouteRendersUnsetFieldsAsEmptyStrings(t *testing.T) {
 	mux := http.NewServeMux()
 	RegisterPlatformRoute(mux, PlatformInfo{Issuer: "https://auth.example.test"})
@@ -126,9 +117,6 @@ func TestPlatformRouteServesEmptyValuesWithoutError(t *testing.T) {
 }
 
 func TestPlatformRouteIsUnauthenticated(t *testing.T) {
-	// RegisterPlatformRoute is called with a plain *http.ServeMux, never a
-	// ProtectedRouteRegistrar — this test exists to keep that contract from
-	// silently regressing behind a future refactor.
 	mux := http.NewServeMux()
 	RegisterPlatformRoute(mux, PlatformInfo{Issuer: "https://auth.example.test"})
 

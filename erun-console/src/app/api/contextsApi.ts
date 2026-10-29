@@ -2,15 +2,12 @@ import { type CloudContext, isRecord, parseCloudContext } from 'erun-kit';
 
 import { type NoValue, platformApi } from './platformApi';
 
-// The BYO-cloud credentials an operator registers under an alias. `provider`
-// defaults to aws server-side; `credentials` is an opaque provider-specific
-// JSON string the API encrypts at rest (never returned).
+// `credentials` is opaque provider-specific JSON, encrypted at rest and never returned.
 export interface CloudProviderAliasInput {
   provider?: string;
   credentials: string;
 }
 
-// The fields needed to register (provision) a cloud context.
 export interface CreateContextInput {
   name: string;
   cloudProviderAlias: string;
@@ -56,8 +53,6 @@ export const contextsApi = platformApi.injectEndpoints({
       invalidatesTags: ['Config'],
     }),
 
-    // getContext polls one cloud context by id; the provision controller
-    // drives this with `pollingInterval` until status reaches running/failed.
     getContext: builder.query<CloudContext, { token: string; contextId: string }>({
       query: ({ token, contextId }) => ({
         url: `/v1/contexts/${encodeURIComponent(contextId)}`,

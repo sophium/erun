@@ -6,16 +6,14 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
-// machOArtifactBytes opens with the little-endian 64-bit Mach-O magic a
-// darwin/arm64 cross-build produces. The desktop classifies by content, so this
-// is all it takes to reach the signing branch.
+// machOArtifactBytes opens with the 64-bit Mach-O magic; the desktop
+// classifies by content.
 var machOArtifactBytes = append([]byte{0xCF, 0xFA, 0xED, 0xFE}, []byte("erun darwin arm64 artifact")...)
 
-// stubCodesign routes the shared codesign lookup at a script that records its
-// argv and reports the file as carrying no signature, so a test can watch what
-// the desktop does without a macOS host.
 func stubCodesign(t *testing.T, dir string) string {
 	t.Helper()
 	log := filepath.Join(dir, "codesign-calls.log")
@@ -33,8 +31,8 @@ func stubCodesign(t *testing.T, dir string) string {
 
 func seedOrchestratorArtifact(t *testing.T, name string, content []byte) string {
 	t.Helper()
-	dir, err := ensureOrchestratorOutputsDir("erun")
-	if err != nil {
+	dir := orchestratorConfigFile(t, "orchestrator-outputs", "erun")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("ensure outputs dir: %v", err)
 	}
 	path := filepath.Join(dir, name)
@@ -44,21 +42,19 @@ func seedOrchestratorArtifact(t *testing.T, name string, content []byte) string 
 	return path
 }
 
-// arm64 macOS SIGKILLs a Mach-O carrying no signature at all, without printing
-// anything, so the desktop signs one before handing it to the operator to run —
-// and says so, because the file was modified on its way in.
+// arm64 macOS silently SIGKILLs an unsigned Mach-O.
 func TestRunOrchestratorOutputOnHostSignsAnUnsignedDarwinArtifact(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the codesign stub is a POSIX shell script")
 	}
 	home := withOrchestratorConfigHome(t)
 	artifact := seedOrchestratorArtifact(t, "erun-darwin-arm64", machOArtifactBytes)
-	// ERUN_HOST_OS_OVERRIDE pins the darwin branch so the test runs anywhere.
 	t.Setenv("ERUN_HOST_OS_OVERRIDE", "darwin")
 	codesignLog := stubCodesign(t, home)
 
 	emits := newCapturedEmits()
-	app := &App{emitFn: emits.fn(), deps: erunUIDeps{launchHostArtifact: func(string, string) error { return nil }}}
+	app := NewApp(erunUIDeps{launchHostArtifact: func(string, string) error { return nil }})
+	app.SetEmitter(emits.fn())
 	if err := app.RunOrchestratorOutputOnHost("erun", "erun-darwin-arm64"); err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -82,11 +78,11 @@ func TestRunOrchestratorOutputOnHostSignsAnUnsignedDarwinArtifact(t *testing.T) 
 
 func requireOnlyNotification(t *testing.T, emits *capturedEmits, kind, contains string) {
 	t.Helper()
-	events := emits.events(appNotificationEvent)
+	events := emits.events(uimodel.AppNotificationEvent)
 	if len(events) != 1 {
 		t.Fatalf("expected one notification, got %+v", events)
 	}
-	payload, ok := events[0].(appNotificationPayload)
+	payload, ok := events[0].(uimodel.AppNotificationPayload)
 	if !ok {
 		t.Fatalf("unexpected payload type: %T", events[0])
 	}
@@ -95,8 +91,6 @@ func requireOnlyNotification(t *testing.T, emits *capturedEmits, kind, contains 
 	}
 }
 
-// codesign exists only on macOS and so does the problem: on any other host the
-// artifact is handed over exactly as it arrived, and nothing is said about it.
 func TestRunOrchestratorOutputOnHostLeavesANonDarwinHostAlone(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the codesign stub is a POSIX shell script")
@@ -107,7 +101,8 @@ func TestRunOrchestratorOutputOnHostLeavesANonDarwinHostAlone(t *testing.T) {
 	codesignLog := stubCodesign(t, home)
 
 	emits := newCapturedEmits()
-	app := &App{emitFn: emits.fn(), deps: erunUIDeps{launchHostArtifact: func(string, string) error { return nil }}}
+	app := NewApp(erunUIDeps{launchHostArtifact: func(string, string) error { return nil }})
+	app.SetEmitter(emits.fn())
 	if err := app.RunOrchestratorOutputOnHost("erun", "erun-darwin-arm64"); err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -122,7 +117,7 @@ func TestRunOrchestratorOutputOnHostLeavesANonDarwinHostAlone(t *testing.T) {
 	if info.Mode().Perm()&0o111 != 0 {
 		t.Fatalf("expected the artifact left untouched, got mode %v", info.Mode().Perm())
 	}
-	if got := emits.events(appNotificationEvent); len(got) != 0 {
+	if got := emits.events(uimodel.AppNotificationEvent); len(got) != 0 {
 		t.Fatalf("expected no notification off darwin, got %+v", got)
 	}
 }

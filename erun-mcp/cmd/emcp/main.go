@@ -11,23 +11,38 @@ import (
 	"strings"
 	"syscall"
 
-	eruncommon "github.com/sophium/erun/erun-common"
-	erunmcp "github.com/sophium/erun/erun-mcp"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-mcp"
+	"github.com/sophium/erun/erun-mcp/tools/shared/buildinfo"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimedefaults"
 )
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stderr, erunmcp.CurrentBuildInfo(), erunmcp.RunHTTP))
+	os.Exit(run(os.Args[1:], os.Stderr, buildinfo.CurrentBuildInfo(), withRuntimeDefaults(erunmcp.RunHTTP)))
 }
 
-type serverRunner func(context.Context, eruncommon.BuildInfo, erunmcp.HTTPConfig, erunmcp.MetricsConfig, erunmcp.RuntimeConfig) error
+// withRuntimeDefaults wires the concrete build, deploy and cluster primitives
+// here rather than in the server package, so editing a primitive does not
+// recompile the server. The defaults are applied twice on purpose: each pass
+// wraps DeployHelmChart in a namespace and quota ensure, and the edge has
+// always run that ensure twice per deploy.
+func withRuntimeDefaults(next serverRunner) serverRunner {
+	return func(ctx context.Context, info model.BuildInfo, cfg erunmcp.HTTPConfig, metricsCfg erunmcp.MetricsConfig, runtime runtimecfg.RuntimeConfig) error {
+		runtime = runtimedefaults.NormalizeRuntimeConfig(runtimedefaults.NormalizeRuntimeConfig(runtime))
+		return next(ctx, info, cfg, metricsCfg, runtime)
+	}
+}
 
-func run(args []string, stderr io.Writer, info eruncommon.BuildInfo, runServer serverRunner) int {
+type serverRunner func(context.Context, model.BuildInfo, erunmcp.HTTPConfig, erunmcp.MetricsConfig, runtimecfg.RuntimeConfig) error
+
+func run(args []string, stderr io.Writer, info model.BuildInfo, runServer serverRunner) int {
 	flags := flag.NewFlagSet("emcp", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 
 	cfg := erunmcp.HTTPConfig{}
 	metricsCfg := erunmcp.MetricsConfig{}
-	runtime := erunmcp.RuntimeConfig{}
+	runtime := runtimecfg.RuntimeConfig{}
 	flags.StringVar(&cfg.Host, "host", erunmcp.DefaultHost, "Host interface to bind the MCP HTTP server to")
 	flags.IntVar(&cfg.Port, "port", erunmcp.DefaultPort, "Port to bind the MCP HTTP server to")
 	flags.StringVar(&cfg.Path, "path", erunmcp.DefaultPath, "HTTP path to serve the MCP endpoint from")

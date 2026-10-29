@@ -1,7 +1,4 @@
-// tenantInviteRequestThunks drives "Request an invitation" (NotEnrolledState's
-// second action) and the operator/admin queue's issue/decline actions.
-// Split out of tenantPlatformConnectThunks.ts/tenantDialogThunks.ts since
-// invite requests are a distinct enough workflow to own their own file.
+// tenantInviteRequestThunks drives "Request an invitation" and the queue's issue/decline actions.
 
 import {
   INVITE_REQUEST_KIND_JOIN_TENANT,
@@ -45,9 +42,6 @@ export const setRequestNoteDraft =
     dispatch(patchTenantDashboard({ requestNoteDraft: note }));
   };
 
-// requestInvitationSubmitDisabledReason names why the dialog's submit button
-// is disabled, so the countdown itself is the visible reason (Nielsen #1) —
-// never a bare disabled button with no explanation.
 export function requestInvitationSubmitDisabledReason(
   requesting: boolean,
   rateLimitedUntil: number,
@@ -66,9 +60,7 @@ export function requestInvitationSubmitDisabledReason(
     : `You can send another request in ${String(seconds)} seconds.`;
 }
 
-// submitInviteRequest submits (or, for an identity with an existing pending
-// request, updates) a request to join or create tenantName. The requester's
-// identity is never sent — the platform reads it from the verified bearer.
+// The requester's identity is never sent; the platform reads it from the bearer.
 export const submitInviteRequest =
   (params: { tenantName: string; environmentName?: string }): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {
@@ -142,10 +134,7 @@ export const setDeclineReasonDraft =
     dispatch(patchTenantDashboard({ declineReasonDraft: reason }));
   };
 
-// confirmDeclineInviteRequest requires a non-empty reason: a decline with no
-// reason reaches nobody, and root AGENTS.md forbids that dead end — the
-// dialog's own confirm button stays disabled until declineReasonDraft is
-// non-empty (enforced in the component), this is the second guard.
+// A decline needs a reason; this backs up the component's disabled confirm.
 export const confirmDeclineInviteRequest =
   (): AppThunk<Promise<void>> => async (dispatch, getState) => {
     const dashboard = getState().tenantDashboard;
@@ -184,10 +173,6 @@ export const confirmDeclineInviteRequest =
     }
   };
 
-// approveInviteRequest issues the invitation directly (no confirm dialog —
-// non-destructive, the same one-click treatment "Reactivate" gets in
-// UsersPanel), and keeps the minted link on screen as the transferable
-// artefact/manual fallback.
 export const approveInviteRequest =
   (inviteRequestId: string): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {
@@ -224,10 +209,6 @@ export const approveInviteRequest =
     }
   };
 
-// useMyInviteRequest is NotEnrolledState's own read: prefer the dashboard
-// payload's myInviteRequest (loaded alongside everything else), falling back
-// to nothing rather than a second round trip — LoadTenantDashboard already
-// resolves this whenever a bearer minted, including the not-enrolled state.
 export function useMyInviteRequest() {
   return useAppSelector((state) => state.tenantDashboard.data?.myInviteRequest ?? null);
 }

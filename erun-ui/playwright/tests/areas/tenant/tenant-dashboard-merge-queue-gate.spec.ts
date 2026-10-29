@@ -9,15 +9,8 @@ import {
 } from '../../../fixtures/seedRoot.js';
 import type { AppShell } from '../../../pages/index.js';
 
-// tenant-dashboard-merge-queue-gate covers the unresolved-thread gate on
-// AdvanceMergeQueue: a blocked advance must name the count and the review,
-// offer a route to the discussion, and — only for a caller the platform
-// grants the distinct override route to — a reason-required override. See
-// tenant-dashboard-review-write.spec.ts for the unblocked
-// advance/create/close/comment coverage this complements; the Go side of
-// both the gate and the override lives in
-// erun-backend-api/internal/service/reviews_test.go and
-// erun-ui/tenant_review_write_test.go.
+// A blocked AdvanceMergeQueue must name the count and review, link the
+// discussion, and offer a reason-required override only to permitted callers.
 function seedDashboardEnvironment(title: string): string {
   const environment = uniqueEnvironmentName(title);
   seedEnvironment(SEED_TENANT, environment, 'apiurl: http://127.0.0.1:1/unreachable\n');
@@ -28,8 +21,7 @@ function invokeBody(request: Request): { method: string } {
   return JSON.parse(request.postData() ?? '{}') as { method: string };
 }
 
-// invokeArgs reads the single-input-struct arg every Wails method here takes,
-// the same envelope shape headlessserver.invokeRequest decodes on the wire.
+// invokeArgs reads the single input struct every Wails method takes.
 function invokeArgs<T>(request: Request): T {
   const parsed = JSON.parse(request.postData() ?? '{}') as { args?: [T] };
   return (parsed.args?.[0] ?? {}) as T;
@@ -131,8 +123,7 @@ test.describe('tenant dashboard — merge queue unresolved-thread gate', () => {
       await expect(alert).toContainText(BLOCKED_REVIEW.name);
       await expect(alert).toContainText('3');
       await expect(alert).toContainText('unresolved');
-      // No caller has an unrestricted "always show Override" affordance:
-      // canOverrideMergeQueue defaults to false in this scenario.
+      // canOverrideMergeQueue defaults to false here, so no override is offered.
       await expect(app.tenantDashboard.mergeQueueOverrideAnywayButton()).toHaveCount(0);
 
       await app.tenantDashboard.mergeQueueViewDiscussionButton().click();
@@ -182,7 +173,6 @@ test.describe('tenant dashboard — merge queue unresolved-thread gate', () => {
       await app.tenantDashboard.advanceMergeQueueConfirmButton().click();
       await expect(app.tenantDashboard.mergeQueueBlockedAlert()).toBeVisible();
 
-      // The override does not act on a single click: it demands a reason.
       await app.tenantDashboard.mergeQueueOverrideAnywayButton().click();
       const reasonInput = app.tenantDashboard.mergeQueueOverrideReasonInput();
       await expect(reasonInput).toBeVisible();
@@ -235,8 +225,7 @@ test.describe('tenant dashboard — merge queue unresolved-thread gate', () => {
       await app.tenantDashboard.mergeQueueOverrideCancelButton().click();
 
       await expect(app.tenantDashboard.mergeQueueOverrideReasonInput()).toHaveCount(0);
-      // Cancelling the override is not cancelling the whole refusal: the
-      // operator is still exactly where "resolve the threads instead" holds.
+      // Cancelling the override leaves the refusal in place.
       await expect(app.tenantDashboard.mergeQueueBlockedAlert()).toBeVisible();
       await expect(app.tenantDashboard.mergeQueueViewDiscussionButton()).toBeVisible();
     } finally {

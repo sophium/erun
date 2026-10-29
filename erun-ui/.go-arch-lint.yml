@@ -1,0 +1,143 @@
+version: 3
+workdir: .
+allow:
+  depOnAnyVendor: false
+  deepScan: false
+
+vendors:
+  cgo:
+    in: ["C"]
+  github-com-ActiveState-termtest-conpty:
+    in: ["github.com/ActiveState/termtest/conpty", "github.com/ActiveState/termtest/conpty/**"]
+  github-com-adrg-xdg:
+    in: ["github.com/adrg/xdg", "github.com/adrg/xdg/**"]
+  github-com-creack-pty:
+    in: ["github.com/creack/pty", "github.com/creack/pty/**"]
+  github-com-fsnotify-fsnotify:
+    in: ["github.com/fsnotify/fsnotify", "github.com/fsnotify/fsnotify/**"]
+  github-com-google-uuid:
+    in: ["github.com/google/uuid", "github.com/google/uuid/**"]
+  github-com-modelcontextprotocol-go-sdk:
+    in: ["github.com/modelcontextprotocol/go-sdk", "github.com/modelcontextprotocol/go-sdk/**"]
+  github-com-sophium-erun-erun-common:
+    in: ["github.com/sophium/erun/erun-common", "github.com/sophium/erun/erun-common/**"]
+  github-com-wailsapp-wails-v2:
+    in: ["github.com/wailsapp/wails/v2", "github.com/wailsapp/wails/v2/**"]
+
+excludeFiles:
+  - "^.*/node_modules/.*$"
+
+exclude:
+  - playwright/fixtures/winstub
+
+components:
+  headlessserver:
+    in: "headlessserver"
+  internal-activity:
+    in: "internal/activity"
+  internal-cloudctx:
+    in: "internal/cloudctx"
+  internal-contribute:
+    in: "internal/contribute"
+  internal-envops:
+    in: "internal/envops"
+  internal-investigate:
+    in: "internal/investigate"
+  internal-orchestrator:
+    in: "internal/orchestrator"
+  internal-runtimeview:
+    in: "internal/runtimeview"
+  internal-settings:
+    in: "internal/settings"
+  internal-tenant:
+    in: "internal/tenant"
+  internal-terminal:
+    in: "internal/terminal"
+  internal-uimodel:
+    in: "internal/uimodel"
+  root:
+    in: "."
+
+deps:
+  internal-activity:
+    mayDependOn:
+      - internal-uimodel
+    canUse:
+      - github-com-sophium-erun-erun-common
+  internal-cloudctx:
+    mayDependOn:
+      - internal-uimodel
+    canUse:
+      - github-com-modelcontextprotocol-go-sdk
+      - github-com-sophium-erun-erun-common
+  internal-contribute:
+    mayDependOn:
+      - internal-uimodel
+    canUse:
+      - github-com-sophium-erun-erun-common
+  internal-envops:
+    mayDependOn:
+      - internal-uimodel
+    canUse:
+      - github-com-adrg-xdg
+      - github-com-sophium-erun-erun-common
+  internal-investigate:
+    mayDependOn:
+      - internal-uimodel
+    canUse:
+      - github-com-adrg-xdg
+      - github-com-sophium-erun-erun-common
+  internal-orchestrator:
+    mayDependOn:
+      - internal-uimodel
+    canUse:
+      - github-com-adrg-xdg
+      - github-com-google-uuid
+      - github-com-sophium-erun-erun-common
+  internal-runtimeview:
+    mayDependOn:
+      - internal-uimodel
+    canUse:
+      - github-com-adrg-xdg
+      - github-com-sophium-erun-erun-common
+  internal-settings:
+    mayDependOn:
+      - internal-uimodel
+    canUse:
+      - github-com-adrg-xdg
+      - github-com-fsnotify-fsnotify
+      - github-com-sophium-erun-erun-common
+  internal-tenant:
+    mayDependOn:
+      - internal-uimodel
+    canUse:
+      - github-com-sophium-erun-erun-common
+  internal-terminal:
+    mayDependOn:
+      - internal-uimodel
+    canUse:
+      - github-com-ActiveState-termtest-conpty
+      - github-com-adrg-xdg
+      - github-com-creack-pty
+      - github-com-modelcontextprotocol-go-sdk
+      - github-com-sophium-erun-erun-common
+  root:
+    mayDependOn:
+      - headlessserver
+      - internal-activity
+      - internal-cloudctx
+      - internal-contribute
+      - internal-envops
+      - internal-investigate
+      - internal-orchestrator
+      - internal-runtimeview
+      - internal-settings
+      - internal-tenant
+      - internal-terminal
+      - internal-uimodel
+    canUse:
+      - cgo
+      - github-com-adrg-xdg
+      - github-com-modelcontextprotocol-go-sdk
+      - github-com-sophium-erun-erun-common
+      - github-com-wailsapp-wails-v2

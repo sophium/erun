@@ -13,16 +13,9 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/harnessexec"
 )
 
-// TestJobOffEnvironmentExclusiveClaimIsEnforced is the exact reproduction
-// that was reported, run against a real MCP edge rather than a dry-run
-// trace: an exclusive job started from a host caller (no ERUN_REPO_REMOTE,
-// exactly `erun exec job start --exclusive` typed on an operator's machine)
-// used to leave a caller in the same off-environment path free to start a
-// second job while the first was still running, because --exclusive never
-// reached exec_raw's arguments at all -- the edge enforced nothing, and both
-// calls reported success. This proves the fix: the second, ordinary job
-// start is now refused and names the holder, the same guarantee job_test.go
-// already locks for the in-environment path.
+// TestJobOffEnvironmentExclusiveClaimIsEnforced: an exclusive job started by a
+// host caller through a real MCP edge makes a second job start fail, naming
+// the holder.
 func TestJobOffEnvironmentExclusiveClaimIsEnforced(t *testing.T) {
 	const mcpPort = 26700
 	const metricsPort = 26701
@@ -38,9 +31,8 @@ func TestJobOffEnvironmentExclusiveClaimIsEnforced(t *testing.T) {
 	release := filepath.Join(setup.Cwd, "release")
 	fixture.StubBinaryWithScript(t, stubs, "work", "while [ ! -f '"+release+"' ]; do sleep 0.05; done\nexit 0\n")
 
-	// emcp stands in for the target environment's own edge, exactly as
-	// TestJobOffEnvironmentAgentReinvocation's does; ERUN_REPO_REMOTE=true is
-	// what makes the job it starts run as genuinely in-environment work.
+	// emcp stands in for the environment's edge; ERUN_REPO_REMOTE=true makes its
+	// jobs in-environment work.
 	emcpEnv := append(append([]string{}, setup.Env()...), fixture.StubEnv(stubs, "work")...)
 	emcpEnv = append(emcpEnv, "ERUN_ERUN_BIN="+bin, "ERUN_REPO_REMOTE=true")
 
@@ -55,22 +47,15 @@ func TestJobOffEnvironmentExclusiveClaimIsEnforced(t *testing.T) {
 	if err := emcpCmd.Start(); err != nil {
 		t.Fatalf("start emcp: %v", err)
 	}
-	// Registered before every job teardown below, so t.Cleanup's LIFO order
-	// runs it after them: stopOffEnvironmentJob reads each job's supervisor
-	// back through this edge, and an edge killed first would leave that wait
-	// unable to read anything. That ordering is a requirement of this
-	// registration, not a convenience -- moving this cleanup below a job
-	// teardown turns the teardown into a loud failure naming the channel
-	// rather than a silent pass (awaitJobSupervisorExitVia).
+	// Registered before the job teardowns so LIFO runs it after: they read
+	// supervisors back through this edge.
 	t.Cleanup(func() {
 		_ = emcpCmd.Process.Kill()
 		_ = emcpCmd.Wait()
 	})
 	waitForLocalPort(t, mcpPort)
 
-	// The host half: a caller outside any environment, exactly the
-	// reproduction's `erun exec job start --exclusive`. No ERUN_REPO_REMOTE
-	// here -- that is the whole point of this scenario.
+	// The host caller: no ERUN_REPO_REMOTE.
 	hostEnv := setup.Env()
 
 	start := erun.Run(t, []string{"exec", "job", "start", "--tenant", "team", "--environment", "dev", "--name", "gate", "--id", "gate", "--exclusive", "--", "work"},

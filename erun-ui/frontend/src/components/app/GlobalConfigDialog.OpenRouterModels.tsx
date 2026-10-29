@@ -20,12 +20,6 @@ import { isClaudeModelToken } from '@/components/app/claudeModels.helpers';
 import { InlineAlert } from '@/components/app/InlineAlert';
 import type { UIGatewayModel, UIOpenRouterModel } from '@/uiOpenRouterTypes';
 
-// The catalog's model rows, split from the section that owns the catalog's
-// state: these are presentational, taking the current rows and the edit
-// callbacks, and the section keeps the dispatch and the credential wiring.
-
-// OpenRouterModelsField edits the catalog rows: the model ids an environment may
-// select, and each id's context window.
 export function OpenRouterModelsField({
   models,
   candidates,
@@ -135,10 +129,7 @@ function OpenRouterModelRow({
     >
       <div className="grid gap-1">
         <div className="relative">
-          {/* The field stays typeable as well as pickable: a gateway serves ids
-              it does not list, and refusing one would leave no way to reach it.
-              The list is searched rather than scrolled, because a gateway can
-              serve hundreds of models. */}
+          {/* Stays typeable: a gateway serves ids it does not list. */}
           <Input
             aria-label={`Model id ${String(index + 1)}`}
             className={candidates.length > 0 ? 'pr-10' : undefined}
@@ -158,8 +149,6 @@ function OpenRouterModelRow({
               candidates={candidates}
               disabled={disabled}
               onPick={(candidate) => {
-                // A window the gateway reports comes with the pick; one that
-                // reports none leaves whatever is there.
                 onSetModel(index, {
                   id: candidate.id,
                   ...(candidate.context ? { context: candidate.context } : {}),
@@ -186,8 +175,7 @@ function OpenRouterModelRow({
         placeholder="Context window"
         onChange={(event) => {
           const next = event.target.value.trim();
-          // An empty window is unknown rather than zero, so the launch leaves
-          // Claude Code's own assumption in place.
+          // Empty means unknown, not zero, so Claude Code's own assumption stays.
           onSetModel(index, { context: next === '' ? undefined : Math.trunc(Number(next)) });
         }}
       />
@@ -202,9 +190,6 @@ function OpenRouterModelRow({
   );
 }
 
-// OpenRouterModelRowActions holds everything on a catalog row that acts on the
-// listing rather than editing its fields: the reasoning-echo declaration and the
-// remove control.
 function OpenRouterModelRowActions({
   model,
   index,
@@ -231,9 +216,7 @@ function OpenRouterModelRowActions({
           checked={model.requiresReasoningEcho === true}
           disabled={disabled}
           onChange={(event) => {
-            // An undeclared row and a declared-false one mean the same thing, so
-            // clearing the box removes the key rather than storing a false every
-            // reader would then have to interpret.
+            // Undeclared and false mean the same, so unchecking removes the key.
             onSetModel(index, { requiresReasoningEcho: event.target.checked ? true : undefined });
           }}
         />
@@ -255,9 +238,6 @@ function OpenRouterModelRowActions({
   );
 }
 
-// GatewayModelChoices is the searchable list of what the gateway serves. It is
-// searched rather than scrolled because a gateway can serve hundreds of models,
-// and a flat list of them is unusable.
 function GatewayModelChoices({
   index,
   selectedId,
@@ -311,10 +291,7 @@ function GatewayModelChoices({
   );
 }
 
-// GatewayModelItem is one searchable choice: the name the gateway gives it, the
-// id it actually launches with, and the window that comes with the pick. The
-// entry's value carries both name and id so a search matches either — an
-// operator may know the model by its name and the launch needs the id.
+// The item value carries both name and id so search matches either.
 function GatewayModelItem({
   candidate,
   selected,

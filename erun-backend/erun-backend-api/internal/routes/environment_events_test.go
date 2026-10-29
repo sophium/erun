@@ -69,12 +69,7 @@ func TestReadEnvironmentEventsParsesTheCursorAndFilter(t *testing.T) {
 	}
 }
 
-// TestReadEnvironmentEventsRefusesAnUnparsableCursor is the guard that a
-// resume position is never silently reinterpreted. Treating `cursor` as
-// optional would parse a junk token as the zero cursor and answer with the
-// whole log from the beginning -- replaying every event to a client that
-// asked only for what it missed, which is the one thing a resume cursor
-// exists to prevent.
+// A junk cursor must not be read as the zero cursor and replay the whole log.
 func TestReadEnvironmentEventsRefusesAnUnparsableCursor(t *testing.T) {
 	for _, cursor := range []string{"not-a-cursor", "1.5", "-1", "0x10"} {
 		stub := &stubEnvironmentEventRepository{}
@@ -97,9 +92,6 @@ func TestReadEnvironmentEventsRefusesAnUnparsableLimit(t *testing.T) {
 	}
 }
 
-// TestReadEnvironmentEventsReportsAnEmptyPageAsAnEmptyArray guards the
-// client-side contract: a stream with nothing new to hand back must render as
-// an empty list, not a missing field a client would have to guess at.
 func TestReadEnvironmentEventsReportsAnEmptyPageAsAnEmptyArray(t *testing.T) {
 	route := EnvironmentEventRoutes{events: &stubEnvironmentEventRepository{}}
 	rec := getEnvironmentEvents(t, route, "")
@@ -158,8 +150,7 @@ func TestAppendEnvironmentEventRecordsTheReportedEvent(t *testing.T) {
 	if stub.appended.Detail != `{"sessionId":"s1"}` {
 		t.Fatalf("detail = %q, want it stored uninterpreted", stub.appended.Detail)
 	}
-	// The position is the database's to assign: a request body has no way to
-	// claim one.
+	// The position is assigned by the database, never the request body.
 	if stub.appended.EnvironmentEventSeq != 0 {
 		t.Fatalf("seq = %d, want the caller unable to set it", stub.appended.EnvironmentEventSeq)
 	}

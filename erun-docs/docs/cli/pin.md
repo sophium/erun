@@ -52,7 +52,7 @@ It edits the source of truth and stops there. **Realizing** the new version — 
 |---|---|
 | `--version` | Pin to this erun version. Refused if it is not published. |
 | `--latest` | Pin to the latest published stable release (the default when no version is given). |
-| `--revert` | Pin back to the version recorded before the last re-pin. |
+| `--revert` | Pin back to the version recorded before the last re-pin. A revert across a release that moved the hosted IdP also needs its database restored ([Hosted IdP](/deployment/deploy-platform#hosted-idp)). |
 | `--list` | List the published erun versions available to pin to. |
 | `--dry-run` | Resolve and print the full plan — every site, old → new — without writing. |
 | `--tenant`, `--environment` | Target a specific tenant/environment. |

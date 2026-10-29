@@ -9,12 +9,8 @@ import {
   uniqueEnvironmentName,
 } from '../../../fixtures/seedRoot.js';
 
-// See tenant-dashboard-audit-log.spec.ts for why this stages a throwaway env
-// with an apiUrl and stubs the RPC: the capability set these tests stage comes
-// from a hosted erun-backend-api the inert harness deliberately has no access
-// to, so the permission-derived rendering is exercised over the stubbed RPC.
-// The Go side that derives these panels from the platform's capability answer is
-// covered by erun-ui/tenant_dashboard_test.go.
+// The capability set comes from a hosted API the harness cannot reach, so the
+// RPC is stubbed.
 function seedDashboardEnvironment(title: string): string {
   const environment = uniqueEnvironmentName(title);
   seedEnvironment(SEED_TENANT, environment, 'apiurl: http://127.0.0.1:1/unreachable\n');
@@ -93,7 +89,6 @@ test.describe('tenant dashboard — permission-derived surfaces (#1210)', () => 
       );
       await expect(app.tenantDashboard.restrictedAccessNote()).toContainText('GET /v1/reviews');
 
-      // The panel this caller may read still works while the others are hidden.
       await app.tenantDashboard.selectTab('Audit log');
       await expect(app.tenantDashboard.auditRows()).toHaveCount(1);
       await expect(app.tenantDashboard.auditTable()).toContainText('GET /v1/audit-events');
@@ -136,14 +131,9 @@ test.describe('tenant dashboard — permission-derived surfaces (#1210)', () => 
       await app.sidebar.openTenantDashboard(SEED_TENANT);
       await app.tenantDashboard.waitForOpen();
 
-      // A failed panel keeps its tab, so the failure is reachable rather than
-      // hidden the way a missing permission is.
+      // A failed panel keeps its tab, unlike a missing permission.
       await app.tenantDashboard.selectTab('Builds');
       await expect(app.tenantDashboard.activePanel()).toContainText('http 500');
-      // PanelBody's error branch used to render through a bespoke
-      // DashboardMessage <div> with no ARIA role at all, so a screen reader
-      // never announced it. It now renders through InlineAlert (role="alert"),
-      // queried here via the accessibility tree rather than an attribute match.
       await expect(app.tenantDashboard.activePanel().getByRole('alert')).toContainText('http 500');
       await page.screenshot({
         path: artifactPath('test-results/dashboard-panel-error-alert-light.png'),
@@ -184,8 +174,7 @@ test.describe('tenant dashboard — permission-derived surfaces (#1210)', () => 
             { tab: 'registration', restricted: 'GET /v1/contexts' },
             { tab: 'requests', restricted: 'GET /v1/invite-requests' },
           ],
-          // The summary names every missing read at once, so it hands over the
-          // grant for each one a role covers — here, only the audit read.
+          // The summary offers the grant for each missing read a role covers.
           {
             accessRemedies: {
               'GET /v1/audit-events': {
@@ -200,8 +189,7 @@ test.describe('tenant dashboard — permission-derived surfaces (#1210)', () => 
       await app.sidebar.openTenantDashboard(SEED_TENANT);
       await app.tenantDashboard.waitForOpenRestricted();
 
-      // Only the API log survives: it is read over the environment's own MCP
-      // edge, not the platform API, so it carries no platform permission.
+      // The API log is read over the env's MCP edge, so it needs no platform permission.
       await expect(app.tenantDashboard.tabs()).toHaveCount(1);
       await expect(app.tenantDashboard.restrictedAccessNote()).toContainText(
         'GET /v1/audit-events',
@@ -209,14 +197,11 @@ test.describe('tenant dashboard — permission-derived surfaces (#1210)', () => 
       await expect(app.tenantDashboard.restrictedAccessNote()).toContainText(
         'Ask an administrator for access',
       );
-      // Naming the missing reads is not enough: the note carries the grant that
-      // lifts the one a role covers, with this caller's own user id in it.
       await expect(app.tenantDashboard.restrictedAccessNote()).toContainText(
         'erun platform user grant-role --user-id u1 --role-id role-audit',
       );
       await expect(app.tenantDashboard.restrictedAccessNote()).toContainText('Auditor');
-      // Nothing renders as an empty table the user could read as "this tenant
-      // has nothing in it".
+      // No empty table that could read as "this tenant has nothing".
       await expect(app.tenantDashboard.activePanel().getByRole('table')).toHaveCount(0);
     } finally {
       removeEnvironment(SEED_TENANT, environment);
@@ -224,21 +209,10 @@ test.describe('tenant dashboard — permission-derived surfaces (#1210)', () => 
   });
 });
 
-// #1390: a stale signed-in identity fails the dashboard's own precondition
-// read (whoami) before any panel is even attempted, so it blocks the whole
-// dashboard — apiError, not a per-panel error. That message names "sign in"
-// as its fix, and the app already has a control for it (the same cloud-alias
-// login the sidebar offers), so it must render with that control rather than
-// as inert text in an empty panel.
+// A stale identity fails whoami before any panel, so it blocks the whole
+// dashboard and must offer the sign-in control.
 test.describe('tenant dashboard — a stale identity blocks the whole dashboard (#1390)', () => {
-  // #1392: a successful sign-in used to leave this exact alert and button on
-  // screen — the login dispatched and the sidebar's alias updated, but
-  // nothing re-fetched the dashboard, so the operator saw the identical
-  // stale-identity error next to a session that had just been fixed. The
-  // route stub answers LoadTenantDashboard differently on the re-fetch
-  // triggered by a successful login than it did on the initial load, so this
-  // proves the panel actually recovers rather than merely dispatching a
-  // login that changes nothing on screen.
+  // A successful sign-in must re-fetch; the stub answers the re-fetch differently.
   test('offers to sign in, and a successful sign-in re-fetches the dashboard so the panel recovers', async ({
     app,
     page,
@@ -297,16 +271,9 @@ test.describe('tenant dashboard — a stale identity blocks the whole dashboard 
       const signIn = app.tenantDashboard.signInButton();
       await expect(signIn).toBeVisible();
       await signIn.click();
-      // Every poll in this file waits on a value this spec's own route handler
-      // owns, and `expect.poll` carries no timeout of its own: with none it
-      // resolves to expect's 10s default rather than the 30s this test
-      // declares, so a sign-in whose answer is merely slow reds the step with
-      // the test's own clock unspent. Pointed at that budget instead; the
-      // held-answer case at the end of this file is the reproduction.
+      // expect.poll defaults to expect.timeout, not the test deadline.
       await expect.poll(() => loginAlias, withTestBudget()).toBe('pw-aws');
 
-      // The panel must recover: the not-signed-in state and its Log in
-      // button are gone, replaced by the freshly re-fetched dashboard.
       await expect(app.tenantDashboard.notSignedInHeading()).toHaveCount(0);
       await expect(page.getByRole('button', { name: 'Log in' })).toHaveCount(0);
       await app.tenantDashboard.waitForOpen();
@@ -316,9 +283,6 @@ test.describe('tenant dashboard — a stale identity blocks the whole dashboard 
     }
   });
 
-  // The mirror case: a sign-in that does not succeed must say so rather than
-  // silently re-rendering the identical message, which is the same trap one
-  // level down (#1392).
   test('a failed sign-in reports the failure and leaves the error in place', async ({
     app,
     page,
@@ -359,14 +323,11 @@ test.describe('tenant dashboard — a stale identity blocks the whole dashboard 
       const signIn = app.tenantDashboard.signInButton();
       await signIn.click();
 
-      // The real reason, not a generic "Sign-in failed" sentence. Scoped to
-      // main: a toast notification carries the same message too, and both
-      // are role="alert".
+      // Scoped to main: the toast carries the same message, also role="alert".
       await expect(
         page.getByRole('main').getByRole('alert').filter({ hasText: 'sign-in was refused' }),
       ).toBeVisible();
-      // The not-signed-in state is still there — the operator can try again —
-      // but no extra dashboard re-fetch happened.
+      // Still signed out, but with no extra re-fetch.
       await expect(app.tenantDashboard.notSignedInHeading()).toBeVisible();
       await expect.poll(() => dashboardLoads, withTestBudget()).toBe(1);
     } finally {
@@ -408,21 +369,8 @@ test.describe('tenant dashboard — a stale identity blocks the whole dashboard 
     }
   });
 
-  // The sign-in's own answer is what the poll above waits on, and `expect.poll`
-  // carries no timeout of its own: with none it resolves to expect's 10s
-  // default rather than the budget this test declares. Under contention an
-  // answer that is merely slow therefore reds the step with the test's own
-  // clock unspent, which is how a loaded machine turns into a failing branch
-  // nobody touched. The hold below is deliberately just past that 10s default
-  // -- the smallest delay that discriminates -- so the suite pays seconds here
-  // rather than the tens a genuinely loaded machine would.
-  //
-  // Pre-fix this case reds at exactly 10_000ms with 50s of its own budget
-  // unused; with the poll pointed at that budget it passes at the answer's real
-  // arrival. The delay is injected at a named RPC (this spec's own
-  // LoginCloudProvider stub) rather than by loading the machine, so the
-  // reproduction is deterministic on a quiet host -- the same shape
-  // tests/areas/manage/manage-runtime-sizing.spec.ts uses for the panel reads.
+  // The sign-in answer is held just past expect's 10s default, so a poll not
+  // using the test budget would fail here.
   test('a sign-in answer that lands past the poll cap is waited out, not cut off', async ({
     app,
     page,
@@ -447,8 +395,6 @@ test.describe('tenant dashboard — a stale identity blocks the whole dashboard 
           return;
         }
         if (body.method === 'LoginCloudProvider') {
-          // Held past expect's 10s default and recorded only when it lands, so
-          // the poll's own clock is what decides this step.
           await new Promise((resolve) => setTimeout(resolve, 12_000));
           loginAlias = body.args?.[0] ?? '';
           await route.fulfill({

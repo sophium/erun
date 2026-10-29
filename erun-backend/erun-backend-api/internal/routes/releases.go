@@ -25,9 +25,7 @@ type ReleaseRoutes struct {
 	queue    ReleaseQueueService
 }
 
-// RegisterReleaseRoutes wires the release endpoints and returns the same routes
-// value as the review status route's release trigger, so an accepted review and
-// an explicit trigger enqueue through one path.
+// RegisterReleaseRoutes wires the release endpoints; the returned routes also serve the review status trigger.
 func RegisterReleaseRoutes(register ProtectedRouteRegistrar, releases ReleaseRepository, queue ReleaseQueueService) ReleaseRoutes {
 	routes := ReleaseRoutes{releases: releases, queue: queue}
 	register(http.MethodGet, "/v1/releases", http.HandlerFunc(routes.listReleases))
@@ -37,17 +35,13 @@ func RegisterReleaseRoutes(register ProtectedRouteRegistrar, releases ReleaseRep
 	return routes
 }
 
-// createReleaseRequest is the trigger: the merge commit to release, the branch it
-// landed on, and optionally the review that earned it.
 type createReleaseRequest struct {
 	ReviewID     string `json:"reviewId"`
 	TargetBranch string `json:"targetBranch"`
 	CommitID     string `json:"commitId"`
 }
 
-// createRelease enqueues a release for a merge commit. It answers 200 rather
-// than 201 for a commit that already has a release, so a caller can tell an
-// enqueue apart from "this commit is already released" without minting anything.
+// createRelease answers 200, not 201, for a commit that already has a release.
 func (r ReleaseRoutes) createRelease(w http.ResponseWriter, req *http.Request) {
 	var body createReleaseRequest
 	if err := decodeJSON(req, &body); err != nil {
@@ -70,10 +64,7 @@ func (r ReleaseRoutes) createRelease(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusOK, result.Release)
 }
 
-// TriggerRelease enqueues the release an accepted review earns. It is shared
-// with the review status route, which is where the "accepted, therefore
-// release" policy lives; running the release itself is the environment's own
-// job, not this control plane's — see AGENTS.md "Merge Queue".
+// TriggerRelease enqueues the release an accepted review earns.
 func (r ReleaseRoutes) TriggerRelease(ctx context.Context, request service.ReleaseRequest) error {
 	_, err := r.queue.Enqueue(ctx, request)
 	return err
@@ -93,8 +84,6 @@ func (r ReleaseRoutes) listReleases(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusOK, releases)
 }
 
-// listReviewReleases is how a review names why its release failed: the reason
-// the release itself gave lives on the release row, not on the review.
 func (r ReleaseRoutes) listReviewReleases(w http.ResponseWriter, req *http.Request) {
 	releases, err := r.releases.List(req.Context(), apirepository.ReleaseFilter{ReviewID: req.PathValue("review_id")})
 	if err != nil {

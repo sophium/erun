@@ -4,7 +4,7 @@ import * as React from 'react';
 
 import type { WhipTargetSelection } from '@/app/model';
 
-import type { main } from '../../../wailsjs/go/models';
+import type { orchestrator } from '../../../wailsjs/go/models';
 
 interface TargetRow {
   id: string;
@@ -12,23 +12,13 @@ interface TargetRow {
   checked: boolean;
 }
 
-// The three group shortcuts, each declared once. The icon-only button has no
-// visible text of its own, so its IconTooltip label is the label an operator
-// can see and read out; the button's accessible name is the same string, read
-// from the same place. Written twice by hand, the third one had already
-// drifted to "Select all" — a name that does not contain its own visible
-// label (WCAG 2.5.3 "Label in Name") and so matches neither voice control read
-// aloud nor the two shortcuts beside it. One field makes that
-// unrepresentable rather than fixing the one instance.
+// One field supplies both tooltip and accessible name (WCAG 2.5.3 Label in Name).
 const WHIP_GROUP_SHORTCUTS = [
   { key: 'orchestrators', label: 'Select all orchestrators', Icon: Bot },
   { key: 'environments', label: 'Select all environments', Icon: Server },
   { key: 'all', label: 'Select all orchestrators and environments', Icon: ListChecks },
 ] as const;
 
-// isWhipSelectionEmpty is true only for the untouched default: nothing
-// focused, nothing manually checked either. Pulled out of the component body
-// to keep its own branching out of the render function's complexity budget.
 function isWhipSelectionEmpty(selection: WhipTargetSelection): boolean {
   return (
     selection.environmentMode === 'custom' &&
@@ -39,7 +29,7 @@ function isWhipSelectionEmpty(selection: WhipTargetSelection): boolean {
 }
 
 function orchestratorRows(
-  targets: main.uiWhipTargetList,
+  targets: orchestrator.WhipTargetList,
   selection: WhipTargetSelection,
 ): TargetRow[] {
   return targets.orchestrators.map((orchestrator) => ({
@@ -52,7 +42,7 @@ function orchestratorRows(
 }
 
 function environmentRows(
-  targets: main.uiWhipTargetList,
+  targets: orchestrator.WhipTargetList,
   selection: WhipTargetSelection,
 ): TargetRow[] {
   return targets.environments.map((environment) => ({
@@ -64,15 +54,8 @@ function environmentRows(
   }));
 }
 
-// TitlebarWhipTargetPicker is the selection surface issue erun#1700 asks for:
-// individual environments and orchestrators, checkable, plus the three group
-// shortcuts. Plain checkboxes and buttons rather than a Command/cmdk list:
-// the population here is short and never needs type-to-filter, and every row
-// is reachable with a plain Tab (WCAG 2.1.1 keyboard) the same way the
-// existing deploy-components and orchestrator-environments checklists
-// already are. The primary whip action lives in the popover header
-// (Titlebar.WhipAction.tsx) rather than here, so it stays reachable without
-// scrolling this list (erun#1748).
+// TitlebarWhipTargetPicker lists checkable environments and orchestrators plus
+// the group shortcuts; plain checkboxes keep every row Tab-reachable.
 export function TitlebarWhipTargetPicker({
   targets,
   targetsLoading,
@@ -83,7 +66,7 @@ export function TitlebarWhipTargetPicker({
   onSelectAllOrchestrators,
   onSelectAll,
 }: {
-  targets: main.uiWhipTargetList | null;
+  targets: orchestrator.WhipTargetList | null;
   targetsLoading: boolean;
   selection: WhipTargetSelection;
   onToggleEnvironment: (id: string, checked: boolean) => void;

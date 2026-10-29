@@ -11,12 +11,6 @@ import {
 import { useAppDispatch } from '../app/hooks';
 import { queryErrorMessage } from '../app/queryError';
 
-// Thin controllers over the RTK Query endpoints for the environments panel:
-// one for registering a new environment, one (keyed by environmentId) for
-// deploying an already-registered one and polling it to a terminal status.
-// No business logic beyond sequencing those calls lives here — the render
-// layer (EnvironmentsPanel) shows whatever state these hooks expose.
-
 const POLL_INTERVAL_MS = 2000;
 
 export type RegisterState =
@@ -25,10 +19,7 @@ export type RegisterState =
   | { status: 'created'; environment: Environment }
   | { status: 'error'; message: string };
 
-// State of one environment's deploy + poll flow. `conflict` (409, a deploy
-// already in flight) and `unavailable` (501, no deploy executor configured) are
-// their own terminal-ish states rather than folded into `error`, so the render
-// layer can show them as the real, non-error states they are.
+// 409 and 501 are their own states rather than `error`.
 export type DeployState =
   | { status: 'starting' }
   | { status: 'deploying'; environment: Environment }
@@ -53,9 +44,6 @@ export interface RegisterController {
   register: (input: CreateEnvironmentInput) => void;
 }
 
-// useRegisterEnvironmentController posts the create request and, on success,
-// invokes onRegistered so the parent can refresh the read model — the new
-// environment then appears in the deploy list below.
 export function useRegisterEnvironmentController(
   token: string,
   onRegistered?: () => void,
@@ -96,16 +84,12 @@ export function useRegisterEnvironmentController(
 }
 
 export interface DeployController {
-  // Per-environmentId deploy state; an absent entry means the env has no
-  // in-session deploy yet (the persisted status from the config read still shows).
+  // An absent entry means no in-session deploy yet.
   states: Record<string, DeployState>;
   deploy: (environmentId: string, version?: string) => void;
 }
 
-// useDeployController drives one environment's deploy + poll at a time per
-// environmentId, so several environments can deploy independently in one
-// session. onSettled fires once a deploy reaches running/failed, so the parent
-// can refresh the read model and pick up the new status/deployedVersion there too.
+// Deploy state is keyed per environmentId so several environments deploy independently.
 export function useDeployController(token: string, onSettled?: () => void): DeployController {
   const [states, setStates] = React.useState<Record<string, DeployState>>({});
   const dispatch = useAppDispatch();

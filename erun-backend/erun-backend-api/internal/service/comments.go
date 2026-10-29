@@ -10,12 +10,10 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
-// commitIDPattern is the 40-lowercase-hex-character grammar documented in
-// collaboration/comments.md's Validation rules table.
+// commitIDPattern is the grammar documented in collaboration/comments.md.
 var commitIDPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
-// InvalidCommitIDError refuses a comment whose commitId is not 40 lowercase
-// hex characters.
+// InvalidCommitIDError refuses a commitId that is not 40 lowercase hex characters.
 type InvalidCommitIDError struct {
 	CommitID string
 }

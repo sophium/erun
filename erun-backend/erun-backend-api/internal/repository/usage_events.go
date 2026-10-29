@@ -18,9 +18,8 @@ func NewUsageEventRepository(txs *TxManager) *UsageEventRepository {
 	return &UsageEventRepository{txs: txs}
 }
 
-// Record inserts one metering event for the caller's tenant (RLS scopes the
-// insert; tenant_id defaults from erun_current_tenant_id() and is never taken
-// from the caller-supplied value).
+// Record inserts one metering event; tenant_id comes from the database default,
+// never the caller.
 func (r *UsageEventRepository) Record(ctx context.Context, event model.UsageEvent) error {
 	return r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		_, err := tx.NewRaw(`
@@ -37,10 +36,8 @@ func (r *UsageEventRepository) Record(ctx context.Context, event model.UsageEven
 	})
 }
 
-// List returns the caller's tenant's usage events, most recent first,
-// filtered explicitly by the security context's TenantID: erun_operations'
-// RLS policy is unconditional, so an OPERATIONS caller would otherwise see
-// every tenant's metering events.
+// List returns the caller's tenant's usage events, newest first, filtered
+// explicitly because erun_operations' RLS policy is unconditional.
 func (r *UsageEventRepository) List(ctx context.Context) ([]model.UsageEvent, error) {
 	var events []model.UsageEvent
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {

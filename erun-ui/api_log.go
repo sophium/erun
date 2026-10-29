@@ -6,10 +6,13 @@ import (
 	"os/exec"
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config/runtimetarget"
+	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/primitive/open/runtimeref"
+	tenantsvc "github.com/sophium/erun/erun-ui/internal/tenant"
 )
 
-func loadAPILog(ctx context.Context, input uiTenantDashboardInput) (string, error) {
+func loadAPILog(ctx context.Context, input tenantsvc.DashboardInput) (string, error) {
 	kubernetesContext := strings.TrimSpace(input.KubernetesContext)
 	tenant := strings.TrimSpace(input.Tenant)
 	environment := strings.TrimSpace(input.Environment)
@@ -17,20 +20,18 @@ func loadAPILog(ctx context.Context, input uiTenantDashboardInput) (string, erro
 		return loadAPILogFromKubernetes(ctx, kubernetesContext, tenant, environment)
 	}
 	if mcpURL := strings.TrimSpace(input.MCPURL); mcpURL != "" {
-		return loadAPILogFromMCP(ctx, mcpURL, input.mcpBearer)
+		return loadAPILogFromMCP(ctx, mcpURL, input.MCPBearer)
 	}
 	return "", fmt.Errorf("tenant dashboard needs a Kubernetes context or MCP URL to load API logs")
 }
 
 func loadAPILogFromKubernetes(ctx context.Context, kubernetesContext, tenant, environment string) (string, error) {
-	namespace := eruncommon.KubernetesNamespaceName(tenant, environment)
-	// A selector (rather than deployment/<name>) names which replica the log
-	// came from instead of quietly picking one; the API Deployment's
-	// Recreate strategy means a rollout transiently has two pods matching.
+	namespace := runtimetarget.KubernetesNamespaceName(tenant, environment)
+	// A selector names the replica; Recreate rollouts briefly have two matching pods.
 	return kubectlText(ctx, kubernetesContext,
 		"--namespace", namespace,
 		"logs",
-		"-l", "app="+eruncommon.APIDeploymentName(tenant),
+		"-l", "app="+runtimeref.APIDeploymentName(tenant),
 		"--prefix",
 		"-c", "erun-backend-api",
 		"--tail", "400",
@@ -43,7 +44,7 @@ func kubectlText(ctx context.Context, kubernetesContext string, args ...string) 
 		args = append([]string{"--context", kubernetesContext}, args...)
 	}
 	cmd := exec.CommandContext(ctx, "kubectl", args...)
-	eruncommon.HideConsoleWindow(cmd)
+	core.HideConsoleWindow(cmd)
 	output, err := cmd.CombinedOutput()
 	text := strings.TrimRight(string(output), "\n")
 	if err != nil {

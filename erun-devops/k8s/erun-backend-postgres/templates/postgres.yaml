@@ -16,7 +16,7 @@
 {{- end -}}
 {{- $imageOverrides := default dict .Values.imageOverrides -}}
 {{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
-{{- $postgresImage := default (printf "%s/erun-backend-postgres:18.3" $containerRegistry) (index $imageOverrides "erun-backend-postgres") -}}
+{{- $postgresImage := default (printf "%s/erun-backend-postgres:18.6" $containerRegistry) (index $imageOverrides "erun-backend-postgres") -}}
 apiVersion: v1
 kind: Secret
 metadata:
@@ -73,11 +73,8 @@ spec:
       labels:
         app: {{ $tenant }}-postgres
     spec:
-      # No reset logic lives in this pod template, deliberately: this spec is
-      # what a crash, eviction, node reboot, or `rollout restart` re-applies,
-      # so anything destructive here would re-run on every one of those, not
-      # just on a deploy. The reset (reset-job.yaml) is a Helm hook Job that
-      # runs once per deploy and never touches the running pod.
+      # Keep destructive logic out of this pod spec: it re-runs on every restart.
+      # The reset lives in reset-job.yaml.
       securityContext:
         fsGroup: 999
       containers:

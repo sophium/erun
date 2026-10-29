@@ -9,16 +9,8 @@ import { InlineAlert } from '@/components/app/InlineAlert';
 
 type ManageDialog = AppState['manageDialog'];
 
-// ExposeServicePicker offers the Services the environment is actually running.
-// Before it, exposing meant typing a name you had to know already -- and the
-// Ingress backend was derived from that name as `<tenant>-<label>`, which only
-// matches a chart erun scaffolded. Picking a real Service fills the backend in
-// from the namespace, so a repo's own chart is routable without renaming
-// anything it owns.
-//
-// It degrades rather than disappears: when the listing is restricted, failed,
-// or empty, the label field below still accepts a typed name, so the form
-// never becomes unusable because a read did not answer.
+// ExposeServicePicker offers running Services so the Ingress backend comes from the namespace, not `<tenant>-<label>`.
+// When the listing is unavailable, the label field still accepts a typed name.
 export function ExposeServicePicker({
   dialog,
 }: {
@@ -37,11 +29,6 @@ export function ExposeServicePicker({
     );
   }
   if (listing.error) {
-    // A failed read, through the primitive rather than a hand-rolled alert:
-    // the message interpolates the upstream error, so it needs the icon (not
-    // colour alone) and the wrapping. The remedy — type the name below — stays
-    // in the message, since the field it names is already on screen rather
-    // than behind an action.
     return (
       <InlineAlert>
         Could not read this environment&apos;s services ({listing.error}). Type the service name

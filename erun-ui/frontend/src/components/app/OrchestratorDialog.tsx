@@ -56,24 +56,12 @@ import {
   ListOrchestratorEnvCandidates,
 } from '../../../wailsjs/go/main/App';
 
-// OrchestratorDialog creates or edits a persisted orchestrator: a name, the agent
-// environments it links — each with a directory on this machine, either a
-// pod-backed environment's read-only review directory or a host environment's own
-// directory, which the orchestrator works in directly because no pod owns it — and
-// the directories it works in that belong to no environment at all, which are
-// picked rather than derived and registered nowhere. Creating prepares each linked
-// environment's directory — the mirror plus its one-way sync for a remote-agent
-// env; a local-agent env's worktree and a host env's directory are already here, so
-// those are only checked to exist — and a directory of its own only has to exist;
-// editing re-links the set.
+// An orchestrator: a name, linked environments with their directories, and directories of its own.
 interface OrchestratorForm {
   candidates: EnvCandidate[];
   name: string;
   setName: (name: string) => void;
-  // aliasChoices are the erun aliases configured on this machine, and alias is
-  // the form's own value (' none' represented as '' in the model, 'none' in the
-  // picker). Both are here because the picker offers the resolved list rather
-  // than free text: the writer refuses an alias this host cannot resolve.
+  // The picker offers only resolvable aliases: the writer refuses any other.
   aliasChoices: string[];
   alias: OrchestratorAlias;
   setAlias: (alias: OrchestratorAlias) => void;
@@ -103,17 +91,12 @@ function useOrchestratorForm(open: boolean, editing: OrchestratorInfo | null): O
       return;
     }
     setName(editing?.name ?? '');
-    // Seed the picker from the stored value, not from the resolved list: an
-    // alias this host can no longer resolve still has to be shown, or the
-    // operator would see "none" where a value is stored and the panel would
-    // quietly disagree with config.yaml.
+    // Seed from the stored value so an alias the host no longer resolves still shows.
     setAlias(editing?.alias ?? '');
     setSelected(editing ? editing.environments.map((env) => ({ ...env })) : []);
     setDirectories(editing ? [...editing.directories] : []);
     void ListOrchestratorEnvCandidates().then((list) => {
-      // The Wails binding types requiredRole as a plain string (Go's
-      // OrchestratorEnvRole erases to that on the wire); loadOrchestrators
-      // takes the same widen-then-narrow approach for OrchestratorInfo below.
+      // The Wails binding types requiredRole as a plain string.
       setCandidates(list as EnvCandidate[]);
     });
     void ListOrchestratorAliasChoices().then((list) => {
@@ -134,12 +117,7 @@ function useOrchestratorForm(open: boolean, editing: OrchestratorInfo | null): O
               tenant: candidate.tenant,
               environment: candidate.environment,
               directory: candidate.defaultDirectory,
-              // Not declared, never a silent default of either known role —
-              // an operator who wants one picks it explicitly. The one
-              // exception is a candidate with a requiredRole (a runtime
-              // environment): it has exactly one legal choice, so pre-selecting
-              // it is not guessing a default, it is the only value the picker
-              // will actually accept — see EnvironmentRow's own role options.
+              // Undeclared by default; a required role is the only legal value, so it is preselected.
               role: candidate.requiredRole ?? '',
             },
           ]
@@ -167,8 +145,7 @@ function useOrchestratorForm(open: boolean, editing: OrchestratorInfo | null): O
     );
   };
 
-  // Adding the same directory twice is one row, matching the backend's own
-  // dedupe, so the form cannot show a duplicate the saved definition will not have.
+  // Deduped, like the backend.
   const addDirectory = (directory: string): void => {
     setDirectories((current) => (current.includes(directory) ? current : [...current, directory]));
   };
@@ -176,9 +153,6 @@ function useOrchestratorForm(open: boolean, editing: OrchestratorInfo | null): O
     setDirectories((current) => current.filter((entry) => entry !== directory));
   };
 
-  // The hook owns submitting as well as the fields: what the dialog sends is
-  // exactly the form it collected, and keeping the two in one place is what stops
-  // a new field from being rendered but never sent.
   const submit = (): void => {
     const settings = orchestratorLaunchSettingsToSave(launch.settings);
     if (editing) {
@@ -207,18 +181,14 @@ function useOrchestratorForm(open: boolean, editing: OrchestratorInfo | null): O
   };
 }
 
-// OrchestratorDialog is the single management surface for an orchestrator,
-// mirroring the environment Manage dialog: the row carries only a "…" that
-// opens this, and restart + delete (with confirmation) live here rather than as
-// inline row buttons. It swaps to a delete-confirmation view in place.
+// OrchestratorDialog is the orchestrator's management surface, mirroring the env Manage dialog.
 export function OrchestratorDialog(): React.ReactElement {
   const dispatch = useAppDispatch();
   const open = useAppSelector((state) => state.orchestrators.dialogOpen);
   const editing = useAppSelector((state) => state.orchestrators.editing);
   const [confirmingDelete, setConfirmingDelete] = React.useState(false);
 
-  // Leaving the dialog always resets it, so reopening (for this or another
-  // orchestrator) starts on the edit form, never mid-confirmation.
+  // Reset on close so reopening never starts mid-confirmation.
   React.useEffect(() => {
     if (!open) {
       setConfirmingDelete(false);
@@ -235,13 +205,7 @@ export function OrchestratorDialog(): React.ReactElement {
       }}
     >
       <DialogContent
-        // Bound the panel to the viewport and let the field region scroll, so the
-        // footer — and with it Save — stays reachable on a short window. The form
-        // carries the linked environments, the orchestrator's own directories and
-        // its guidance, which together outgrow a window; without
-        // this the dialog simply grew past the bottom edge and the Save button sat
-        // half off-screen, where it reads as a save that does nothing. Same
-        // treatment, and the same reason, as EnvironmentDialogView.
+        // Bounded to the viewport with a scrolling field region so Save stays reachable.
         className="flex max-h-[85vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-lg"
       >
         {editing && confirmingDelete ? (
@@ -267,10 +231,7 @@ export function OrchestratorDialog(): React.ReactElement {
   );
 }
 
-// orchestratorScopeIsEmpty reports an orchestrator definition with nothing to
-// operate on. A directory of its own counts: an orchestrator pointed only at a
-// directory is a complete definition, which is why this is not simply "no
-// environments linked".
+// A directory of its own counts as scope.
 function orchestratorScopeIsEmpty(selected: OrchestratorEnvRef[], directories: string[]): boolean {
   return selected.length === 0 && directories.length === 0;
 }
@@ -368,9 +329,7 @@ function OrchestratorForm({
   );
 }
 
-// OrchestratorNameField is the orchestrator's display name. Optional, and
-// derived from the linked tenants when left blank. Split out alongside the
-// alias field to keep OrchestratorForm inside its line budget.
+// OrchestratorNameField is optional; blank derives from the linked tenants.
 function OrchestratorNameField({
   name,
   onChange,
@@ -393,17 +352,7 @@ function OrchestratorNameField({
   );
 }
 
-// OrchestratorAliasField renders the Platform alias picker: which erun platform
-// alias this orchestrator declares as its own. Split out of OrchestratorForm for
-// the same reason OrchestratorManageActions is -- the form sits at its
-// size/complexity budget -- and because the sentinel round trip belongs in one
-// place rather than inline among the other fields.
-//
-// The choices come from the backend rather than from free text: the writer
-// refuses an alias this host cannot resolve, so a picker over the resolved list
-// is what keeps the dialog from offering a value whose save is guaranteed to
-// fail. An empty list is a real state (no erun alias is configured on this
-// machine), and SelectField renders it as one.
+// OrchestratorAliasField picks from resolvable aliases only, since the writer refuses others.
 function OrchestratorAliasField({
   choices,
   alias,
@@ -428,10 +377,7 @@ function OrchestratorAliasField({
   );
 }
 
-// OrchestratorManageActions is the footer's left cluster for an existing
-// orchestrator: restart (only while its session is running) and delete. Split
-// out so the form stays within the lint size/complexity budgets and so
-// `editing` arrives already narrowed to a persisted definition.
+// OrchestratorManageActions: restart (while running) and delete for a persisted orchestrator.
 function OrchestratorManageActions({
   editing,
   busy,
@@ -473,10 +419,7 @@ function OrchestratorManageActions({
   );
 }
 
-// OrchestratorDeleteConfirm mirrors the environment delete's explicit-confirm
-// gate. Orchestrator delete is far less destructive than env delete (it removes
-// only the host-side definition; the linked environments and their workspace
-// sync survive), so a single confirm step is the right friction — no typed name.
+// OrchestratorDeleteConfirm: one confirm step, since delete removes only the host-side definition.
 function OrchestratorDeleteConfirm({
   editing,
   onCancel,

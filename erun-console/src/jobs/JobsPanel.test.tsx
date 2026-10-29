@@ -65,9 +65,7 @@ describe('JobsPanel', () => {
     ).toBeInTheDocument();
     expect(screen.getByText('erun/code4')).toBeInTheDocument();
     expect(screen.getByText('agent')).toBeInTheDocument();
-    // A running row is grouped under its job type rather than carrying a
-    // status badge: everything in the live half is RUNNING by construction,
-    // so repeating the word on every row would be noise.
+    // Running rows carry no status badge; the live half is RUNNING by construction.
     expect(screen.getByRole('heading', { name: /fix/ })).toBeInTheDocument();
   });
 
@@ -82,9 +80,7 @@ describe('JobsPanel', () => {
     expect(link).toHaveAttribute('href', 'https://github.com/sophium/erun/issues/2109');
   });
 
-  // The live queue leads and is grouped by job type, which is the grouping an
-  // operator scans for "is anyone gating?". A job with no issue still has to
-  // appear -- most work is not issue-driven.
+  // A job with no issue must still appear.
   it('groups running jobs by job type', async () => {
     vi.stubGlobal(
       'fetch',
@@ -97,9 +93,6 @@ describe('JobsPanel', () => {
     expect(screen.getByRole('heading', { name: /gate/ })).toBeInTheDocument();
   });
 
-  // ABANDONED is a job the platform swept because its actor stopped updating
-  // it. It is not a failure and not a success, so it renders under its own
-  // status word rather than being folded into either.
   it('renders ABANDONED as its own state, distinct from FAILED', async () => {
     vi.stubGlobal(
       'fetch',
@@ -131,10 +124,6 @@ describe('JobsPanel', () => {
     expect(await screen.findByText(/Could not load jobs: forbidden/)).toBeInTheDocument();
   });
 
-  // The panel must never render the command behind a job. A job's summary is
-  // prose by contract, and the row has no field that could carry a command
-  // line -- this pins that the pod-side technical detail stays out of the
-  // queue.
   it('never renders a command line for a job', async () => {
     vi.stubGlobal(
       'fetch',
@@ -156,9 +145,6 @@ describe('JobsPanel', () => {
     expect(screen.queryByText(/rebase --onto/)).not.toBeInTheDocument();
   });
 
-  // A status this console has not been taught must be preserved as itself
-  // rather than guessed at. Folding an unknown value into RUNNING would claim
-  // the job is in progress, which is exactly what is in doubt.
   it('preserves an unrecognised status instead of guessing at it', async () => {
     vi.stubGlobal(
       'fetch',

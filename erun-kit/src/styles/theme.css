@@ -70,9 +70,7 @@
   --muted-foreground: oklch(0.556 0 0);
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
-  /* The one deliberate brand hue in an otherwise neutral palette: a blue at
-     the same 258deg hue as --chart-1..5 so it reads as "this product's
-     color" rather than a decorative addition. 5.67:1 on white. */
+  /* The one brand hue, matching --chart-1..5's 258deg. 5.67:1 on white. */
   --accent-brand: oklch(0.52 0.19 258);
   --accent-brand-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.577 0.245 27.325);
@@ -142,8 +140,7 @@
   --muted-foreground: oklch(0.708 0 0);
   --accent: oklch(0.371 0 0);
   --accent-foreground: oklch(0.985 0 0);
-  /* Lighter and lower-chroma than the light-mode value so it stays legible on
-     a near-black background instead of just inverting: 8.78:1 on dark bg. */
+  /* Lighter and lower-chroma so it stays legible on dark: 8.78:1. */
   --accent-brand: oklch(0.75 0.14 258);
   --accent-brand-foreground: oklch(0.145 0 0);
   --destructive: oklch(0.704 0.191 22.216);
@@ -165,9 +162,7 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(0.275 0 0);
   --sidebar-ring: oklch(0.439 0 0);
-  /* Tinted for a near-black background rather than inverted: the light-mode
-     values are a pale mint/pink wash that would render as an unstyled-looking
-     bright block here. Foreground text stays 9.1-9.4:1 on its own background. */
+  /* Tinted for the dark background rather than inverted. */
   --diff-add: oklch(0.28 0.05 145);
   --diff-add-foreground: oklch(0.85 0.1 145);
   --diff-delete: oklch(0.28 0.05 25);
@@ -195,43 +190,15 @@
     letter-spacing: var(--letter-spacing);
   }
 
-  /* A bare `grid` gets one implicit `auto` column, and an `auto` track sizes to
-     the max-content width of its widest item. Inside a dialog that is a trap:
-     one unbroken string -- a long file path, a UUID -- widens the track, and
-     every sibling grid item with it, past the card's clamped box, while the
-     card's own background and border still paint at the correct width. The
-     result is in-flow content rendering on top of the application behind the
-     dialog. DialogContent clamps its own track, but each nested grid between
-     the card and the offending text has to clamp too, and there are dozens of
-     them across both apps -- so the default belongs here rather than at every
-     call site.
-
-     `:where()` contributes no specificity and `@layer base` loses to Tailwind's
-     `utilities` layer, so this is only a default: any explicit `grid-cols-*`
-     on a grid inside a dialog still wins, and multi-column dialog layouts are
-     unaffected. */
+  /* An implicit `auto` grid track grows to its widest unbroken string, pushing
+     dialog content past the card. `:where()` in `@layer base` is only a
+     default: explicit `grid-cols-*` still wins. */
   :where([data-slot='dialog-content'] .grid) {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  /* The same trap as above, one level down and not limited to dialogs: a
-     flex or grid item defaults to `min-width: auto`, which floors its size
-     at its own content's intrinsic width regardless of how little room its
-     container actually has. `flex-1` (`flex: 1 1 0%`) and a `grid-cols-*`
-     track already commit the item to being sized by its container rather
-     than its content, so that floor serves no layout this codebase
-     actually wants -- it only waits for an unbroken string (a cloud alias,
-     a file path, a status message) to drag the item, and the box around
-     it, wider than its parent. That has been independently filed and fixed
-     four times at the point of failure rather than at the mechanism
-     (`erun-kit`'s `DialogContent` above; `Titlebar`'s status/centre flex
-     rows; `SelectField`'s grid-item wrapper; the reconnect status panel's
-     flex header) because the symptom always shows up in whichever
-     component happens to be holding the long string, never in the shared
-     container shape. Kept as a `:where()` default so it stays inert
-     wherever a component still wants its item to protect its own intrinsic
-     width -- an explicit `min-w-*` on the item, same specificity fight as
-     above, keeps winning. */
+  /* `min-width: auto` floors a flex/grid item at its content width, so an
+     unbroken string widens its parent. Explicit `min-w-*` still wins. */
   :where(.flex-1) {
     min-width: 0;
   }

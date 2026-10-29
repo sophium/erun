@@ -97,9 +97,6 @@ func TestTenantIssuerRoutesListTenantIssuers(t *testing.T) {
 	}
 }
 
-// An operations-scoped caller may read another tenant's issuer mappings —
-// the console's enroll-into-another-org flow resolves a target tenant's org
-// this way before creating an identity provider account in it.
 func TestTenantIssuerRoutesListTenantIssuersOperationsCanReadAnotherTenant(t *testing.T) {
 	repo := &stubTenantIssuerRepository{}
 	rec := httptest.NewRecorder()
@@ -114,9 +111,6 @@ func TestTenantIssuerRoutesListTenantIssuersOperationsCanReadAnotherTenant(t *te
 	}
 }
 
-// A non-operations caller naming a tenant other than its own is refused
-// before the repository is ever called, mirroring the same
-// resolveTargetTenant gate on cross-tenant users/invites reads.
 func TestTenantIssuerRoutesListTenantIssuersRefusesCrossTenantForNonOperations(t *testing.T) {
 	repo := &stubTenantIssuerRepository{}
 	rec := httptest.NewRecorder()
@@ -157,11 +151,6 @@ func TestTenantIssuerRoutesUpdateTenantIssuerName(t *testing.T) {
 	}
 }
 
-// Converting an issuer to org-scoped rewrites the shared issuers row, so it
-// changes how every tenant's tokens on that issuer resolve — not just the
-// caller's own mapping the way a rename does. It carries the same
-// operations-only gate POST /v1/tenants applies to these root resolution
-// tables.
 func TestTenantIssuerRoutesOrgScopeRequiresOperationsTenant(t *testing.T) {
 	repo := &stubTenantIssuerRepository{}
 	rec := httptest.NewRecorder()
@@ -177,8 +166,6 @@ func TestTenantIssuerRoutesOrgScopeRequiresOperationsTenant(t *testing.T) {
 	}
 }
 
-// Either field alone leaves resolution broken: a key with no value orphans the
-// issuer's existing tenant, a value with no key is read by nothing.
 func TestTenantIssuerRoutesOrgScopeRequiresBothFields(t *testing.T) {
 	for _, body := range []string{
 		`{"issuer":"https://issuer.example","orgFieldKey":"urn:zitadel:iam:user:resourceowner:id"}`,
@@ -232,11 +219,6 @@ func TestTenantIssuerRoutesOrgScopeConverts(t *testing.T) {
 	}
 }
 
-// An operations caller can target another tenant's mapping directly — the
-// repair path for a tenant already stuck with an unresolvable (issuer, org)
-// mapping (the probeco-shaped state assertResolvableIssuerMapping now
-// refuses at creation time, but cannot undo for a row written before that
-// refusal existed).
 func TestTenantIssuerRoutesOrgScopeRepairsAnotherTenant(t *testing.T) {
 	repo := &stubTenantIssuerRepository{updated: model.TenantIssuer{
 		TenantID:      "tenant-2",
@@ -257,15 +239,12 @@ func TestTenantIssuerRoutesOrgScopeRepairsAnotherTenant(t *testing.T) {
 	}
 }
 
-// A non-operations caller naming another tenant is refused before the
-// repository is ever called, mirroring the read-side gate above.
 func TestTenantIssuerRoutesOrgScopeRefusesCrossTenantForNonOperations(t *testing.T) {
 	repo := &stubTenantIssuerRepository{}
 	rec := httptest.NewRecorder()
 	body := `{"issuer":"https://issuer.example","orgFieldKey":"urn:zitadel:iam:user:resourceowner:id","orgFieldValue":"999","tenantId":"tenant-2"}`
 
-	// A company tenant is refused outright before tenantId is even
-	// considered (the operations-tenant-type gate runs first).
+	// The operations-tenant-type gate runs before tenantId is considered.
 	TenantIssuerRoutes{issuers: repo}.updateTenantIssuerName(rec, tenantIssuerRequest(body, string(model.TenantTypeCompany)))
 
 	if rec.Code != http.StatusForbidden {
@@ -276,8 +255,6 @@ func TestTenantIssuerRoutesOrgScopeRefusesCrossTenantForNonOperations(t *testing
 	}
 }
 
-// A rename must keep working untouched — it is tenant-scoped and carries no
-// operations gate.
 func TestTenantIssuerRoutesRenameStillWorksForCompanyTenant(t *testing.T) {
 	repo := &stubTenantIssuerRepository{updated: model.TenantIssuer{Issuer: "https://issuer.example", Name: "Renamed"}}
 	rec := httptest.NewRecorder()

@@ -19,10 +19,6 @@ export interface CurrentTenant {
   type: string;
 }
 
-// unreachableReason turns the platform's verdict into the sentence a caller
-// can act on: why re-signing-in cannot help, and who can change that. A
-// verdict this console does not recognize says exactly that rather than
-// inventing a cause nobody checked.
 function unreachableReason(reachability: TenantReachability | undefined): string {
   switch (reachability) {
     case TENANT_REACHABILITY_ORG_MISMATCH:
@@ -36,11 +32,8 @@ function unreachableReason(reachability: TenantReachability | undefined): string
   }
 }
 
-// UnreachableMemberships names the memberships that exist but can never be
-// signed into. They are deliberately shown rather than filtered away: dropping
-// them would trade one silence (a switch target that always fails) for another
-// (a membership nobody can see is broken), and the operator who repairs the
-// mapping is usually the person reading this.
+// Unreachable memberships are shown, not filtered, so the broken mapping is
+// visible to whoever must repair it.
 function UnreachableMemberships({
   tenants,
 }: {
@@ -73,31 +66,10 @@ function CurrentTenantLabel({ current }: { current: CurrentTenant }): React.Reac
   );
 }
 
-// TenantSwitcher is the shell chrome above the sidebar nav: it names
-// the scope everything below it operates on, and is always visible — never
-// only while some menu is open. A caller whose identity maps to only one
-// tenant sees it as a plain label; rendering a control here would suggest a
-// choice that does not exist. This is also the safe default while
-// getReachableTenants is still loading or has failed — a caller never briefly
-// sees a control that then downgrades to a label once the real count is
-// known, only the reverse.
-//
-// Tenant resolution is a pure function of the token (issuer + org claim), so
-// picking another tenant cannot re-scope the one already held — it starts a
-// fresh OIDC sign-in instead (see auth/auth.ts's `prompt` param and
-// shell/tenantSwitch.ts, which records the intended target so the console can
-// tell afterwards whether the new credential actually resolved to it).
-//
-// Membership is not the same key as resolution, so a membership the platform
-// reports as anything other than RESOLVABLE is never offered. Offering those
-// sent the caller through a full OIDC round trip to land back where they
-// started, and the mismatch banner afterwards was good behaviour on an offer
-// that should never have been made.
-//
-// A membership with no verdict at all is a platform too old to have one, not a
-// broken tenant: it stays offered (with the mismatch banner as the safety net
-// it has always been) rather than silently disappearing from the switcher on a
-// version skew, and it is never named as unreachable either.
+// TenantSwitcher renders a plain label (also while loading) unless more than
+// one tenant is reachable. Switching starts a fresh OIDC sign-in because
+// tenant resolution is a pure function of the token. Only RESOLVABLE
+// memberships are offered; one with no verdict (older platform) stays offered.
 export function TenantSwitcher({
   token,
   current,

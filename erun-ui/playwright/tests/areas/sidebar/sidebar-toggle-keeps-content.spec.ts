@@ -1,13 +1,7 @@
 import { test, expect } from '../../../fixtures/erunApp.js';
 
-// Regression: toggling the sidebar sometimes blanked the whole content area to
-// white until reload. The content region is now wrapped in an ErrorBoundary so
-// an uncaught render error surfaces a recoverable fallback instead of a blank
-// screen — that recovery is the user-facing contract this spec guards.
-//
-// The intermittent xterm paint that triggered the blanking can't be reproduced
-// deterministically in the headless harness, so this spec locks the reachable
-// negative invariant instead of the real trigger.
+// The real trigger (an intermittent xterm paint) is not reproducible headless,
+// so this pins that toggling keeps content rendered.
 test.describe('sidebar toggle keeps content rendered', () => {
   test('content pane stays mounted and non-blank across both toggle directions', async ({
     app,

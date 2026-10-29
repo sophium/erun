@@ -1,13 +1,7 @@
 import type { Locator, Page } from '@playwright/test';
 
-// One banner rendered as status or alert depending on the terminalMessage
-// kind. Scoped to the titlebar's own <header> (Titlebar.tsx) because
-// TerminalBusyOverlay renders an unrelated role="status" aria-live="polite"
-// node over the terminal pane with the same signature -- an unscoped
-// selector's .first() can resolve to that overlay's "Opening <tenant> /
-// <environment>..." text instead of the titlebar's own banner whenever a
-// session is mid-open, which is exactly the default env this harness
-// auto-opens on every boot.
+// Scoped to the titlebar <header>: TerminalBusyOverlay renders a same-shaped status
+// node ("Opening <tenant> / <environment>...") while a session opens.
 const TITLEBAR_BANNER_SELECTOR =
   'header [role="status"][aria-live="polite"], header [role="alert"][aria-live="assertive"]';
 
@@ -38,9 +32,7 @@ export class Titlebar {
     return this.page.getByRole('button', { name: 'Toggle changed files list' });
   }
 
-  // Env-scoped titlebar controls: the two IDE buttons and the contribute
-  // toggle. These render only when the active session is an environment tab,
-  // not an orchestrator session (#1178).
+  // Render only when the active session is an environment tab.
   vscodeButton(): Locator {
     return this.page.getByRole('button', { name: /VS Code/i });
   }
@@ -57,9 +49,7 @@ export class Titlebar {
     return this.page.getByRole('button', { name: /Switch to (light|dark) theme/ });
   }
 
-  // The whip control is global (every orchestrator, every environment), so
-  // unlike the env-scoped controls above it renders regardless of which
-  // session tab is active.
+  // Global, so it renders whichever session tab is active.
   whipButton(): Locator {
     return this.page.getByRole('button', { name: /^Whip:/ });
   }
@@ -68,80 +58,41 @@ export class Titlebar {
     return this.page.getByRole('heading', { name: 'Whip' });
   }
 
-  // Converges on the report having actually replaced the target picker
-  // before a caller reads its content. whipReportBody() (not the heading,
-  // which stays mounted across both the picker and the report views) is the
-  // element gated on that transition -- the click that starts a whip and the
-  // report's own mount are two separate render steps, so asserting on the
-  // report's content right after the click races that transition against the
-  // caller's own budget instead of the report's.
+  // Gates on the report body, not the heading, which stays mounted across both views.
   async waitForWhipReportOpen(): Promise<void> {
     await this.whipReportBody().waitFor({ state: 'visible' });
   }
 
-  // Converges on the whole popover having actually dismissed itself -- the
-  // auto-dismiss timer flips React state, but the popover's own exit
-  // animation runs on the real browser clock even under a test that has
-  // installed a fake one for the timer (see the auto-dismiss specs), so the
-  // heading's removal from the DOM can lag the timer firing. A caller that
-  // asserts dismissal right after advancing the clock needs this settled
-  // against its own full budget, not the shorter `expect` one.
+  // The exit animation runs on the real clock even under a fake timer clock.
   async waitForWhipReportClosed(): Promise<void> {
     await this.whipReportHeading().waitFor({ state: 'hidden' });
   }
 
-  // Scoped to the popover's own landmark: several seeded rows (the sidebar
-  // row, the terminal tab) already render the same env/orchestrator name
-  // elsewhere on the page, so an unscoped getByText(name)/getByRole(...) is
-  // ambiguous. Titlebar.WhipAction.tsx's WhipPopoverBody carries this
-  // role/name on its outermost element for exactly this reason.
+  // Scoped to the popover: the same names render elsewhere on the page.
   whipPanel(): Locator {
     return this.page.getByRole('region', { name: 'Whip' });
   }
 
-  // Converges on the popover actually being open (target list fetched and
-  // rendered, preselection applied) before returning, rather than leaving
-  // every caller to race that render against a bare expect(...).toBeVisible()
-  // with only the shorter `expect` timeout to work with.
   async openWhipPanel(): Promise<void> {
     await this.whipButton().click();
     await this.whipPanel().waitFor({ state: 'visible' });
   }
 
-  // Scoped to the popover's own live region: several seeded rows (the
-  // sidebar row, the terminal tab) already render the same env/orchestrator
-  // name elsewhere on the page, so an unscoped getByText(name) is ambiguous.
+  // Scoped to the popover: the same names render elsewhere on the page.
   whipReportBody(): Locator {
     return this.page.getByRole('status', { name: 'Whip results' });
   }
 
-  // Converges on the report actually having closed before returning -- a
-  // caller that immediately reopens the popover (a fresh whip's own report
-  // must not race the prior one's close animation) or asserts the heading is
-  // gone both need this settled, not raced against their own fixed budget.
   async closeWhipReport(): Promise<void> {
     await this.page.getByRole('button', { name: 'Close whip' }).click();
     await this.whipReportHeading().waitFor({ state: 'hidden' });
   }
 
-  // The selection surface's own checkable rows -- one per environment
-  // ("tenant/environment") or orchestrator (its configured name) -- an
-  // implicit <label> wraps each Checkbox, so its accessible name is the row's
-  // visible text with no separate aria-label to keep in sync.
   whipTargetCheckbox(name: string): Locator {
     return this.whipPanel().getByRole('checkbox', { name });
   }
 
-  // The three group shortcuts are icon-only, so each one's accessible name is
-  // its tooltip label -- the only label an operator can see. The
-  // third one's name contains the first one's as a prefix ("Select all
-  // orchestrators" / "Select all orchestrators and environments"), and
-  // getByRole's `name` is a substring match by default, so an unanchored
-  // selector for the first would match both buttons and fail Playwright's
-  // strict mode. Each is therefore pinned with `exact`, which is also the
-  // assertion that the name carries the whole visible label: a shortcut whose
-  // name drifted from its tooltip stops resolving here instead of silently
-  // matching something else.
+  // `exact`: the third name starts with the first, and a non-exact name would match both.
   selectAllOrchestratorsButton(): Locator {
     return this.whipPanel().getByRole('button', { name: 'Select all orchestrators', exact: true });
   }
@@ -157,9 +108,7 @@ export class Titlebar {
     });
   }
 
-  // The primary action's own label states the resolved count before it acts
-  // (erun#1700), so it has no fixed accessible name -- match the shared
-  // prefix instead.
+  // The label states the resolved count, so match its prefix.
   whipRunButton(): Locator {
     return this.whipPanel().getByRole('button', { name: /^Whip(ping…| \d+ target)/ });
   }
@@ -169,7 +118,7 @@ export class Titlebar {
   }
 
   async openVSCode(): Promise<void> {
-    // The aria-label is computed from the active selection, so there is no fixed name to match exactly.
+    // The aria-label depends on the selection.
     await this.page
       .getByRole('button', { name: /VS Code/i })
       .first()
@@ -183,9 +132,6 @@ export class Titlebar {
       .click();
   }
 
-  // Scoped to the titlebar's own alert banner (see TITLEBAR_BANNER_SELECTOR's
-  // header-scoping comment) so this never resolves to an unrelated alert
-  // elsewhere on the page (a dialog's InlineAlert, a panel's own role="alert").
   errorAlert(): Locator {
     return this.page.locator('header [role="alert"]');
   }
@@ -209,12 +155,8 @@ export class Titlebar {
     return this.page.locator(TITLEBAR_BANNER_SELECTOR).first();
   }
 
-  // The titlebar renders one banner at a time, so a line can be replaced before a
-  // locator poll samples it — a success line followed by a failure line for the
-  // same flow is the common case. recordBanners installs a MutationObserver that
-  // fires on the mutation itself, so no rendered line can slip between samples;
-  // call it before triggering the flow, then assert with sawBanner. Use this
-  // instead of statusMessage() whenever another banner can follow the asserted one.
+  // A banner can be replaced between locator polls; the MutationObserver sees every line.
+  // Call before triggering the flow, then assert with sawBanner.
   async recordBanners(): Promise<void> {
     await this.page.evaluate((selector) => {
       const target = window as unknown as { __erunBannerLog?: string[] };
@@ -244,76 +186,43 @@ export class Titlebar {
     return banners.some((banner) => banner.includes(expected));
   }
 
-  // The pill only mounts after the first idle-status poll completes for the
-  // selected env, so callers must wait for visibility before driving it. The
-  // accessible name normally starts with "Idle timeout", but a reading the
-  // pod never confirmed leads with a provenance caveat instead — match
-  // "Idle timeout" anywhere in the name so both cases resolve the same badge.
+  // Mounts after the first idle poll. Unconfirmed readings lead with a caveat, so
+  // "Idle timeout" is matched anywhere in the name.
   idleStatusBadge(): Locator {
     return this.page.getByRole('button', { name: /Idle timeout/ });
   }
 
-  // The pill that replaces the idle countdown while a cloud-node start or stop
-  // is in flight against the node this widget names.
   idleTransitionPill(): Locator {
     return this.page.getByTestId('titlebar-idle-transition');
   }
 
-  // The cloud-node power button. Its accessible name is the action it performs,
-  // so a spec matching on it is asserting the label contract, not a test id.
   cloudNodePowerButton(label: string | RegExp): Locator {
     return this.page.getByRole('button', { name: label });
   }
 
-  // --- Message centre ---
-  // Titlebar.MessageCenter.tsx replaces the old single notification pill with
-  // one icon per class carrying an unread count; the review dialog it opens
-  // (Titlebar.MessageCenter.Dialog.tsx) is where every notification's full
-  // text, identity, and actions now live. 'debug' has no titlebar icon by
-  // design (only reachable from inside the dialog's toggle), so it has no
-  // icon locator here.
+  // 'debug' has no titlebar icon; it is reachable only from inside the dialog.
   messageCenterIcon(kind: 'error' | 'warning' | 'info' | 'success'): Locator {
     const label = kind.charAt(0).toUpperCase() + kind.slice(1);
     return this.page.getByRole('button', { name: new RegExp(`^${label}: \\d+ unread$`) });
   }
 
-  // The unread-count pill nested inside a class icon button -- its own
-  // background is asserted to differ from the icon's currentColor (the
-  // red-on-red/amber-on-amber separation fix), never assumed from markup.
   messageCenterIconBadge(kind: 'error' | 'warning' | 'info' | 'success'): Locator {
     return this.messageCenterIcon(kind).locator('span');
   }
 
-  // Converges on the dialog actually being open before returning: it mounts
-  // with a row per unread notification, which is more render work than a
-  // bare expect(...).toBeVisible() right after the click should have to
-  // absorb inside its own shorter `expect` timeout.
   async openMessageCenter(kind: 'error' | 'warning' | 'info' | 'success'): Promise<void> {
     await this.messageCenterIcon(kind).click();
     await this.messageCenterDialog().waitFor({ state: 'visible' });
   }
 
-  // Renders only once every class icon has nothing unread but the session
-  // still has history -- see Titlebar.MessageCenter.tsx's own doc comment.
-  // That condition is about the WHOLE titlebar, so a spec can assert this
-  // button directly only while it can also assert that nothing else is unread;
-  // a spec that has merely cleared its own entry point cannot, and wants
-  // messageCenterEntryPoint below instead.
+  // Renders only while nothing at all is unread; specs that only cleared their own
+  // entry point should use messageCenterEntryPoint.
   messageCenterHistoryButton(): Locator {
     return this.page.getByRole('button', { name: 'Message history' });
   }
 
-  // The titlebar's own way into the dialog, whichever one it is currently
-  // offering. Titlebar.MessageCenter.tsx offers exactly one at a time: the
-  // "Message history" fallback only while every class icon has nothing unread
-  // (`visibleKinds.length === 0 && historyCount > 0`), and otherwise an unread
-  // class's own icon. A spec that cleared its own entry point therefore cannot
-  // pin the fallback: any other class an earlier spec in this worker left
-  // unread -- a stray backend-originated notice arriving after this page
-  // booted, which a longer full-suite worker lifetime makes likely -- keeps
-  // that class's icon up and suppresses the fallback. The invariant such a
-  // spec can own is that the centre stays reachable from the titlebar, which
-  // is what this locator asserts, with either affordance as the entry.
+  // The titlebar offers exactly one entry point: the history fallback while nothing is
+  // unread, else an unread class icon. Earlier specs may leave a class unread.
   messageCenterEntryPoint(): Locator {
     return this.messageCenterIcon('error')
       .or(this.messageCenterIcon('warning'))
@@ -323,12 +232,7 @@ export class Titlebar {
       .first();
   }
 
-  // Opens the dialog through whichever entry point the titlebar is offering,
-  // then moves it to the All tab: an entry point that is a class icon opens
-  // the dialog filtered to that class, and a caller asserting a row of its
-  // own -- or of more than one class -- needs every row in view. Converges on
-  // the dialog actually being open first, the same reason openMessageCenter
-  // does above.
+  // A class icon opens the dialog filtered to that class, so switch to All.
   async openMessageCenterFromTitlebar(): Promise<void> {
     await this.messageCenterEntryPoint().click();
     await this.messageCenterDialog().waitFor({ state: 'visible' });
@@ -347,9 +251,6 @@ export class Titlebar {
     return this.messageCenterDialog().getByRole('checkbox', { name: 'Show debug messages' });
   }
 
-  // Bulk clear: "Mark <kind> read" is scoped to whichever tab is active
-  // (hidden once that class has nothing unread); "Mark all read" always
-  // targets every class (hidden once nothing anywhere is unread).
   messageCenterMarkClassReadButton(kind: 'error' | 'warning' | 'info' | 'success'): Locator {
     return this.messageCenterDialog().getByRole('button', {
       name: new RegExp(`^Mark ${kind} read$`),
@@ -360,16 +261,10 @@ export class Titlebar {
     return this.messageCenterDialog().getByRole('button', { name: 'Mark all read', exact: true });
   }
 
-  // Rows are the dialog's own <li> entries -- role="listitem" is implicit, no
-  // test id needed. Scope any row-local action button off this.
   messageCenterRow(messageText: string | RegExp): Locator {
     return this.messageCenterDialog().getByRole('listitem').filter({ hasText: messageText });
   }
 
-  // Converges on the dialog actually being closed before returning -- a
-  // caller that immediately clicks another titlebar icon behind the modal
-  // overlay (several specs open one class right after closing another) needs
-  // that settled, not raced against its own fixed budget.
   async closeMessageCenter(): Promise<void> {
     await this.page.keyboard.press('Escape');
     await this.messageCenterDialog().waitFor({ state: 'hidden' });

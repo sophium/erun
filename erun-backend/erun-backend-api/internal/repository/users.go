@@ -13,9 +13,7 @@ type UserRepository struct {
 	txs *TxManager
 }
 
-// UserFilter scopes List. TenantID, when set, is the explicit target tenant —
-// required for an operations-scoped caller, since erun_operations bypasses RLS
-// and would otherwise return every tenant's users.
+// UserFilter scopes List; TenantID is required for an operations caller.
 type UserFilter struct {
 	TenantID string
 }
@@ -24,11 +22,9 @@ func NewUserRepository(txs *TxManager) *UserRepository {
 	return &UserRepository{txs: txs}
 }
 
-// CreateUserParams is the enrollment input. TenantID, when set, targets a
-// tenant other than the caller's own resolved tenant — honored only for an
-// operations-scoped caller (enforced by the route, not here). RoleIDs, when
-// given, are granted to the new user instead of the TenantUser default; each
-// must already exist in the target tenant.
+// CreateUserParams is the enrollment input. TenantID overrides the target
+// tenant for operations callers (enforced by the route); RoleIDs replace the
+// TenantUser default.
 type CreateUserParams struct {
 	Username string
 	Issuer   string
@@ -37,36 +33,13 @@ type CreateUserParams struct {
 	RoleIDs  []string
 }
 
-// errIdentityAlreadyEnrolledRace is Create's internal-only signal that the
-// insertUserExternalID unique-violation branch fired: a concurrent enrollment
-// won the same (tenant, issuer, subject) between Create's up-front
-// findUserByExternalID check and this insert. It aborts the transaction (so
-// the just-inserted, now-orphaned users row rolls back) and never leaves this
-// file — Create catches it and re-resolves the winner the same way the
-// up-front check would have, so the caller sees the same no-op success either
-// way rather than a race-dependent error.
+// errIdentityAlreadyEnrolledRace aborts Create's transaction when a concurrent
+// enrollment wins the identity; Create then reports the winner as a no-op.
 var errIdentityAlreadyEnrolledRace = errors.New("identity already enrolled (race)")
 
-// Create enrolls a user and, when Issuer/Subject are given, links the external
-// identity that lets them actually sign in — otherwise the row exists but no
-// token can ever resolve to it.
-//
-// Re-enrolling an identity already mapped in this tenant is a no-op, not a
-// conflict: the operator's intent ("this identity usable in this tenant") is
-// already satisfied, so Create reports it back (alreadyEnrolled=true) with
-// the user that already holds it rather than erroring. The lookup is scoped
-// to tenantID exactly like every other query here, so it can only ever
-// surface a user within the caller's own resolved target tenant — never a
-// different tenant's enrollment of the same external identity.
-//
-// Role assignment: a caller-named RoleIDs list is granted as given.
-// Otherwise, the tenant's first user gets TenantAdmin — without a
-// grant-capable role nobody could ever grant a role at all, since granting is
-// itself permission-gated — and every later enrollment defaults to
-// TenantUser, so an invited colleague can use erun immediately rather than
-// sitting fully capability-less until someone grants a role by hand. A no-op
-// re-enrollment does not re-run role assignment; it leaves the existing
-// user's roles untouched.
+// Create enrolls a user and links the external identity when Issuer/Subject
+// are set. Re-enrolling an identity already mapped in the tenant is a no-op
+// (alreadyEnrolled=true) and does not reassign roles.
 func (r *UserRepository) Create(ctx context.Context, params CreateUserParams) (model.User, bool, error) {
 	username := strings.TrimSpace(params.Username)
 	issuer := strings.TrimSpace(params.Issuer)
@@ -90,7 +63,6 @@ func (r *UserRepository) Create(ctx context.Context, params CreateUserParams) (m
 	return model.User{}, false, err
 }
 
-// trimmedRoleIDs drops blank entries from a caller-supplied roleIds list.
 func trimmedRoleIDs(roleIDs []string) []string {
 	trimmed := make([]string, 0, len(roleIDs))
 	for _, roleID := range roleIDs {
@@ -101,8 +73,6 @@ func trimmedRoleIDs(roleIDs []string) []string {
 	return trimmed
 }
 
-// insertUserAndRoles is Create's actual insert path, run once
-// findUserByExternalID's up-front check has ruled out a no-op re-enrollment.
 func (r *UserRepository) insertUserAndRoles(ctx context.Context, tenantID string, username string, issuer string, subject string, roleIDs []string) (model.User, error) {
 	var user model.User
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
@@ -115,10 +85,7 @@ func (r *UserRepository) insertUserAndRoles(ctx context.Context, tenantID string
 			return err
 		}
 		if issuer != "" && subject != "" {
-			// The identity link is the whole point of the enrollment, so a
-			// mapping no token can resolve through makes this user unable to
-			// sign in the moment they are created. Refusing here aborts the
-			// transaction, leaving no half-usable row behind.
+			// An unresolvable mapping would leave the new user unable to sign in.
 			if err := assertTenantIssuerMappingResolvable(ctx, tx, user.TenantID, issuer); err != nil {
 				return err
 			}
@@ -131,12 +98,7 @@ func (r *UserRepository) insertUserAndRoles(ctx context.Context, tenantID string
 	return user, err
 }
 
-// resolveIdentityRaceWinner re-resolves the winner of errIdentityAlreadyEnrolledRace
-// the same way Create's up-front check would have, so the caller sees the same
-// no-op success either way. The lookup failing to find anything should not
-// happen (the unique violation that got here proves a winner exists), so it
-// falls back to reporting a genuinely unrecognized conflict rather than
-// guessing.
+// resolveIdentityRaceWinner re-resolves the winner of errIdentityAlreadyEnrolledRace.
 func (r *UserRepository) resolveIdentityRaceWinner(ctx context.Context, tenantID string, issuer string, subject string) (model.User, bool, error) {
 	if existing, found, err := r.findUserByExternalID(ctx, tenantID, issuer, subject); err == nil && found {
 		return existing, true, nil
@@ -144,11 +106,8 @@ func (r *UserRepository) resolveIdentityRaceWinner(ctx context.Context, tenantID
 	return model.User{}, false, ErrUnrecognizedConflict
 }
 
-// findUserByExternalID looks up the user already holding tenantID's
-// (issuer, externalID) mapping, if any. Scoped by tenantID like every other
-// tenant-owned lookup here (falling back to RLS's own erun_current_tenant_id()
-// scoping when tenantID is empty), so it can never surface a different
-// tenant's enrollment.
+// findUserByExternalID looks up the user holding tenantID's (issuer,
+// externalID) mapping, falling back to RLS scoping when tenantID is empty.
 func (r *UserRepository) findUserByExternalID(ctx context.Context, tenantID string, issuer string, externalID string) (model.User, bool, error) {
 	var user model.User
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
@@ -207,11 +166,8 @@ func insertUserRow(ctx context.Context, tx bun.Tx, tenantID string, username str
 	return user, nil
 }
 
-// insertUserExternalID's only unique constraint is user_external_ids' own
-// primary key (tenant_id, issuer, external_id), so any unique violation here
-// is unambiguously a concurrent enrollment winning the same identity mapping
-// Create's up-front findUserByExternalID check already looked for and did
-// not find — see errIdentityAlreadyEnrolledRace.
+// The primary key is the only unique constraint, so a violation means a
+// concurrent enrollment won (see errIdentityAlreadyEnrolledRace).
 func insertUserExternalID(ctx context.Context, tx bun.Tx, tenantID string, userID string, issuer string, subject string) error {
 	var err error
 	if tenantID != "" {
@@ -234,10 +190,8 @@ func insertUserExternalID(ctx context.Context, tx bun.Tx, tenantID string, userI
 	return nil
 }
 
-// assignEnrollmentRoles is Create's role-assignment decision: an explicit
-// roleIDs list wins outright, the tenant's first user falls back to
-// TenantAdmin (grantFirstTenantUserRole), and everyone else defaults to
-// TenantUser (grantDefaultEnrollmentRole).
+// assignEnrollmentRoles grants explicit roleIDs, else TenantAdmin to the first
+// user, else TenantUser.
 func assignEnrollmentRoles(ctx context.Context, tx bun.Tx, tenantID string, userID string, roleIDs []string, isFirstUser bool) error {
 	if len(roleIDs) > 0 {
 		for _, roleID := range roleIDs {
@@ -256,12 +210,8 @@ func assignEnrollmentRoles(ctx context.Context, tx bun.Tx, tenantID string, user
 	return grantDefaultEnrollmentRole(ctx, tx, tenantID, userID)
 }
 
-// tenantHasNoUsers reports whether the target tenant currently has zero
-// users, which makes the user about to be created its first — the one case
-// that gets TenantAdmin rather than the ordinary TenantUser default.
-// TenantID, when set, is an operations-scoped caller's explicit override: its
-// session bypasses RLS, so an unfiltered count would see every tenant's users
-// rather than being scoped implicitly.
+// tenantHasNoUsers reports whether the tenant has no users yet. tenantID is
+// explicit because operations sessions bypass RLS.
 func tenantHasNoUsers(ctx context.Context, tx bun.Tx, tenantID string) (bool, error) {
 	var count int
 	var err error
@@ -276,40 +226,17 @@ func tenantHasNoUsers(ctx context.Context, tx bun.Tx, tenantID string) (bool, er
 	return count == 0, nil
 }
 
-// DeleteByUsername removes the user holding username, together with the
-// external-identity mapping and the role grants that point at it, and reports
-// whether there was one.
-//
-// It is revocation's erun-side half, for a machine identity whose footprint is
-// exactly those three rows. The username is derived from the environment's own
-// id (see service.MachineIdentityLoginName), so derivation rather than a stored
-// link is what finds it again — the same mechanism that makes provisioning
-// idempotent — and a call after a successful one is a no-op rather than an
-// error, which it has to be: it runs inside the environment-delete workflow,
-// where an attempt that fails partway is retried from the top.
-//
-// Removing the user row is what makes a revoked identity unusable at this API,
-// rather than merely unauthorized: a token the identity's own client secret
-// keeps minting resolves to no user, and the middleware refuses an unknown
-// external subject. The mapping and the grants are deleted explicitly rather
-// than left to the foreign keys, neither of which declares ON DELETE CASCADE —
-// the database would refuse the users delete outright rather than clean up
-// around it.
-//
-// tenantID scopes every statement, the same way EnvironmentRepository.Delete
-// scopes its own: this runs behind a durable workflow, so the caller passes the
-// owning tenant explicitly rather than relying on the session's RLS context —
-// which an operations-scoped retry would otherwise leave unscoped, matching
-// another tenant's identically-named row.
+// DeleteByUsername removes a machine identity's user row, external-identity
+// mapping and role grants, reporting whether it existed. It is idempotent for
+// workflow retries. The FKs do not cascade, so children are deleted explicitly.
+// tenantID is explicit because an operations retry would otherwise be unscoped.
 func (r *UserRepository) DeleteByUsername(ctx context.Context, tenantID string, username string) (bool, error) {
 	tenantID = strings.TrimSpace(tenantID)
 	username = strings.TrimSpace(username)
 	if username == "" {
 		return false, nil
 	}
-	// An unnamed tenant is a wiring error, never something to scope around: an
-	// empty tenant_id matches no row as erun_tenant and every tenant's row as
-	// erun_operations, so the one answer this must not give is a silent one.
+	// An empty tenant_id matches every tenant under erun_operations.
 	if tenantID == "" {
 		return false, ErrMissingSecurityContext
 	}
@@ -402,11 +329,8 @@ func (r *UserRepository) RoleNames(ctx context.Context, userID string) ([]string
 	return names, nil
 }
 
-// List returns the filter's target tenant's users. TenantID is required to be
-// meaningful: an operations-scoped caller's session bypasses RLS, so an
-// unfiltered query would return every tenant's users rather than being scoped
-// implicitly. The route always resolves TenantID explicitly (the caller's own
-// tenant by default, an override only for an operations caller).
+// List returns the filter's target tenant's users. TenantID must be set
+// because operations sessions bypass RLS.
 func (r *UserRepository) List(ctx context.Context, filter UserFilter) ([]model.User, error) {
 	tenantID := strings.TrimSpace(filter.TenantID)
 	var users []model.User

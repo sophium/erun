@@ -1,0 +1,55 @@
+package cloudctx
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+func (s *Service) injectHostCredentials(ctx context.Context, endpoint, bearer string, accessKeyID, secretAccessKey, sessionToken string, expiration time.Time) error {
+	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: s.d.ClientVersion()}, nil)
+	session, err := client.Connect(ctx, s.d.MCPTransport(endpoint, bearer), nil)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = session.Close()
+	}()
+	args := map[string]any{
+		"accessKeyId":     accessKeyID,
+		"secretAccessKey": secretAccessKey,
+	}
+	if sessionToken != "" {
+		args["sessionToken"] = sessionToken
+	}
+	if !expiration.IsZero() {
+		args["expiration"] = expiration.UTC().Format(time.RFC3339)
+	}
+	if _, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "cloud_inject_aws_credentials",
+		Arguments: args,
+	}); err != nil {
+		return fmt.Errorf("cloud_inject_aws_credentials: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) clearHostCredentials(ctx context.Context, endpoint, bearer string) error {
+	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: s.d.ClientVersion()}, nil)
+	session, err := client.Connect(ctx, s.d.MCPTransport(endpoint, bearer), nil)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = session.Close()
+	}()
+	if _, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "cloud_clear_aws_credentials",
+		Arguments: map[string]any{},
+	}); err != nil {
+		return fmt.Errorf("cloud_clear_aws_credentials: %w", err)
+	}
+	return nil
+}

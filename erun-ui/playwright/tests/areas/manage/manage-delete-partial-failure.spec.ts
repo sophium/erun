@@ -2,10 +2,6 @@ import type { Page } from '@playwright/test';
 
 import { test, expect } from '../../../fixtures/erunApp.js';
 
-// A delete whose namespace cleanup fails must render as an error with the
-// failure clause visible and a Copy action — not the plain success pill it
-// used to be (the copy buffer had already been cleared, and the warning was
-// just appended to the "Deleted ..." text as an afterthought).
 async function stubDeleteWithNamespaceFailure(page: Page): Promise<void> {
   await page.route('**/__erun_invoke', async (route, request) => {
     const body = JSON.parse(request.postData() ?? '{}') as { method: string; args?: unknown[] };
@@ -40,10 +36,7 @@ test.describe('manage dialog delete — partial failure (#1212)', () => {
     await app.manageDialog.confirmDelete(`${seededEnv.tenant}-${seededEnv.environment}`);
 
     const pill = page.getByRole('alert').filter({ hasText: 'NAMESPACE_DELETE_UNREACHABLE_MARKER' });
-    // Converge on the result view actually having rendered (the delete
-    // round-trip and the confirm-view-to-result-pill swap are two separate
-    // steps) before asserting on it, rather than racing that render against
-    // a bare expect's fixed timeout.
+    // The delete round trip and the result-pill swap are separate steps.
     await pill.waitFor({ state: 'visible' });
     await expect(pill).toBeVisible();
     await expect(pill).toContainText(`Deleted ${seededEnv.tenant} / ${seededEnv.environment}.`);

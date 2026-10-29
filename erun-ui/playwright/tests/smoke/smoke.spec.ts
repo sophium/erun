@@ -10,14 +10,8 @@ import {
   uniqueEnvironmentName,
 } from '../../fixtures/seedRoot.js';
 
-// The smoke suite is not a replacement for the per-area suites under
-// tests/areas/ — it is the cross-cutting guard `erun build`'s area-scoped
-// selection runs on every build regardless of which area's specs changed
-// (see AGENTS.md's "Area-scoped gate selection"). One fast test per area,
-// each exercising that area's shallowest real interaction rather than a full
-// flow, so a change that breaks an area the diff didn't touch still fails
-// the gate instead of slipping through on "smoke only" or "smoke + a
-// different area".
+// One fast test per area, run on every build so a change breaks the gate even
+// in an area the diff didn't touch.
 
 test.describe('smoke', () => {
   test('sidebar: env rows render and a hover card opens', async ({ app }) => {
@@ -79,8 +73,7 @@ test.describe('smoke', () => {
     const toggle = page.getByRole('button', {
       name: /Contribute to ERun|Disable contribute mode/i,
     });
-    // waitFor (not expect) so this converges against the enclosing test's own
-    // budget rather than racing the click's render against expect's fixed one.
+    // waitFor converges on the test's budget, not expect's.
     await toggle.first().waitFor({ state: 'visible' });
     await expect(toggle.first()).toBeVisible();
   });
@@ -96,14 +89,12 @@ test.describe('smoke', () => {
     const splitter = page.getByRole('slider', { name: 'Resize diff panel' });
     const initiallyVisible = await splitter.isVisible().catch(() => false);
 
-    // waitFor (not expect.poll) converges against the enclosing test's own
-    // budget instead of racing the toggle's render against expect's fixed one.
+    // waitFor converges on the test's budget, not expect's.
     await app.titlebar.toggleReviewPanel();
     await splitter.waitFor({ state: initiallyVisible ? 'hidden' : 'visible' });
     await expect(splitter).toBeVisible({ visible: !initiallyVisible });
 
-    // Restore so a later test in this worker doesn't inherit an open panel —
-    // converge on that too, so a slow restore can't leak into the next test.
+    // Restore so later tests in this worker don't inherit an open panel.
     await app.titlebar.toggleReviewPanel();
     await splitter.waitFor({ state: initiallyVisible ? 'visible' : 'hidden' });
   });
@@ -117,22 +108,14 @@ test.describe('smoke', () => {
   });
 
   test('diagnostics: the diagnostics console opens with the erun trace tab', async ({ app }) => {
-    // The panel's primary tab names whichever context is active, and a
-    // running orchestrator session outranks the sidebar's environment
-    // selection. A spec earlier in this worker can leave one running, so
-    // establish the environment context here instead of asserting against
-    // whichever context boot happened to restore.
+    // A running orchestrator from an earlier spec outranks the environment
+    // context, so establish it explicitly.
     await app.openEnvironmentTerminal(SEED_TENANT, SEED_ENV_ALPHA);
 
-    // Converge on the panel actually having opened before asserting on a tab
-    // inside it, rather than racing the toggle's render against a flat
-    // visibility timeout (waitForOpen defers to the enclosing test's budget).
     await app.debugPanel.toggle();
     await app.debugPanel.waitForOpen();
     await expect(app.debugPanel.tab('erun trace')).toBeVisible();
 
-    // Converge on the close too so a slow render can't leak an open panel
-    // into the next test in this worker.
     await app.debugPanel.toggle();
     await app.debugPanel.waitForClosed();
   });
@@ -158,10 +141,7 @@ test.describe('smoke', () => {
     await expect(toggle).toBeVisible();
     const wasDark = (await app.documentElement().getAttribute('class'))?.includes('dark') ?? false;
 
-    // waitForFunction (not expect) converges against the enclosing test's own
-    // budget instead of racing the toggle's render against expect's fixed
-    // one — there is no locator-level "wait for this class" primitive, so
-    // this is the class-attribute equivalent of the other tests' waitFor.
+    // No locator-level class wait exists, so use waitForFunction.
     await app.titlebar.toggleTheme();
     await page.waitForFunction(
       (dark) => document.documentElement.classList.contains('dark') === dark,
@@ -169,8 +149,7 @@ test.describe('smoke', () => {
     );
     await expect(app.documentElement()).toHaveClass(wasDark ? /^(?!.*dark).*$/ : /dark/);
 
-    // Restore so a later test in this worker doesn't inherit the flipped
-    // theme — converge on that too, so a slow restore can't leak.
+    // Restore so later tests in this worker don't inherit the theme.
     await app.titlebar.toggleTheme();
     await page.waitForFunction(
       (dark) => document.documentElement.classList.contains('dark') === dark,

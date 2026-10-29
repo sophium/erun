@@ -5,29 +5,24 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"path"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-// erunCommonImportPath is the module whose CLI-shelling helpers are banned here;
-// erunCommonDir is where this module's go.mod replace directive points.
 const (
 	erunCommonImportPath = "github.com/sophium/erun/erun-common"
 	erunCommonDir        = "../../erun-common"
 )
 
-// bannedImports are the standard-library doors to a subprocess.
 var bannedImports = map[string]string{
 	"os/exec": "spawns a subprocess",
 	"syscall": "can reach Exec/ForkExec directly",
 }
 
-// bannedCommonFuncs are the erun-common helpers that shell out to a CLI binary —
-// the CLI and desktop transports' path, which the backend must not take.
-// InitCloudContext is deliberately absent: it takes injected dependencies, and
-// the backend supplies SDK-backed ones (internal/provision/awssdk.go) plus a
-// no-op RunKubectl, so it reaches AWS without a binary.
+// bannedCommonFuncs shell out to a CLI binary. InitCloudContext is absent: the
+// backend injects SDK-backed dependencies into it.
 var bannedCommonFuncs = []string{
 	"Command",
 	"RawCommandRunner",
@@ -39,24 +34,9 @@ var bannedCommonFuncs = []string{
 	"EnsureKubernetesNamespace",
 }
 
-// TestBackendRunsNoExternalBinaries enforces the architecture invariant that
-// erun-backend-api drives its automation through Go SDKs and never executes an
-// external binary — no `aws`, `kubectl`, `helm`, or `docker` subprocess, from
-// the HTTP handlers or from the DBOS provisioning workflow. That invariant is
-// what lets the API ship as a thin alpine image carrying only the Go binary.
-//
-// Scope is this module's own production source. It is deliberately not the
-// transitive import graph: client-go's exec auth plugin, the AWS SDK's process
-// credential provider, and erun-common (which is the CLI's shared layer) all
-// import os/exec legitimately, so a reachability ban could only ever be
-// satisfied by dropping those dependencies. What this module's own code does
-// with them is the thing worth pinning, and it is what actually decides whether
-// the image needs a binary on PATH.
-//
-// Scheduling work elsewhere is not execution: internal/deployexec creates a
-// Kubernetes Job whose container runs `erun deploy` from the erun-devops runtime
-// image. That command lives in a Job spec sent to the API server, in a different
-// pod — the backend process still runs nothing.
+// TestBackendRunsNoExternalBinaries: the backend drives automation through Go SDKs only, so its
+// image ships no binaries. Scope is this module's own source, not the transitive import graph;
+// creating a Kubernetes Job (internal/deployexec) is not execution.
 func TestBackendRunsNoExternalBinaries(t *testing.T) {
 	root, err := filepath.Abs(".")
 	if err != nil {
@@ -89,7 +69,6 @@ func TestBackendRunsNoExternalBinaries(t *testing.T) {
 	if walkErr != nil {
 		t.Fatal(walkErr)
 	}
-	// A walk that scanned nothing would pass without checking anything.
 	if scanned == 0 {
 		t.Fatalf("scanned no production .go files under %s — the walk is misconfigured", root)
 	}
@@ -130,27 +109,26 @@ func checkBannedCommonCalls(t *testing.T, rel string, file *ast.File) {
 	})
 }
 
-// erunCommonLocalNames returns every name erun-common is bound to in this file,
-// so the ban holds under any import alias.
 func erunCommonLocalNames(file *ast.File) map[string]bool {
 	locals := map[string]bool{}
 	for _, spec := range file.Imports {
-		if strings.Trim(spec.Path.Value, `"`) != erunCommonImportPath {
+		importPath := strings.Trim(spec.Path.Value, `"`)
+		if importPath != erunCommonImportPath && !strings.HasPrefix(importPath, erunCommonImportPath+"/") {
 			continue
 		}
-		if spec.Name != nil {
+		switch {
+		case spec.Name != nil:
 			locals[spec.Name.Name] = true
-			continue
+		case importPath == erunCommonImportPath:
+			locals["eruncommon"] = true
+		default:
+			locals[path.Base(importPath)] = true
 		}
-		locals["eruncommon"] = true
 	}
 	return locals
 }
 
-// TestBannedCommonFuncsStillExist keeps the ban list honest. A name that
-// erun-common has since renamed would silently guard nothing, so a rename must
-// fail here and be carried across rather than quietly widening what the backend
-// may call.
+// TestBannedCommonFuncsStillExist: a renamed erun-common function would silently guard nothing.
 func TestBannedCommonFuncsStillExist(t *testing.T) {
 	declared := erunCommonFuncNames(t)
 	if len(declared) == 0 {
@@ -163,27 +141,26 @@ func TestBannedCommonFuncsStillExist(t *testing.T) {
 	}
 }
 
-// erunCommonFuncNames collects erun-common's package-level function names.
 func erunCommonFuncNames(t *testing.T) map[string]bool {
 	t.Helper()
-	paths, err := filepath.Glob(filepath.Join(erunCommonDir, "*.go"))
-	if err != nil {
-		t.Fatal(err)
-	}
 	declared := map[string]bool{}
-	for _, path := range paths {
-		if strings.HasSuffix(path, "_test.go") {
-			continue
+	err := filepath.WalkDir(erunCommonDir, func(name string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			return err
 		}
-		file, parseErr := parser.ParseFile(token.NewFileSet(), path, nil, parser.SkipObjectResolution)
+		file, parseErr := parser.ParseFile(token.NewFileSet(), name, nil, parser.SkipObjectResolution)
 		if parseErr != nil {
-			t.Fatal(parseErr)
+			return parseErr
 		}
 		for _, decl := range file.Decls {
 			if fn, ok := decl.(*ast.FuncDecl); ok && fn.Recv == nil {
 				declared[fn.Name.Name] = true
 			}
 		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 	return declared
 }

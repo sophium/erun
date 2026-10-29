@@ -11,12 +11,7 @@ import { InlineAlert, PermissionNotice } from './InlineAlert';
 import { DataCell, DataTable, type TenantDashboardData } from './TenantDashboardMessage';
 import { RegistrationEnvironmentsSection } from './TenantDashboardPanels.RegistrationEnvironments';
 
-// TenantDashboardPanels.Registration.tsx is the Registration tab: the
-// registration path `erun platform` gives the CLI (context create, provision
-// preview, env register/deploy/stop/delete) and no desktop surface had — the
-// gap this file closes. `erun platform tenant create`/`user enroll` stay out
-// of scope on purpose (see tenant_platform_registration.go's header comment);
-// TwoRegistriesNotice below points there instead of half-implementing them.
+// Registration tab. Tenant create and user enroll stay CLI/console actions.
 
 export function RegistrationPanel({ data }: { data: TenantDashboardData }): React.ReactElement {
   const panel = tenantDashboardPanel(data, 'registration');
@@ -40,14 +35,8 @@ export function RegistrationPanel({ data }: { data: TenantDashboardData }): Reac
   );
 }
 
-// TwoRegistriesNotice is decision (4): the tenant dashboard names the two
-// distinct objects an operator otherwise conflates — a tenant/env created in
-// this desktop only exists in this machine's local config until it is
-// registered here, and a hosted registration has no automatic link back to
-// that local object even when the names match. It also names decision (2):
-// creating a tenant, or enrolling the first user, stays a CLI/console action
-// because it configures an OIDC issuer mapping this form has no safe way to
-// guess.
+// TwoRegistriesNotice separates local config from hosted registration, which
+// have no automatic link even when names match.
 function TwoRegistriesNotice({ tenant }: { tenant: string }): React.ReactElement {
   return (
     <div className="grid gap-1.5 rounded-[var(--radius)] border border-border bg-muted/30 px-3 py-2.5 text-[13px] leading-[1.4] text-muted-foreground">
@@ -100,9 +89,7 @@ function ContextsList({ data }: { data: TenantDashboardData }): React.ReactEleme
   }
   const contexts = data?.contexts ?? [];
   if (contexts.length === 0) {
-    // "Register one below" is only true for the caller who gets
-    // CreateContextForm; for everyone else that section is a permission
-    // notice, which is what this copy points at instead.
+    // Only callers given CreateContextForm can "register one below".
     return (
       <EmptyState
         icon={<Cloud />}
@@ -235,9 +222,7 @@ function CreateContextFeedback({
   );
 }
 
-// PlanList renders a resolved plan's ordered steps verbatim — the actual
-// resolved actions (root AGENTS.md: "prefer the actual commands... over
-// summary notes"), not a paraphrase.
+// PlanList renders a resolved plan's steps verbatim.
 export function PlanList({ plan }: { plan: string[] }): React.ReactElement {
   return (
     <ol className="grid gap-1 rounded-[var(--radius)] border border-border bg-muted/30 px-3 py-2 text-[13px] text-muted-foreground">

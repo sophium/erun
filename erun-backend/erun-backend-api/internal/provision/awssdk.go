@@ -20,40 +20,29 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	iamtypes "github.com/aws/aws-sdk-go-v2/service/iam/types"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
-
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-// awsSDKRunner implements the eruncommon.CloudContextDependencies.RunAWS seam
-// with aws-sdk-go-v2, so the API pod drives a tenant's AWS in-process and needs
-// no `aws` executable — the image ships only the Go binary.
-//
-// eruncommon.InitCloudContext stays the single owner of the bootstrap sequence
-// for every transport, so this stays on the far side of its existing seam and
-// interprets the bounded argv that sequence emits. It is deliberately not a
-// general aws-CLI parser: an argv it does not recognise is an error naming the
-// argv, not a silent no-op, so a change on the eruncommon side surfaces here
-// instead of half-provisioning a tenant.
+// awsSDKRunner implements the RunAWS seam with aws-sdk-go-v2, so the API image
+// needs no `aws` binary. It interprets only the argv cloud.InitCloudContext
+// emits; anything else is an error, never a silent no-op.
 type awsSDKRunner struct {
 	creds awsCredentials
-	// endpoint pins every service client at a local emulator (floci) for
-	// verification; empty means the real AWS endpoints.
+	// endpoint points every client at a local emulator; empty means real AWS.
 	endpoint string
 
 	mu      sync.Mutex
 	configs map[string]aws.Config
 }
 
-// awsCredentials is the tenant alias's stored credential blob.
 type awsCredentials struct {
 	AccessKeyID     string `json:"accessKeyId"`
 	SecretAccessKey string `json:"secretAccessKey"`
 	SessionToken    string `json:"sessionToken,omitempty"`
 }
 
-// newAWSSDKRunner resolves the alias's credentials up front so a tenant whose
-// alias carries no usable keys fails naming that, rather than provisioning
-// against whatever ambient identity the control-plane pod happens to hold.
+// A missing key fails here rather than falling back to the pod's ambient identity.
 func newAWSSDKRunner(credentialsJSON, endpoint string) (*awsSDKRunner, error) {
 	var creds awsCredentials
 	if err := json.Unmarshal([]byte(credentialsJSON), &creds); err != nil {
@@ -65,10 +54,8 @@ func newAWSSDKRunner(credentialsJSON, endpoint string) (*awsSDKRunner, error) {
 	return &awsSDKRunner{creds: creds, endpoint: endpoint, configs: map[string]aws.Config{}}, nil
 }
 
-// runAWS adapts the runner to the eruncommon seam, binding the DBOS step's
-// context so a cancelled workflow cancels the in-flight AWS call.
-func (r *awsSDKRunner) runAWS(ctx context.Context) func(eruncommon.Context, eruncommon.CloudProviderConfig, string, []string) (string, error) {
-	return func(_ eruncommon.Context, _ eruncommon.CloudProviderConfig, region string, args []string) (string, error) {
+func (r *awsSDKRunner) runAWS(ctx context.Context) func(core.Context, model.CloudProviderConfig, string, []string) (string, error) {
+	return func(_ core.Context, _ model.CloudProviderConfig, region string, args []string) (string, error) {
 		return r.run(ctx, region, args)
 	}
 }
@@ -94,8 +81,6 @@ func (r *awsSDKRunner) run(ctx context.Context, region string, args []string) (s
 	}
 }
 
-// dispatch resolves one verb against its service's table. An unknown verb is an
-// error naming it, so a shared sequence that grows a call fails loudly here.
 func dispatch[C any](ctx context.Context, client C, service, verb string, flags awsFlags, verbs map[string]func(context.Context, C, awsFlags) (string, error)) (string, error) {
 	handler, ok := verbs[verb]
 	if !ok {
@@ -104,9 +89,7 @@ func dispatch[C any](ctx context.Context, client C, service, verb string, flags 
 	return handler(ctx, client, flags)
 }
 
-// config caches one resolved config per region: the bootstrap makes a dozen
-// calls in a single region, and resolving it once keeps them off the shared
-// config files and IMDS the default chain would otherwise probe per call.
+// Resolving once per region keeps the bootstrap's calls off config files and IMDS.
 func (r *awsSDKRunner) config(ctx context.Context, region string) (aws.Config, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -115,9 +98,7 @@ func (r *awsSDKRunner) config(ctx context.Context, region string) (aws.Config, e
 	}
 	opts := []func(*awsconfig.LoadOptions) error{
 		awsconfig.WithRegion(region),
-		// The alias's keys are the only identity this may act as; withholding the
-		// ambient chain is what keeps one tenant's provisioning off another
-		// identity's credentials.
+		// Only the alias's keys, never the ambient chain, so tenants cannot share an identity.
 		awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
 			r.creds.AccessKeyID, r.creds.SecretAccessKey, r.creds.SessionToken)),
 	}
@@ -131,8 +112,6 @@ func (r *awsSDKRunner) config(ctx context.Context, region string) (aws.Config, e
 	r.configs[region] = cfg
 	return cfg, nil
 }
-
-// ---- EC2 -------------------------------------------------------------------
 
 var ec2Verbs = map[string]func(context.Context, *ec2.Client, awsFlags) (string, error){
 	"describe-instances":               ec2DescribeInstances,
@@ -186,8 +165,7 @@ func ec2DescribeInstances(ctx context.Context, client *ec2.Client, flags awsFlag
 	if err != nil {
 		return "", err
 	}
-	// Render only the projections eruncommon asks for; anything else would be
-	// parsed as a value it did not request.
+	// Render only the projections cloud asks for.
 	query := flags.one("--query")
 	switch {
 	case strings.Contains(query, "PublicIpAddress"):
@@ -224,8 +202,7 @@ func runInstancesInput(flags awsFlags) (*ec2.RunInstancesInput, error) {
 		MinCount:     aws.Int32(count),
 		MaxCount:     aws.Int32(count),
 	}
-	// The CLI base64-encodes a file:// user-data argument; RunInstances expects
-	// it already encoded.
+	// The CLI base64-encodes file:// user-data; RunInstances expects it encoded.
 	userData, err := readFileArg(flags.one("--user-data"))
 	if err != nil {
 		return nil, err
@@ -238,8 +215,6 @@ func runInstancesInput(flags awsFlags) (*ec2.RunInstancesInput, error) {
 	return input, nil
 }
 
-// applyRunInstancesShorthand fills the structured fields the shared sequence
-// passes as aws-CLI shorthand strings.
 func applyRunInstancesShorthand(input *ec2.RunInstancesInput, flags awsFlags) {
 	if mapping, ok := parseBlockDeviceMapping(flags.one("--block-device-mappings")); ok {
 		input.BlockDeviceMappings = []ec2types.BlockDeviceMapping{mapping}
@@ -252,8 +227,6 @@ func applyRunInstancesShorthand(input *ec2.RunInstancesInput, flags awsFlags) {
 	}
 }
 
-// applyRunInstancesReferences fills the launch's optional references to
-// resources resolved earlier in the bootstrap.
 func applyRunInstancesReferences(input *ec2.RunInstancesInput, flags awsFlags) {
 	if groups := flags.all("--security-group-ids"); len(groups) > 0 {
 		input.SecurityGroupIds = groups
@@ -269,8 +242,7 @@ func applyRunInstancesReferences(input *ec2.RunInstancesInput, flags awsFlags) {
 	}
 }
 
-// ec2WaitMaxDuration matches the aws CLI waiter's ceiling (40 polls, 15s apart),
-// so a bootstrap that hangs gives up at the same point it always did.
+// ec2WaitMaxDuration matches the aws CLI waiter ceiling (40 polls, 15s apart).
 const ec2WaitMaxDuration = 10 * time.Minute
 
 func ec2Wait(ctx context.Context, client *ec2.Client, flags awsFlags) (string, error) {
@@ -284,8 +256,6 @@ func ec2Wait(ctx context.Context, client *ec2.Client, flags awsFlags) (string, e
 		return "", fmt.Errorf("aws ec2 wait: unsupported waiter %q", state)
 	}
 }
-
-// ---- IAM -------------------------------------------------------------------
 
 var iamVerbs = map[string]func(context.Context, *iam.Client, awsFlags) (string, error){
 	"get-role":                     iamGetRole,
@@ -360,9 +330,8 @@ func iamAddRoleToInstanceProfile(ctx context.Context, client *iam.Client, flags 
 	return "", err
 }
 
-// instanceProfileField renders the two projections eruncommon takes off an
-// instance profile: its ARN, and the attached role's name — the idempotency
-// check that decides whether a re-run must attach the role again.
+// instanceProfileField renders the profile ARN or attached role name; the role
+// name decides whether a re-run must attach it again.
 func instanceProfileField(profile *iamtypes.InstanceProfile, query string) (string, error) {
 	switch {
 	case strings.Contains(query, "Roles[0].RoleName"):
@@ -377,8 +346,6 @@ func instanceProfileField(profile *iamtypes.InstanceProfile, query string) (stri
 	}
 }
 
-// ---- SSM -------------------------------------------------------------------
-
 var ssmVerbs = map[string]func(context.Context, *ssm.Client, awsFlags) (string, error){
 	"get-parameter": ssmGetParameter,
 }
@@ -391,11 +358,7 @@ func ssmGetParameter(ctx context.Context, client *ssm.Client, flags awsFlags) (s
 	return aws.ToString(out.Parameter.Value), nil
 }
 
-// ---- argv parsing ----------------------------------------------------------
-
-// awsFlags is one parsed argv tail: each flag maps to the values that followed
-// it, and a leading bare token (the `wait instance-running` waiter name) is kept
-// as the subcommand.
+// awsFlags is a parsed argv tail; a leading bare token is the subcommand.
 type awsFlags struct {
 	values     map[string][]string
 	positional []string
@@ -436,8 +399,7 @@ func (f awsFlags) subcommand() string {
 	return ""
 }
 
-// parseEC2Filters turns each CLI shorthand "Name=k,Values=v1,v2" token into one
-// EC2 filter.
+// parseEC2Filters parses "Name=k,Values=v1,v2" tokens.
 func parseEC2Filters(tokens []string) []ec2types.Filter {
 	var filters []ec2types.Filter
 	for _, token := range tokens {
@@ -535,8 +497,6 @@ func parseIAMInstanceProfile(value string) (*ec2types.IamInstanceProfileSpecific
 	return nil, false
 }
 
-// ---- rendering helpers -----------------------------------------------------
-
 func firstInstanceField(out *ec2.DescribeInstancesOutput, field func(ec2types.Instance) string) string {
 	for _, reservation := range out.Reservations {
 		if len(reservation.Instances) > 0 {
@@ -546,9 +506,8 @@ func firstInstanceField(out *ec2.DescribeInstancesOutput, field func(ec2types.In
 	return ""
 }
 
-// describeInstancesStateLines renders
-// "Reservations[*].Instances[*].[InstanceId,State.Name]" as the CLI's
-// tab-separated text, one instance per line.
+// describeInstancesStateLines renders the CLI's tab-separated text for
+// "Reservations[*].Instances[*].[InstanceId,State.Name]".
 func describeInstancesStateLines(out *ec2.DescribeInstancesOutput) string {
 	var lines []string
 	for _, reservation := range out.Reservations {
@@ -563,8 +522,7 @@ func describeInstancesStateLines(out *ec2.DescribeInstancesOutput) string {
 	return strings.Join(lines, "\n")
 }
 
-// readFileArg reads a "file://<path>" argument's contents as the aws CLI does;
-// any other value passes through unchanged.
+// readFileArg reads a "file://<path>" argument like the aws CLI; other values pass through.
 func readFileArg(value string) (string, error) {
 	value = strings.TrimSpace(value)
 	path, ok := strings.CutPrefix(value, "file://")

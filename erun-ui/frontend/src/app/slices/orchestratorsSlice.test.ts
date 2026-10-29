@@ -141,10 +141,6 @@ test('one environment linked from two orchestrators updates on both refs', () =>
   assert.equal(next.items[1]?.environments[0]?.activity?.outage, false);
 });
 
-// A clean fetch (setOrchestrators) is the build-time join and must keep
-// carrying whatever activity the read model resolved, independent of the live
-// patch reducer above — this is what makes a page reload correct without
-// waiting on the next poller transition.
 test('a fresh fetch still reflects the joined snapshot with no event required', () => {
   const state = stateWith([
     orchestrator({

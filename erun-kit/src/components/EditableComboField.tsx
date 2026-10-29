@@ -23,9 +23,7 @@ function EditableComboChoices({
   return (
     <PopoverContent
       id={`${id}-choices`}
-      // Sized and aligned to the field itself, not to the chevron that opens
-      // it: anchored to a 28px button the list hung off to one side, which
-      // inside a dialog put it half outside the dialog it belongs to.
+      // Sized to the field, not the chevron, so it stays inside a dialog.
       className="w-(--radix-popover-trigger-width) min-w-64 max-w-[calc(100vw-4rem)] p-1"
       align="start"
       collisionPadding={12}
@@ -79,8 +77,7 @@ export function EditableComboField({
   onValueChange: (value: string) => void;
 }): React.ReactElement {
   const [open, setOpen] = React.useState(false);
-  // Show all suggestions until the user types, rather than filtering by the
-  // prefilled value, so the full option set stays visible (recognition over recall).
+  // Show all suggestions until the user types.
   const [dirty, setDirty] = React.useState(false);
   const visibleSuggestions = dirty ? filterSuggestions(suggestions, value) : suggestions;
   const openPopover = (next: boolean) => {

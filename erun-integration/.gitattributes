@@ -1,6 +1,2 @@
-# Goldens are compared byte-for-byte against output the erun binary writes with
-# LF line endings. A Windows checkout with core.autocrlf=true would otherwise
-# materialize them as CRLF and fail every comparison on text that reads
-# identically, so the working-tree ending is pinned here rather than left to the
-# developer's git config.
+# Goldens are compared byte-for-byte with LF output, whatever core.autocrlf says.
 testdata/**/*.txt text eol=lf

@@ -13,13 +13,8 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
-// routeCheckStubServer stands in for a deployed erun-backend-api plane:
-// registered maps a path to the one method that answers 200 (bearer
-// checked); every other path -- and every other method on a registered
-// path -- falls through to Go's stdlib net/http.ServeMux own default
-// behavior (405 for a path known under a different method, 404 for a path
-// it has never heard of), the same behavior the real plane's bare mux
-// produces since erun-backend-api installs no custom NotFoundHandler.
+// routeCheckStubServer answers 200 for each registered path and method; everything else
+// gets ServeMux's default 405/404, as the real plane has no custom NotFoundHandler.
 func routeCheckStubServer(t testing.TB, registered map[string]string) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -36,13 +31,8 @@ func routeCheckStubServer(t testing.TB, registered map[string]string) *httptest.
 	return server
 }
 
-// seedRouteCheckRoutesDir writes a minimal internal/routes-shaped source
-// file under dir so DiscoverAPIRoutes has real register(...) call sites to
-// parse, without depending on this checkout's own erun-backend-api tree
-// (the harness has no live cluster or cloud target, and pointing this
-// command at a real monorepo layout from inside the sandboxed fixture would
-// be exactly that kind of dependency). It includes one parameterized route
-// so the {param} -> literal-segment substitution is exercised too.
+// seedRouteCheckRoutesDir writes a minimal routes source, with one {param} route, so
+// discovery does not depend on this checkout's backend tree.
 func seedRouteCheckRoutesDir(t testing.TB, dir string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -64,13 +54,8 @@ func RegisterExampleRoutes(register ProtectedRouteRegistrar) {
 	}
 }
 
-// TestExecRouteCheck drives `erun exec route-check` against a stub plane
-// standing in for a real deployed control plane: a route the plane answers
-// under a different method (405) still counts reachable, a route the
-// plane's router has never heard of (Go's own literal 404 page) is reported
-// missing and fails the run, and a plane that does not even answer the
-// GET /v1/whoami sanity probe refuses outright rather than reporting every
-// route in the inventory as missing.
+// TestExecRouteCheck: a 405 counts as reachable, Go's 404 page as missing, and a plane
+// failing the GET /v1/whoami probe refuses outright.
 func TestExecRouteCheck(t *testing.T) {
 	t.Parallel()
 
@@ -106,8 +91,7 @@ func TestExecRouteCheck(t *testing.T) {
 		setup := env.New(t)
 		routesDir := filepath.Join(setup.Cwd, "stub-routes")
 		seedRouteCheckRoutesDir(t, routesDir)
-		// missing-on-plane is registered under POST here, never GET -- proving
-		// that a 405 (path known, wrong method) still counts as reachable.
+		// Registered under POST only: a 405 still counts as reachable.
 		platform := routeCheckStubServer(t, map[string]string{
 			"/v1/whoami":                    "GET",
 			"/v1/known":                     "GET",
@@ -130,9 +114,7 @@ func TestExecRouteCheck(t *testing.T) {
 		setup := env.New(t)
 		routesDir := filepath.Join(setup.Cwd, "stub-routes")
 		seedRouteCheckRoutesDir(t, routesDir)
-		// missing-on-plane is never registered on the stub at all, modeling a
-		// route that merged and closed its issue while the deployed plane
-		// still predates it.
+		// Never registered: the deployed plane predates the route.
 		platform := routeCheckStubServer(t, map[string]string{
 			"/v1/whoami":                    "GET",
 			"/v1/known":                     "GET",
@@ -154,10 +136,7 @@ func TestExecRouteCheck(t *testing.T) {
 		setup := env.New(t)
 		routesDir := filepath.Join(setup.Cwd, "stub-routes")
 		seedRouteCheckRoutesDir(t, routesDir)
-		// No /v1/whoami registered at all: the plane answers Go's own default
-		// 404 to the sanity probe itself, modeling a down or misconfigured
-		// plane -- this must refuse rather than reporting every route in the
-		// inventory as missing.
+		// No /v1/whoami: a down plane must refuse rather than report every route missing.
 		platform := routeCheckStubServer(t, map[string]string{})
 		platformAlias(t, setup, platform)
 		result := erun.Run(t, []string{

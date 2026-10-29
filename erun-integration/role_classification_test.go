@@ -13,16 +13,8 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/roleclassification"
 )
 
-// protectedRouteSites parses every non-test .go file in
-// erun-backend-api/internal/routes and returns one "METHOD /path" key per
-// register(http.MethodX, "path", ...) call site -- the
-// routes.ProtectedRouteRegistrar convention every route file uses. Unlike
-// apiRouteCapabilities above (which also walks the couple of routes
-// registered directly on the mux for platform.go/invites.go's intentionally
-// unauthenticated endpoints), this deliberately excludes them: an
-// unauthenticated route never reaches PermissionAuthorizer, so classifying
-// it against TenantUser/TenantAdmin would assert something the route can
-// never actually be gated on.
+// protectedRouteSites returns "METHOD /path" for every register(...) call in
+// internal/routes; mux-registered unauthenticated routes never reach PermissionAuthorizer.
 func protectedRouteSites(t testing.TB, root string) []string {
 	t.Helper()
 	dir := filepath.Join(root, "erun-backend", "erun-backend-api", "internal", "routes")
@@ -43,38 +35,40 @@ func protectedRouteSites(t testing.TB, root string) []string {
 			t.Fatalf("parse %s: %v", name, err)
 		}
 		ast.Inspect(file, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok {
-				return true
+			if route, ok := registerCallRoute(n); ok {
+				routes = append(routes, route)
 			}
-			ident, ok := call.Fun.(*ast.Ident)
-			if !ok || ident.Name != "register" || len(call.Args) < 2 {
-				return true
-			}
-			method, ok := httpMethodLiteral(call.Args[0])
-			if !ok {
-				return true
-			}
-			pathLit, ok := call.Args[1].(*ast.BasicLit)
-			if !ok || pathLit.Kind != token.STRING {
-				return true
-			}
-			p, err := strconv.Unquote(pathLit.Value)
-			if err != nil {
-				return true
-			}
-			routes = append(routes, method+" "+p)
 			return true
 		})
 	}
 	return routes
 }
 
-// routeRoleClassifications parses erun-backend-api/internal/routeroles'
-// Routes map literal the same way apiRouteMapLiteral above reads
-// InternalAPIRoutes/KnownUnsurfacedRoutes: it only needs each key's
-// presence, not which routeroles.Class the value names, so the same
-// generic bool-map reader works unchanged here too.
+func registerCallRoute(n ast.Node) (string, bool) {
+	call, ok := n.(*ast.CallExpr)
+	if !ok {
+		return "", false
+	}
+	ident, ok := call.Fun.(*ast.Ident)
+	if !ok || ident.Name != "register" || len(call.Args) < 2 {
+		return "", false
+	}
+	method, ok := httpMethodLiteral(call.Args[0])
+	if !ok {
+		return "", false
+	}
+	pathLit, ok := call.Args[1].(*ast.BasicLit)
+	if !ok || pathLit.Kind != token.STRING {
+		return "", false
+	}
+	p, err := strconv.Unquote(pathLit.Value)
+	if err != nil {
+		return "", false
+	}
+	return method + " " + p, true
+}
+
+// routeRoleClassifications reads only the keys of routeroles' Routes map.
 func routeRoleClassifications(t testing.TB, root string) map[string]bool {
 	t.Helper()
 	path := filepath.Join(root, "erun-backend", "erun-backend-api", "internal", "routeroles", "route_roles.go")
@@ -88,15 +82,8 @@ func routeRoleClassifications(t testing.TB, root string) map[string]bool {
 	return classified
 }
 
-// TestRouteRoleClassificationGate fails when a registered, authenticated API
-// route is not classified against the predefined role model in
-// erun-backend-api/internal/routeroles' Routes map -- the same "classify
-// every route or fail" treatment as TestDesktopSurfaceGate above, applied to
-// who may call a route instead of whether an operator can reach it. Without
-// this, a role defined by enumerated exact paths would silently fail to
-// grant a route nobody remembered to add, which is a narrower role's own
-// hazard: a wildcard role (ReadAll/WriteAll) can never miss a new route this
-// way, since it grants everything by pattern.
+// TestRouteRoleClassificationGate fails when an authenticated route is not in routeroles'
+// Routes map; roles built from exact paths would otherwise silently miss new routes.
 func TestRouteRoleClassificationGate(t *testing.T) {
 	t.Parallel()
 	root := repoRoot(t)

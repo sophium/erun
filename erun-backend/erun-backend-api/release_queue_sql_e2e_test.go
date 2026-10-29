@@ -16,10 +16,8 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
-// The release queue's correctness lives in SQL — a conditional claim, a partial
-// unique index, a cooldown window, a per-commit uniqueness contract — so it is
-// exercised against a real migrated PostgreSQL rather than a fake that agrees
-// with itself. Needs only the database, no cluster.
+// Correctness lives in SQL (conditional claim, partial unique index, cooldown), so
+// this runs against real PostgreSQL.
 func releaseQueueDatabase(t *testing.T) (*repository.ReleaseRepository, context.Context, *sql.DB) {
 	t.Helper()
 	databaseURL := testpg.URL(t)
@@ -41,17 +39,13 @@ func releaseQueueDatabase(t *testing.T) (*repository.ReleaseRepository, context.
 	return repo, ctx, db
 }
 
-// seedQueueTenant creates a tenant of its own for the scenario, so a run never
-// disturbs rows another tenant owns and row-level security is actually exercised.
+// seedQueueTenant isolates each scenario in its own tenant so RLS is exercised.
 func seedQueueTenant(t *testing.T, db *sql.DB) string {
 	t.Helper()
 	return seedQueueTenantOfType(t, db, "COMPANY")
 }
 
-// seedQueueTenantOfType is seedQueueTenant's general form, for the
-// OPERATIONS-caller scoping regression test below: erun_operations' RLS
-// policy is unconditional (USING (true)), so only an OPERATIONS-typed tenant
-// can actually exercise the bypass List must guard against.
+// Only an OPERATIONS tenant exercises the unconditional erun_operations RLS policy.
 func seedQueueTenantOfType(t *testing.T, db *sql.DB, tenantType string) string {
 	t.Helper()
 	var tenantID string
@@ -70,9 +64,6 @@ func enqueueRelease(t *testing.T, repo *repository.ReleaseRepository, ctx contex
 	return release
 }
 
-// TestReleaseQueueClaimIsSerialPerTenant is the invariant the whole feature rests
-// on: two claims cannot both hand out a release for one tenant, and the second
-// only becomes claimable once the first is terminal.
 func TestReleaseQueueClaimIsSerialPerTenant(t *testing.T) {
 	repo, ctx, _ := releaseQueueDatabase(t)
 	first := enqueueRelease(t, repo, ctx, "commit-serial-a")
@@ -84,7 +75,7 @@ func TestReleaseQueueClaimIsSerialPerTenant(t *testing.T) {
 	if !ok {
 		t.Fatal("nothing was claimable with two releases queued")
 	}
-	// FIFO by the UUIDv7 release id: the release enqueued first runs first.
+	// FIFO by UUIDv7 release id.
 	if claimed.ReleaseID != first.ReleaseID {
 		t.Fatalf("claimed %s, want the head of the queue %s", claimed.ReleaseID, first.ReleaseID)
 	}
@@ -109,9 +100,6 @@ func TestReleaseQueueClaimIsSerialPerTenant(t *testing.T) {
 	}
 }
 
-// TestReleaseQueueRefusesTwoRunningRows proves the invariant is the database's,
-// not the query's: a claim that raced past the predicate still cannot leave two
-// running rows behind.
 func TestReleaseQueueRefusesTwoRunningRows(t *testing.T) {
 	repo, ctx, db := releaseQueueDatabase(t)
 	first := enqueueRelease(t, repo, ctx, "commit-index-a")
@@ -122,8 +110,7 @@ func TestReleaseQueueRefusesTwoRunningRows(t *testing.T) {
 	if !ok {
 		t.Fatal("nothing was claimable")
 	}
-	// Forcing the second row to running behind the query's back is what a lost
-	// race would look like; the partial unique index has to reject it.
+	// Simulates a lost race; the partial unique index must reject it.
 	_, err = db.Exec(`UPDATE releases SET status = 'running' WHERE release_id = $1`, second.ReleaseID)
 	if err == nil {
 		t.Fatalf("a second running release was accepted for one tenant (first=%s second=%s)", first.ReleaseID, second.ReleaseID)
@@ -131,9 +118,6 @@ func TestReleaseQueueRefusesTwoRunningRows(t *testing.T) {
 	t.Logf("the database refused the second running release: %v", err)
 }
 
-// TestReleaseQueueHoldsOneReleasePerCommit is the idempotency contract at the
-// storage layer: a second row for one merge commit cannot exist, so a second
-// version for one commit cannot be minted.
 func TestReleaseQueueHoldsOneReleasePerCommit(t *testing.T) {
 	repo, ctx, _ := releaseQueueDatabase(t)
 	enqueueRelease(t, repo, ctx, "commit-unique")
@@ -148,8 +132,6 @@ func TestReleaseQueueHoldsOneReleasePerCommit(t *testing.T) {
 	}
 }
 
-// TestReleaseQueueCooldownSpacesConsecutiveReleases: a trigger stuck in a loop
-// must not spend the tenant's capacity on back-to-back runs.
 func TestReleaseQueueCooldownSpacesConsecutiveReleases(t *testing.T) {
 	repo, ctx, _ := releaseQueueDatabase(t)
 	first := enqueueRelease(t, repo, ctx, "commit-cooldown-a")
@@ -176,8 +158,8 @@ func TestReleaseQueueCooldownSpacesConsecutiveReleases(t *testing.T) {
 	}
 }
 
-// TestReleaseQueueRequeueBumpsTheAttempt: the attempt is what keys the retry's
-// Job and workflow, so a retry that reused it would replay instead of running.
+// TestReleaseQueueRequeueBumpsTheAttempt: the attempt keys the retry's Job and workflow, so reusing
+// it would replay.
 func TestReleaseQueueRequeueBumpsTheAttempt(t *testing.T) {
 	repo, ctx, _ := releaseQueueDatabase(t)
 	release := enqueueRelease(t, repo, ctx, "commit-requeue")
@@ -194,8 +176,7 @@ func TestReleaseQueueRequeueBumpsTheAttempt(t *testing.T) {
 		t.Fatalf("requeued = %+v, want a clean queued row", requeued)
 	}
 
-	// A published release is never requeued: its version is public, and a second
-	// one for the same commit is the failure this queue exists to prevent.
+	// A published release is never requeued: its version is public.
 	mustNoErr(t, repo.RecordOutcome(ctx, release.ReleaseID, repository.ReleaseOutcome{
 		Status: model.ReleaseStatusReleased, Version: "1.0.150",
 	}), "publish the release")
@@ -204,8 +185,6 @@ func TestReleaseQueueRequeueBumpsTheAttempt(t *testing.T) {
 	}
 }
 
-// TestReleaseQueueExpiresAnAbandonedRelease: a control plane that died
-// mid-release must not hold its tenant's only in-flight slot forever.
 func TestReleaseQueueExpiresAnAbandonedRelease(t *testing.T) {
 	repo, ctx, _ := releaseQueueDatabase(t)
 	abandoned := enqueueRelease(t, repo, ctx, "commit-stale")
@@ -217,8 +196,7 @@ func TestReleaseQueueExpiresAnAbandonedRelease(t *testing.T) {
 		t.Fatal("nothing was claimable")
 	}
 
-	// A zero window makes every in-flight release stale, which is the
-	// crashed-control-plane recovery.
+	// A zero window makes every in-flight release stale.
 	expired, err := repo.ExpireStale(ctx, 0, "the control plane stopped reporting")
 	mustNoErr(t, err, "expire stale")
 	if expired != 1 {
@@ -237,8 +215,6 @@ func TestReleaseQueueExpiresAnAbandonedRelease(t *testing.T) {
 	}
 }
 
-// TestReleaseQueueIsScopedByTenant: one tenant's in-flight release must not stop
-// another tenant's queue, and must not be visible to it.
 func TestReleaseQueueIsScopedByTenant(t *testing.T) {
 	repo, ctx, db := releaseQueueDatabase(t)
 	enqueueRelease(t, repo, ctx, "commit-tenant-a")
@@ -264,7 +240,6 @@ func TestReleaseQueueIsScopedByTenant(t *testing.T) {
 		t.Fatalf("claimed %+v (ok=%v), want the other tenant's own release %s", claimed, ok, other.ReleaseID)
 	}
 
-	// Row-level security keeps each tenant's queue its own.
 	listed, err := repo.List(otherCtx, repository.ReleaseFilter{})
 	mustNoErr(t, err, "list the other tenant's releases")
 	if len(listed) != 1 || listed[0].ReleaseID != other.ReleaseID {
@@ -272,10 +247,6 @@ func TestReleaseQueueIsScopedByTenant(t *testing.T) {
 	}
 }
 
-// TestReleaseListScopesToTheOperationsCallersOwnTenant pins the failure
-// scenario directly: an OPERATIONS caller's List must not include a
-// stranger tenant's releases even though erun_operations' RLS policy makes
-// them visible too.
 func TestReleaseListScopesToTheOperationsCallersOwnTenant(t *testing.T) {
 	repo, strangerCtx, db := releaseQueueDatabase(t)
 	enqueueRelease(t, repo, strangerCtx, "commit-stranger")

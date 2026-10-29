@@ -8,12 +8,10 @@ in `erun-common/AGENTS.md`.
 - Own the `erun` binary and Cobra tree. CLI-private code belongs in `internal`;
   shared planning/execution belongs in common.
 - The `mcp` command launches `emcp`; it must not embed its server.
-- Planned (https://github.com/sophium/erun/issues/2741, see
-  `erun-common/AGENTS.md` § "Target package layers"): one package per command
-  under `cmd/<command>/`, importing its matching `erun-common` package, `base/*`
-  and a thin `cmd/shared` (flag/output/root helpers only), never another command
-  package; `main.go` registers them. Until then keep each command's code in its
-  own files, and put nothing command-specific in shared files.
+- One package per command under `cmd/<command>/` (`erun-common/AGENTS.md`
+  § "Package layers"). What two or more commands use lives in one package per
+  concern under `cmd/shared/<concern>/`; a command imports only the concerns it
+  uses and never another command. The root `cmd` package registers them.
 
 ## Command Wiring
 

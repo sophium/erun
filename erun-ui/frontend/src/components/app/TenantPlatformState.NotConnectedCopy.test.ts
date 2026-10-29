@@ -11,13 +11,7 @@ import type { UITenantDashboard } from '@/types';
 
 import { TenantPlatformStateCard } from './TenantPlatformState';
 
-// The not-connected card replaces the entire tenant dashboard -- the view
-// returns it before the tab strip is ever rendered -- so no tab loads in this
-// state, whichever tabs the signed-in caller would otherwise see. The body copy
-// used to name five tabs, which read as a complete account of what was
-// unavailable and left the rest looking usable. These pin the rendered string:
-// the card must not name a subset of the descriptor list, because a subset
-// claim is false here for every caller and drifts as tabs are added.
+// The not-connected card replaces every tab, so its copy must not name a subset of them.
 
 function dashboard(overrides: Partial<UITenantDashboard> = {}): UITenantDashboard {
   return {

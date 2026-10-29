@@ -20,10 +20,7 @@ describe('attachEdgeUrl', () => {
   });
 });
 
-// FakeWebSocket stands in for the real browser WebSocket so tests can drive
-// the wire protocol without a live edge. It records the constructor args
-// (url, protocols) so a test can assert the auth subprotocol offer, and
-// exposes the same on* handler slots openAttachSession assigns.
+// Records constructor args so a test can assert the auth subprotocol offer.
 class FakeWebSocket {
   static instances: FakeWebSocket[] = [];
   url: string;
@@ -70,10 +67,6 @@ function stubWebSocket(): typeof FakeWebSocket {
   return FakeWebSocket;
 }
 
-// firstSocket asserts the constructor already ran -- openAttachSession
-// constructs its WebSocket synchronously, so this never actually throws in a
-// passing test, but it turns a missing instance into a clear failure instead
-// of a null-access TypeScript would otherwise force awkward optional chains for.
 function firstSocket(): FakeWebSocket {
   const socket = FakeWebSocket.instances[0];
   if (socket === undefined) {

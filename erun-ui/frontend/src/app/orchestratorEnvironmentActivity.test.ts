@@ -15,11 +15,6 @@ function env(overrides: Partial<OrchestratorEnvRef> = {}): OrchestratorEnvRef {
   };
 }
 
-// This is the join the hover card renders straight from -- red-then-green
-// against origin/main means "petios / rihards-review" alone, with nothing
-// else on the line. Each case below asserts the state renders as its own
-// distinct line rather than collapsing into a neighbour.
-
 test('busy with a detail names the holder verbatim, not a bare "busy"', () => {
   const line = orchestratorEnvironmentLine(
     env({
@@ -71,15 +66,8 @@ test('an outage reads as outage even while otherwise reachable and busy', () => 
   assert.notEqual(line.status, 'Busy — holding: x');
 });
 
-// The orchestrator card used to reuse the desktop's own reachability reading
-// and render it as a confident "Not open here", which read as a claim about
-// the *orchestrator's* reach even though the desktop's local forward has
-// nothing to do with a host-side orchestrator's own MCP client. The desktop
-// genuinely has no reading here (no local forward, no answer from any
-// fallback channel either), so the honest line says only what the desktop
-// itself observed — never that the environment is closed to anyone else —
-// and it says so about "this desktop" explicitly rather than with a bare,
-// unscoped "not open".
+// No local forward says nothing about the orchestrator's reach, so the line is
+// scoped to this desktop.
 test('never observed (no activity at all) reads as no signal from this desktop, not a confident "not open"', () => {
   const line = orchestratorEnvironmentLine(env());
   assert.equal(line.state, 'no-forward');
@@ -94,12 +82,6 @@ test('never observed (no activity at all) reads as no signal from this desktop, 
   );
 });
 
-// An orchestrator actively driving a linked environment (a lease held from
-// elsewhere, a CLI session, another machine over MCP) must never read as "Not
-// open here" — that string used to fire whenever this desktop itself had no
-// local forward, which said nothing true about whether the *orchestrator*
-// could reach the environment. The poller now asks such an environment
-// directly and can still find it busy.
 test('a lease held by a session driving the environment from elsewhere still reads busy', () => {
   const line = orchestratorEnvironmentLine(
     env({
@@ -205,9 +187,6 @@ test('a joined usage reading older than its stale window is flagged stale', () =
   assert.equal(line.usageStale, true);
 });
 
-// roleLabel makes an operate-role (or any declared-role) link's association
-// visible on the hover card — erun#1770's own requirement. Undeclared stays
-// silent rather than rendering "Undeclared role" on every pre-existing row.
 test('an undeclared role renders no roleLabel', () => {
   const line = orchestratorEnvironmentLine(env({ role: '' }));
   assert.equal(line.roleLabel, '');

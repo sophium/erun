@@ -2,19 +2,8 @@ import type { Page } from '@playwright/test';
 
 import { expect, test } from '../../../fixtures/erunApp.js';
 
-// sidebarCloudAliases resolved a tenant's own cloudProviderAliases and
-// returned nothing at all when no tenant referenced the alias -- the
-// ordinary shape for a hosted erun platform reached from a machine whose
-// tenants are all local. The alias then never appeared in the sidebar no
-// matter which tenant was selected.
-//
-// The seeded baseline's own aliases (SEED_CLOUD_ALIAS, SEED_CLOUDFLARE_ALIAS)
-// are both attached to the pw tenant, so this stubs LoadState with a minimal
-// boot payload instead of extending the shared seed -- extending the shared
-// seed with a third, unattached alias would also change
-// cloudflare-cloud-alias.spec.ts's per-tenant row-count assertion for every
-// other spec in the suite. Mirrors sidebar-env-activity-boot-snapshot.spec.ts's
-// stub-LoadState-then-reboot pattern.
+// An erun alias referenced by no tenant must still appear in the sidebar. LoadState
+// is stubbed because adding an unattached alias to the shared seed changes other specs.
 
 const TENANT = 'unattached-erun';
 const UNATTACHED_ERUN_ALIAS = 'erun+api.acme.test@erun';

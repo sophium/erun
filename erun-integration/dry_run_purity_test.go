@@ -11,15 +11,8 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/erun"
 )
 
-// dryRunPurityCases are mutating commands run against a config root that does
-// not yet hold the named tenant/environment — the exact shape that let stray
-// "add", "push", "runtime", and "nonexistent-1185" directories accumulate
-// under ~/.config/erun for months. Root AGENTS.md documents --dry-run
-// everywhere as "resolve and trace mutating actions without executing them";
-// a run that creates so much as an empty directory breaks that guarantee as
-// surely as one that writes a file. This is a cross-command invariant: rather
-// than trust each command's own goldens to notice a stray mkdir, diff the
-// config directory's entry list before and after.
+// dryRunPurityCases run mutating commands against an unseeded config root; a dry
+// run must not create even an empty directory.
 var dryRunPurityCases = []struct {
 	name string
 	args []string
@@ -35,9 +28,7 @@ var dryRunPurityCases = []struct {
 		},
 	},
 	{
-		// A --type value invalid enough to fail before tenant/environment
-		// resolution must leave nothing behind either — the validate-before-create
-		// half of this class of bug, not just the dry-run half.
+		// Validation must fail before anything is created.
 		name: "init_rejects_invalid_type_before_any_resolution",
 		args: []string{
 			"init", "purity-tenant", "purity-env",
@@ -62,10 +53,7 @@ var dryRunPurityCases = []struct {
 		},
 	},
 	{
-		// Both definition verbs resolve the local environment before they
-		// decide anything, and a pull-as-new is the one path that would create
-		// a config tree. A dry run must resolve and stop, never create the
-		// directory it would have written into.
+		// A pull-as-new would create a config tree; a dry run must not.
 		name: "platform_env_push_nonexistent_environment",
 		args: []string{
 			"platform", "env", "push", "purity-tenant", "purity-env",
@@ -99,11 +87,7 @@ func TestDryRunNeverTouchesTheConfigDirectory(t *testing.T) {
 	}
 }
 
-// snapshotConfigTree lists every entry under root, relative to root, so a
-// command's filesystem footprint under the config directory can be diffed
-// before and after it runs. A directory that merely comes to exist — with no
-// file ever written into it — is exactly the kind of residue this guards
-// against, so this must walk directories too, not just check for new files.
+// snapshotConfigTree lists every entry under root, directories included.
 func snapshotConfigTree(t *testing.T, root string) []string {
 	t.Helper()
 	var entries []string

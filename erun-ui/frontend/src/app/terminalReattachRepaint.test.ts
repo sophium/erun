@@ -5,15 +5,10 @@ import { afterEach, beforeEach, test, vi } from 'vitest';
 
 import { TerminalReattachRepaint } from './terminalReattachRepaint';
 
-// TerminalReattachRepaint touches window only inside its methods -- never at
-// module scope -- so a shim installed per test is enough to drive the real
-// class. The generated Wails binding is the same: it dereferences window.go
-// inside the call, so ResizeSession lands on the stub below.
 const resizeCalls: [number, number, number][] = [];
 
 function installWindow(): void {
   const shim = {
-    // Unqualified globals, resolved at call time, so mock.timers is what runs.
     setTimeout: (handler: () => void, ms?: number) => setTimeout(handler, ms) as unknown as number,
     clearTimeout: (id: number) => {
       clearTimeout(id);
@@ -50,13 +45,10 @@ function fakeTerminal(cols: number, rows: number) {
     cols,
     rows,
     resizes,
-    // setContent lets a test simulate the program redrawing on its own, e.g.
-    // while typing is still within the quiet window.
     setContent(next: string) {
       content = next;
     },
-    // Empty by default: the state dtach leaves a reattached pane in, and
-    // therefore the state the repaint cycle fires on.
+    // Empty by default: dtach leaves a reattached pane blank.
     buffer: {
       active: {
         viewportY: 0,
@@ -111,22 +103,17 @@ test('a keystroke restores the shrunken geometry at once, not mid-line 650ms lat
   const { terminal, repaint } = harness();
   repaint.schedule(7);
 
-  // The poller fires and shrinks. This is the window the operator hit.
   vi.advanceTimersByTime(1300);
   assert.equal(terminal.rows, 26, 'expected the shrink to be applied');
   assert.deepEqual(lastResizeCall(), [7, 120, 26]);
 
-  // The user starts typing while it is shrunk.
   repaint.noteInput();
   assert.equal(terminal.rows, 40, 'input must restore the rows immediately');
   assert.deepEqual(lastResizeCall(), [7, 120, 40]);
   assert.equal(fitCount, 1, 'the restore must re-fit exactly once');
 
-  // The original 650ms restore must not also land: a second reflow on a line
-  // being edited is the corruption. Tick less than a full poller period (1300ms)
-  // past the restore so this stays a test of the cancelled timeout, not of the
-  // (legitimate, separately covered) next poll cycle once the quiet window
-  // elapses.
+  // The cancelled 650ms restore must not land; a second reflow mid-edit corrupts
+  // the line.
   const afterInput = terminal.resizes.length;
   vi.advanceTimersByTime(700);
   assert.equal(terminal.resizes.length, afterInput, 'the cancelled hold must not fire');
@@ -138,17 +125,11 @@ test('input defers the cycle through the quiet window but does not disarm it', (
   repaint.schedule(7);
   repaint.noteInput();
 
-  // A tick landing inside the 1500ms quiet window must not resize a pane the
-  // operator is actively typing into.
   vi.advanceTimersByTime(1300);
   assert.deepEqual(terminal.resizes, [], 'a tick within the quiet window must not resize');
 
-  // Once the quiet window elapses with the screen still blank, the poller must
-  // still repaint it. This is the only repaint path left for an orchestrator
-  // pane (#1332's Go-side WINCH nudge is dead code for that session kind), so
-  // permanently disarming on the first keystroke left the pane blank for the
-  // rest of the session -- exactly the defect behind the operator's blind,
-  // concatenated retype (#1330 follow-up).
+  // The poller is an orchestrator pane's only repaint path, so input must not
+  // disarm it.
   vi.advanceTimersByTime(1300);
   assert.equal(terminal.rows, 26, 'a still-blank pane must be repainted once typing pauses');
   assert.deepEqual(lastResizeCall(), [7, 120, 26]);
@@ -159,8 +140,6 @@ test('a repainted (now visible) pane is left alone even after the quiet window e
   repaint.schedule(7);
   repaint.noteInput();
 
-  // The screen becomes visible while the operator is still within the quiet
-  // window -- e.g. the program redrew on its own after the keystroke.
   terminal.setContent('visible content');
   vi.advanceTimersByTime(3000);
 
@@ -181,7 +160,7 @@ test('without input the cycle still completes, so the repaint is not simply disa
 test('restore skips fit() when the container is momentarily unmeasurable, but still restores geometry', () => {
   let afterRestoreCalls = 0;
   const { terminal, repaint } = harness(
-    () => ({ cols: 2, rows: 1 }), // the container mid-transition FitAddon.fit() would otherwise apply
+    () => ({ cols: 2, rows: 1 }),
     () => {
       afterRestoreCalls += 1;
     },
@@ -192,9 +171,6 @@ test('restore skips fit() when the container is momentarily unmeasurable, but st
   assert.equal(terminal.rows, 26, 'expected the shrink to be applied');
   vi.advanceTimersByTime(650);
 
-  // term.resize(cols, rows) already restores the pre-shrink geometry directly,
-  // independent of fit(); the guard only stops the *extra* re-measure from
-  // clobbering it with a bad proposal.
   assert.equal(terminal.cols, 120);
   assert.equal(terminal.rows, 40, 'the hold must restore even though fit() was skipped');
   assert.equal(fitCount, 0, 'fit() must not run against an unusable proposal');

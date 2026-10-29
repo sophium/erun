@@ -5,14 +5,8 @@ import type { PlatformTenant } from '../app/api/tenantsApi';
 import { useListTenantsQuery } from '../app/api/tenantsApi';
 import { queryErrorMessage } from '../app/queryError';
 
-// OrgTarget is EnrollForm's own distinction between "nothing chosen — creates
-// in the platform's own org, today's behaviour", "chosen, but this tenant's
-// org mapping could not be read" (a transient lookup failure, retryable), and
-// "chosen, but this tenant genuinely has no org mapping yet" (a real state,
-// not a failure) — collapsing any of these into another has previously
-// hidden which org an identity actually landed in. 'loading' and 'resolved'
-// round out the render states while the lookup is in flight or has found a
-// usable mapping.
+// 'unmapped' (no org mapping) and 'error' (retryable lookup failure) stay distinct so
+// it is always clear which org an identity lands in.
 export type OrgTarget =
   | { status: 'default' }
   | { status: 'loading' }
@@ -39,11 +33,7 @@ export function resolveOrgTarget(
   return orgId === undefined ? { status: 'unmapped' } : { status: 'resolved', orgId };
 }
 
-// useEnrollOrgTarget resolves a chosen target tenant to the Zitadel org it
-// maps to (tenant_issuers.org_field_value, via GET /v1/tenant-issuers) so
-// EnrollForm can pass that org id as orgId rather than asking the operator
-// for a raw org id directly. Skips the lookup entirely when the target is the
-// caller's own tenant — the existing, always-available default.
+// useEnrollOrgTarget resolves a target tenant to its Zitadel org id; skipped for the caller's own tenant.
 export function useEnrollOrgTarget(
   token: string,
   ownTenantId: string,

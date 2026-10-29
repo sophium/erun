@@ -13,10 +13,7 @@ import {
 
 import { ChooseLocalRepoPath } from '../../../wailsjs/go/main/App';
 
-// orchestratorEnvRoleHelper states, briefly, what the selected role means --
-// where it is chosen, not only in the erun-orchestrate skill -- so an
-// operator can pick between "code", "build", and "runtime" by what each does
-// rather than by guessing from the name.
+// orchestratorEnvRoleHelper explains what each role does.
 function orchestratorEnvRoleHelper(role: OrchestratorEnvRole): string {
   switch (role) {
     case 'code':
@@ -30,11 +27,7 @@ function orchestratorEnvRoleHelper(role: OrchestratorEnvRole): string {
   }
 }
 
-// EnvironmentsFieldStatus distinguishes the three states the field can be in,
-// so "no environments configured" never reads the same as "you have several,
-// none eligible" — the empty state itself must say which case applies and
-// what to do next, rather than leaving an operator who knows an env exists to
-// wonder whether erun even noticed it.
+// EnvironmentsFieldStatus keeps "none configured" distinct from "none eligible".
 function EnvironmentsFieldStatus({
   totalCount,
   eligibleCount,
@@ -103,10 +96,7 @@ export function EnvironmentsField({
   );
 }
 
-// IneligibleEnvironmentRow renders an env the picker considered and rejected:
-// a disabled checkbox so it reads as unavailable rather than merely unchecked,
-// and the reason as a first-class, always-visible line rather than a tooltip
-// an operator has to go hunting for.
+// IneligibleEnvironmentRow shows a disabled checkbox and an always-visible reason.
 function IneligibleEnvironmentRow({ candidate }: { candidate: EnvCandidate }): React.ReactElement {
   return (
     <div className="rounded-sm border border-border/60 bg-muted/20 px-2 py-1.5">
@@ -126,10 +116,7 @@ function IneligibleEnvironmentRow({ candidate }: { candidate: EnvCandidate }): R
   );
 }
 
-// EnvironmentRowDirectory renders the review-directory controls for a
-// selected, non-required-role candidate: an editable mirror path (with a
-// browse button) or the derived worktree path, shown read-only. Split out of
-// EnvironmentRow to keep that function within the lint size budget.
+// EnvironmentRowDirectory shows an editable mirror path or the derived worktree path.
 function EnvironmentRowDirectory({
   candidate,
   selectedRef,
@@ -147,9 +134,7 @@ function EnvironmentRowDirectory({
     });
   };
   if (!candidate.mirrored) {
-    // Derived from the env's repository path, so it is shown rather than
-    // offered for editing: there is no mirror to place, and the operator
-    // moves it by changing the env's repository path.
+    // Derived from the env's repository path, so read-only.
     return (
       <p className="min-w-0 truncate font-mono text-xs text-muted-foreground">
         {candidate.defaultDirectory}
@@ -179,11 +164,7 @@ function EnvironmentRowDirectory({
   );
 }
 
-// EnvironmentRowRole renders the role control for a selected candidate: a
-// real Select when more than one role is legal, or a plain statement of fact
-// when a requiredRole leaves only one -- a single-option Select would offer
-// a choice that isn't one. Split out of EnvironmentRow for the same reason
-// as EnvironmentRowDirectory above.
+// EnvironmentRowRole shows a Select, or a statement when only one role is legal.
 function EnvironmentRowRole({
   candidate,
   selectedRef,
@@ -232,9 +213,7 @@ function EnvironmentRow({
   if (!candidate.eligible) {
     return <IneligibleEnvironmentRow candidate={candidate} />;
   }
-  // A required-role candidate (today, only a runtime environment) has no
-  // review directory at all -- EnvironmentRowDirectory below is skipped
-  // entirely for it rather than rendering a picker with nothing to show.
+  // A required-role candidate has no review directory.
   const requiredRole = candidate.requiredRole;
   return (
     <div className="rounded-sm border border-border/60 px-2 py-1.5">

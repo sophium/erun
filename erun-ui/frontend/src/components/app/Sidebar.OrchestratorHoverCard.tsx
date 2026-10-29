@@ -27,22 +27,7 @@ import {
 } from '@/components/app/Sidebar.HoverCardRow';
 import { StatusDotGlyph } from '@/components/app/Sidebar.StatusDot';
 
-// OrchestratorHoverCard gives an orchestrator row the same hover treatment the
-// environment row has had since EnvHoverCard: a Popover, not a tooltip, because
-// a multi-field card does not belong in a tooltip (erun-ui/AGENTS.md).
-//
-// Before this, an orchestrator row explained nothing on hover. The only hover
-// surface in the section was an IconTooltip on the spinner icon, which exists
-// only WHILE the orchestrator is spinning -- so an idle orchestrator, the common
-// case, had no hover target at all, and a working one offered a tooltip on a
-// 12px icon rather than on the row the operator is pointing at (#1343).
-//
-// Deliberately mirrors EnvHoverCard rather than inventing a second hover
-// pattern: same Popover, same open-now / close-soon grace so moving the pointer
-// onto the card does not dismiss it, same non-focus-trapping semantics so the
-// row's own click-to-open still works, same width and type scale. Consistency
-// is the point (Nielsen #4) -- the two sidebar row kinds should not behave
-// differently for the same gesture.
+// OrchestratorHoverCard mirrors EnvHoverCard's popover behaviour for orchestrator rows.
 export function OrchestratorHoverCard({
   className,
   orchestrator,
@@ -70,14 +55,7 @@ export function OrchestratorHoverCard({
           {children}
         </div>
       </PopoverAnchor>
-      {/* w-90 (22.5rem / 360px), not the environment card's w-72: this card's
-          value column has to hold a background shell's `Shell running for
-          10m45s:` label on one line at the shared 12px type size, and at w-72
-          that label wraps to two, which doubles the Doing row's height budget
-          on its own. The card is wide because it lists nine environments, not
-          because its values are long -- long values still truncate, never
-          widen it (OrchestratorEnvironments). The environment card keeps
-          w-72. */}
+      {/* w-90 keeps a background shell's "Shell running for 10m45s:" label on one line. */}
       <PopoverContent
         side="right"
         align="start"
@@ -85,8 +63,7 @@ export function OrchestratorHoverCard({
         onOpenAutoFocus={(event) => {
           event.preventDefault();
         }}
-        // Same routing as EnvHoverCard's: see useHoverCardOpenState's
-        // refuseDismissWhileHeld.
+        // Same routing as EnvHoverCard's.
         onFocusOutside={refuseDismissWhileHeld}
         onMouseEnter={hoverEnter}
         onMouseLeave={hoverLeave}
@@ -100,10 +77,6 @@ export function OrchestratorHoverCard({
             {orchestrator.transient && <HoverCardBadge>Transient</HoverCardBadge>}
           </div>
         </div>
-        {/* Single zone: unlike EnvHoverCard this card has no stable-identity vs
-            live-state split, so it skips spacing level 3 rather than inventing
-            a one-zone version of it (Sidebar.HoverCardRow.tsx). tabular-nums
-            lives on this container, not per row. */}
         <dl className={`${HOVER_CARD_GRID_CLASS} tabular-nums px-3 py-2.5`}>
           <HoverCardRow label="Status">{running ? 'Running' : 'Stopped'}</HoverCardRow>
           {running && orchestrator.restartRequired && (
@@ -120,10 +93,7 @@ export function OrchestratorHoverCard({
           <HoverCardRow label="Doing">
             <OrchestratorDoing orchestrator={orchestrator} running={running} />
           </HoverCardRow>
-          {/* wide: an environment's busy detail names a real holder ("held by
-              gradle-build"), which needs the card's full content width to read
-              without eliding -- the narrow value column every other row shares
-              with the "Environments" label leaves too little room for it. */}
+          {/* wide: busy details name a real holder and need the full content width. */}
           <HoverCardRow label="Environments" wide>
             <OrchestratorEnvironments environments={orchestrator.environments} />
           </HoverCardRow>
@@ -140,10 +110,8 @@ export function OrchestratorHoverCard({
   );
 }
 
-// The whole reason the row is worth hovering: what is this orchestrator doing
-// right now, and for how long. A working turn and a background shell are
-// independent facts -- a shell can outlive the turn that started it -- so both
-// are named when both are true rather than one hiding the other.
+// A working turn and a background shell are independent (a shell can outlive
+// its turn), so both are named when both are true.
 function OrchestratorDoing({
   orchestrator,
   running,
@@ -154,10 +122,8 @@ function OrchestratorDoing({
   if (!running) {
     return <Muted>Not started</Muted>;
   }
-  // The card's own header already names the orchestrator, so these lines must
-  // not repeat it. The sidebar's tooltip labels (orchestratorBusyLabel,
-  // orchestratorShellLabel) deliberately DO carry the name, because they hang
-  // off a bare icon with no other context -- same facts, different surface.
+  // The card header already names the orchestrator; the sidebar tooltips carry
+  // the name because they hang off a bare icon.
   const now = Date.now();
   const lines: React.ReactNode[] = [];
   if (orchestrator.busy) {
@@ -169,14 +135,8 @@ function OrchestratorDoing({
       ? formatElapsed(new Date(orchestrator.shellStartedAtUnix * 1000).toISOString(), now).trim()
       : '';
     const shell = shellElapsed ? `Shell running for ${shellElapsed}` : 'Shell running';
-    // The shell command is a machine-authored string of unbounded length --
-    // observed at ~170 characters, which wrapped this row over ten lines and
-    // pushed the Environments list, the card's actual subject, out of sight.
-    // So the readable half leads in the value treatment and the command drops
-    // to a muted, held-length caption (spacing level 1: value plus its own
-    // caption, one fact read together). Clamping is presentation only: the
-    // command itself is untouched in the read model, still fully in the DOM,
-    // and recoverable from `title`.
+    // The command is unbounded machine output, so it drops to a clamped caption;
+    // the full value stays in the DOM and in `title`.
     lines.push(
       orchestrator.shellCommand ? (
         <span key="shell" className={HOVER_CARD_VALUE_STACK_CLASS}>
@@ -194,27 +154,18 @@ function OrchestratorDoing({
     );
   }
   if (lines.length === 0) {
-    // Distinct from "Not started": the session is up and simply between turns.
     return <Muted>Idle, waiting for input</Muted>;
   }
   return <span className={HOVER_CARD_VALUE_STACK_CLASS}>{lines}</span>;
 }
 
-// Each linked environment renders what it is doing, joined from the
-// environment-activity poller rather than collected here (see
-// orchestratorEnvironmentActivity.ts) -- this is the fix for the defect that
-// motivated the whole card: it used to name two environments and say nothing
-// about either. min-w-0 on both the row and its text column is required for
-// truncate to engage on a grid/flex child (a long environment name or a long
-// busy detail elides instead of blowing out the card's fixed w-90).
+// min-w-0 on the row and its text column lets truncate engage on a grid/flex child.
 function OrchestratorEnvironments({
   environments,
 }: {
   environments: OrchestratorInfo['environments'];
 }): React.ReactElement {
   if (environments.length === 0) {
-    // An orchestrator with no links is a real state, not a failure to load --
-    // and it is worth naming, because it is why its tools are empty.
     return <Muted>None linked</Muted>;
   }
   return (
@@ -230,19 +181,10 @@ function OrchestratorEnvironments({
               {line.dot && <StatusDotGlyph state={line.dot} />}
             </span>
             <span className="min-w-0 flex-1">
-              {/* Identifier: its tail is recoverable from the row it names, so it
-                  clips on one line with the full value in `title` -- the rule
-                  HOVER_CARD_TRUNCATE_CLASS owns (Sidebar.HoverCardRow.tsx). */}
               <span className={`${HOVER_CARD_TRUNCATE_CLASS} font-semibold`} title={line.name}>
                 {line.name}
               </span>
-              {/* Prose, not an identifier: the check-failed line's second clause
-                  names the remedy ("open it to check directly"), which is the
-                  only thing this row exists to deliver. Prose wraps rather than
-                  clips -- the `dd`'s own `break-words`, the deploy overlay's
-                  behaviour, and InlineAlert's `[overflow-wrap:anywhere]` -- so a
-                  narrow card cannot discard the actionable half of the string
-                  while keeping the part the operator cannot act on. */}
+              {/* Prose wraps rather than clips: the second clause carries the remedy. */}
               <span className={`block ${HOVER_CARD_CAPTION_CLASS}`}>{line.status}</span>
               {line.roleLabel && (
                 <span className={`block truncate ${HOVER_CARD_CAPTION_CLASS}`}>
@@ -250,9 +192,7 @@ function OrchestratorEnvironments({
                 </span>
               )}
               {line.usage && (
-                // Stale renders degraded, not amber: same reasoning as
-                // EnvHoverCard's UsageState -- an unmeasured age is not a fault
-                // and must not look more alarming than it is.
+                // Stale renders degraded, not amber: an unmeasured age is not a fault.
                 <span
                   className={`block truncate ${
                     line.usageStale ? HOVER_CARD_CAPTION_DEGRADED_CLASS : HOVER_CARD_CAPTION_CLASS
@@ -270,20 +210,9 @@ function OrchestratorEnvironments({
   );
 }
 
-// Whether erun has been nudging this orchestrator (orchestrator_pacing.go):
-// a session that has gone quiet gets restated the pacing contract every 15s
-// tick once it is stale, capped after orchestratorPacingMaxNudges. The live
-// cap gauge (nudgeCount/nudgeCapped) only means anything while running, but
-// the cumulative history survives a stopped session (persisted per
-// orchestrator id) -- see orchestratorHasNudgeHistory, which is why this row
-// can still render while stopped.
-//
-// The history and the could-not line are one fact read together, so they stack
-// (spacing level 1, HOVER_CARD_VALUE_STACK_CLASS): what erun has done about
-// this session, and whether it can do anything about it from here. The second
-// is a caption rather than an alert -- nothing the operator did caused it and
-// nothing is failing; the session simply belongs to another desktop, which is
-// also why it is not the amber treatment restartRequired earns.
+// Pacing-nudge history survives a stopped session, so this row can render
+// while stopped. The could-not line is a caption, not an alert: the session
+// belongs to another desktop and nothing is failing.
 function OrchestratorNudges({
   orchestrator,
 }: {

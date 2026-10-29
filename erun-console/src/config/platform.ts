@@ -1,10 +1,5 @@
-// Runtime platform discovery: GET /v1/platform, unauthenticated, so the console
-// can resolve its own OIDC issuer + client id and brand before sign-in rather
-// than baking them into the built image (#603 "installable as an independent
-// instance" — one image must be able to serve any PaaS instance). Every field
-// is optional and empty-string when the backend has it unset; an older backend
-// that predates this endpoint (404) or an unreachable one both resolve to
-// `undefined` here so the caller can fall back to the VITE_* local-dev config.
+// Unauthenticated GET /v1/platform so one built image can resolve its OIDC config and
+// brand at runtime. Unset fields are empty strings.
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? '';
 
@@ -29,9 +24,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-// fetchPlatformConfig returns undefined when the endpoint is absent (404), the
-// backend is unreachable, or the response is not JSON-shaped — every case a
-// caller should treat the same way: fall back, don't hard-fail.
+// fetchPlatformConfig returns undefined on 404, network failure or a non-JSON body; callers fall back.
 export async function fetchPlatformConfig(): Promise<PlatformConfig | undefined> {
   let response: Response;
   try {

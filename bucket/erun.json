@@ -1,5 +1,5 @@
 {
-  "version": "1.0.308",
+  "version": "1.0.309",
   "description": "Multi-tenant multi-environment deployment and management tool",
   "homepage": "https://github.com/sophium/erun",
   "license": "MIT",
@@ -9,18 +9,18 @@
     "nodejs",
     "yarn"
   ],
-  "url": "https://github.com/sophium/erun/archive/refs/tags/v1.0.308.zip",
-  "hash": "888d16cde997199c172ffff4dbd35caa7e0303b94501dc89b1a79be8c1e450f7",
-  "extract_dir": "erun-1.0.308",
+  "url": "https://github.com/sophium/erun/archive/refs/tags/v1.0.309.zip",
+  "hash": "5cdb9fac740b7b26ef8f5cc7d69b0d3deb0f650dd77d1bd316b4a6a7707a797c",
+  "extract_dir": "erun-1.0.309",
   "installer": {
     "script": [
       "$env:CGO_ENABLED = '0'",
-      "$cliLdflags = \"-s -w -X github.com/sophium/erun/cmd.buildVersion=$version\"",
+      "$cliLdflags = \"-s -w -X github.com/sophium/erun/cmd/shared.buildVersion=$version\"",
       "Push-Location \"$dir\\erun-cli\"",
       "go build -trimpath -ldflags $cliLdflags -o \"$dir\\erun.exe\" .",
       "if ($LASTEXITCODE -ne 0) { throw 'failed to build erun.exe' }",
       "Pop-Location",
-      "$mcpLdflags = \"-s -w -X github.com/sophium/erun/erun-mcp.buildVersion=$version\"",
+      "$mcpLdflags = \"-s -w -X github.com/sophium/erun/erun-mcp/tools/shared/buildinfo.buildVersion=$version\"",
       "Push-Location \"$dir\\erun-mcp\"",
       "go build -trimpath -ldflags $mcpLdflags -o \"$dir\\emcp.exe\" ./cmd/emcp",
       "if ($LASTEXITCODE -ne 0) { throw 'failed to build emcp.exe' }",

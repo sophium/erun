@@ -19,11 +19,8 @@ export const selectEnvironmentExists = (
       ?.environments.some((env) => env.name === environment),
   );
 
-// selectEnvironmentType returns the env's declared type (local-agent /
-// remote-agent / runtime), or undefined if the env is not in state. The create
-// flow uses it to decide whether `erun init` already deployed the runtime
-// (remote-worktree envs) or the desktop must still compose the deploy
-// (local-agent, which init does not deploy).
+// selectEnvironmentType decides whether `erun init` already deployed the
+// runtime (remote) or the desktop must deploy it (local-agent).
 export const selectEnvironmentType = (
   state: RootState,
   tenant: string,
@@ -45,15 +42,11 @@ export const selectSelectedIsPendingFor = (
   return !selectEnvironmentExists(state, tenant, environment);
 };
 
-// selectPendingOpenAfterDeploy returns the env queued to open once its
-// create-time deploy lands — the create→deploy→open gate — or null.
 export const selectPendingOpenAfterDeploy = (state: RootState): UISelection | null =>
   state.selection.pendingOpenAfterDeploy;
 
-// selectEnvHasFailedDeploy lets tab respawn and auto-reconnect refuse an env
-// whose deploy just failed: reopening a dead tab re-runs open and re-deploys,
-// which would re-fail in a loop and storm parallel re-deploys across tabs.
-// Recovery is left to the explicit failed-deploy card actions.
+// selectEnvHasFailedDeploy stops respawn and auto-reconnect from re-deploying a
+// failed env in a loop.
 export const selectEnvHasFailedDeploy = (
   state: RootState,
   tenant: string,
@@ -77,10 +70,6 @@ export const selectActiveSlotForSelection = (state: RootState, selection: UISele
   return (active ?? first).slot;
 };
 
-// selectActiveTabIsAI reports whether the terminal pane's currently-selected
-// tab (for the currently-selected environment) is the AI tab — used to gate
-// the "another agent is already here" persistent indicator to the one tab it
-// actually applies to.
 export const selectActiveTabIsAI = (state: RootState): boolean => {
   const selection = state.selection.selected;
   if (!selection) {
@@ -91,17 +80,8 @@ export const selectActiveTabIsAI = (state: RootState): boolean => {
   return active?.kind === 'ai';
 };
 
-// selectManageRuntimeImage resolves the runtime image for the version being
-// deployed. It resolves against the dialog-owned suggestion list — the same one
-// the picker renders (dialog.versionSuggestions), NOT the shared tenants slice,
-// which is written for the sidebar-selected env and clobbered by env-change
-// deltas, so the picked version is often absent from it. It must come from a
-// real suggestion for that version, not the stored versionImage on its own: a
-// stale/mismatched versionImage (or an absent one) would otherwise drop the
-// --runtime-image flag, silently deploying the local umbrella's pinned
-// erun-devops version instead of the version the operator targeted. Prefer the
-// exact (version, image) suggestion so lines that share a version stay distinct,
-// then fall back to the first suggestion for the version.
+// selectManageRuntimeImage resolves from the dialog's own suggestions, not the
+// tenants slice, which tracks the sidebar env; a missing image would drop --runtime-image.
 export const selectManageRuntimeImage = (state: RootState, version: string): string => {
   const suggestions = state.manageDialog.versionSuggestions;
   const suggestion =
@@ -110,14 +90,8 @@ export const selectManageRuntimeImage = (state: RootState, version: string): str
   return suggestion?.image ?? '';
 };
 
-// selectDialogKubernetesContext resolves the env-dialog's k8s context across a
-// context-list (re)load: it PRESERVES a still-valid prior selection, but must NOT
-// auto-pick a context the user never chose. Auto-picking contexts[0] made the
-// dialog fetch and display a capacity reading for a cluster the
-// user hadn't selected — while the submit gate still (correctly) required one,
-// so the panel showed capacity with the context dropdown on its placeholder.
-// Return empty when there is no valid current selection so capacity stays hidden
-// until the user picks a context (and the fetch is skipped entirely).
+// selectDialogKubernetesContext keeps a still-valid selection but never
+// auto-picks one, so capacity stays hidden until the user chooses.
 export const selectDialogKubernetesContext = (state: RootState, contexts: string[]): string => {
   const current = normalizeDialogValue(state.environmentDialog.kubernetesContext);
   if (current && contexts.includes(current)) {
@@ -126,19 +100,8 @@ export const selectDialogKubernetesContext = (state: RootState, contexts: string
   return '';
 };
 
-// selectActiveSessionOrchestrator returns the orchestrator whose terminal
-// session is currently active, or null when the active session is an
-// environment tab.
-//
-// This derivation used to live inline in TerminalTabStrip, which was the only
-// component that had it. The titlebar never got it, so its right-hand cluster
-// went on acting on state.selection.selected -- the SIDEBAR's environment
-// selection, which is independent of which terminal tab is active. With an
-// orchestrator tab focused, "Open in VS Code" opened an IDE against an
-// environment the orchestrator may not even be linked to (#1178).
-//
-// It returns the orchestrator rather than a boolean because a cross-env surface
-// needs its `environments` list, not just the knowledge that one is active.
+// selectActiveSessionOrchestrator returns the active session's orchestrator;
+// use it rather than state.selection.selected, which is the sidebar's selection.
 export const selectActiveSessionOrchestrator = (state: RootState): OrchestratorInfo | null => {
   const activeId = state.terminal.sessionId;
   if (activeId <= 0) {
@@ -147,20 +110,11 @@ export const selectActiveSessionOrchestrator = (state: RootState): OrchestratorI
   return state.orchestrators.items.find((item) => item.sessionId === activeId) ?? null;
 };
 
-// selectIsOrchestratorSession is the boolean form, for a caller that only needs
-// to know whether env-scoped chrome applies.
 export const selectIsOrchestratorSession = (state: RootState): boolean =>
   selectActiveSessionOrchestrator(state) !== null;
 
-// selectSidebarFocus names the one thing the sidebar highlights and the main
-// pane shows. The tenant dashboard, an orchestrator's session, and an
-// environment's session each used to compute their own "active" condition
-// from a different state slice, so a tenant dashboard row and an orchestrator
-// row could both render selected at once while the pane showed only one of
-// them (#1204). Every sidebar row derives its highlight from this single
-// value instead. The tenant dashboard takes priority regardless of a stale
-// terminal.sessionId left over from before it opened; an orchestrator session
-// takes priority over an environment selection for the same reason.
+// selectSidebarFocus is the single highlighted item: tenant dashboard, then
+// orchestrator session, then environment selection.
 export const selectSidebarFocus = (state: RootState): SidebarFocus => {
   const dashboardTenant = state.tenantDashboard.tenant;
   if (dashboardTenant) {
@@ -177,12 +131,8 @@ export const selectSidebarFocus = (state: RootState): SidebarFocus => {
   return { kind: 'none' };
 };
 
-// selectWhipDefaultTarget resolves the one target Whip preselects: the same
-// orchestrator-session-over-sidebar-selection precedence selectSidebarFocus
-// already established, translated into the id/name a whip target row uses.
-// The tenant dashboard and "nothing focused" both resolve to null rather than
-// falling back to any environment or orchestrator -- an unfocused whip must
-// have no default, never "everything" (erun#1700).
+// selectWhipDefaultTarget follows selectSidebarFocus's precedence; with nothing
+// focused it is null, never "everything".
 export const selectWhipDefaultTarget = (state: RootState): WhipDefaultTarget => {
   const orchestrator = selectActiveSessionOrchestrator(state);
   if (orchestrator) {
@@ -206,45 +156,28 @@ export interface ReviewEnvTarget {
   environment: string;
 }
 
-// ReviewDirectoryTarget is a directory an orchestrator works in directly: a path
-// on this machine that belongs to no environment, so it has no tenant, no
-// environment and no MCP edge. It is a review target all the same -- the diff is
-// that directory's own working tree, read with host git rather than over an MCP
-// -- so the panel shows its changes beside the linked environments' instead of
-// reading "No environment selected" for a scope the orchestrator actually has.
+// ReviewDirectoryTarget is a directory an orchestrator works in directly; its
+// diff is read with host git.
 export interface ReviewDirectoryTarget {
   kind: 'directory';
-  // envKey is the panel's opaque slot key, shared with diffByEnv, the
-  // selected-path map and the collapsed-directory map. A directory has no
-  // tenant/environment to spell "<tenant>/<environment>" from, so it carries a
-  // namespaced key instead; nothing splits these keys, so the only requirements
-  // are that they are stable and that they cannot collide with an environment's.
+  // envKey must be stable and never collide with "<tenant>/<environment>".
   envKey: string;
   directory: string;
 }
 
 export type ReviewTarget = ReviewEnvTarget | ReviewDirectoryTarget;
 
-// reviewDirectoryKey names one directory's slot. The prefix is what keeps it
-// distinct from an environment's "<tenant>/<environment>"; the path follows
-// verbatim, so a store dump reads as the path itself.
 export function reviewDirectoryKey(directory: string): string {
   return 'directory:' + directory;
 }
 
-// DiagnosticsContext names which evidence the Diagnostics console shows: an
-// orchestrator's own state, the selected environment's, or — when neither is
-// active — the desktop app itself, so the panel is never blank.
 export type DiagnosticsContext =
   | { kind: 'orchestrator'; orchestrator: OrchestratorInfo }
   | { kind: 'environment'; tenant: string; environment: string }
   | { kind: 'app' };
 
-// selectDiagnosticsContext mirrors selectReviewTargets' own precedence
-// (orchestrator session over sidebar selection) rather than introducing a
-// second notion of "what's active" — an orchestrator session used to leave
-// the Diagnostics panel reading "environment: none selected" with no trace,
-// because it derived its context from state.selection.selected alone (#1241).
+// selectDiagnosticsContext uses selectReviewTargets' precedence (orchestrator
+// session over sidebar selection).
 export const selectDiagnosticsContext = (state: RootState): DiagnosticsContext => {
   const orchestrator = selectActiveSessionOrchestrator(state);
   if (orchestrator) {
@@ -257,18 +190,11 @@ export const selectDiagnosticsContext = (state: RootState): DiagnosticsContext =
   return { kind: 'app' };
 };
 
-// selectReviewTargets resolves what the diff panel shows: an orchestrator
-// session's linked environments and the directories it works in itself, in the
-// order its definition names them, else the single selected environment. One
-// target is the one-entry case, so the panel has one code path rather than two --
-// an environment and a directory differ in where their diff is read from, not in
-// how the panel treats them.
+// selectReviewTargets is an orchestrator session's linked environments and
+// directories, else the selected environment.
 export const selectReviewTargets = (state: RootState): ReviewTarget[] => {
   const orchestrator = selectActiveSessionOrchestrator(state);
   if (orchestrator) {
-    // Environments first, then the orchestrator's own directories, so the panel
-    // reads in the order the definition names them and a single-environment
-    // session looks exactly as it did before directories existed.
     return [
       ...orchestrator.environments.map(
         (env): ReviewTarget => ({
@@ -301,10 +227,7 @@ export const selectReviewTargets = (state: RootState): ReviewTarget[] => {
   ];
 };
 
-// selectReviewTargetBranches lists the branches this tenant's reviews and
-// merge queue already target, so opening a review offers the branches that
-// exist rather than asking the operator to retype one from memory. Memoized:
-// the dialog re-reads it on every store change.
+// selectReviewTargetBranches is memoized because the dialog re-reads it on every store change.
 export const selectReviewTargetBranches = createSelector(
   [
     (state: RootState) => state.tenantDashboard.data?.reviews,
@@ -322,17 +245,11 @@ export const selectReviewTargetBranches = createSelector(
   },
 );
 
-// selectNotificationUnreadCounts backs the titlebar's per-class icon badges.
-// Memoized against the notifications array so a dismiss/mark-read only
-// recomputes when the history itself actually changes.
 export const selectNotificationUnreadCounts = createSelector(
   [(state: RootState) => state.notification.notifications],
   (notifications): NotificationCounts => unreadNotificationCounts(notifications),
 );
 
-// selectNotificationHistoryCount backs the titlebar's fallback "message
-// history" entry point (Titlebar.MessageCenter.tsx): once every class is
-// fully read, no per-class icon renders, but a session with history is still
-// worth being able to reopen -- see that component's own doc comment.
+// selectNotificationHistoryCount keeps the message history reachable once every class is read.
 export const selectNotificationHistoryCount = (state: RootState): number =>
   state.notification.notifications.length;

@@ -1,5 +1,4 @@
-// Side-effect import: idleApi injects its endpoint into the shared wailsApi
-// instance on import.
+// Side-effect import: idleApi registers its endpoint on the shared wailsApi.
 import './api/idleApi';
 
 import assert from 'node:assert/strict';
@@ -19,7 +18,6 @@ import type { AppDispatch } from './store';
 import type { TerminalController } from './TerminalController';
 import { thunkExtra } from './thunkExtra';
 
-// Mirrors bootThunks.test.ts's RPC-boundary stub.
 function stubWailsBridge(app: Record<string, (...args: never[]) => Promise<unknown>>): void {
   (globalThis as unknown as { window: unknown }).window = { go: { main: { App: app } } };
 }
@@ -61,16 +59,8 @@ function idleStatus(cloudContextStatus: string): UIIdleStatus {
   return { cloudContextStatus } as UIIdleStatus;
 }
 
-// refreshIdleStatus has more
-// than one independent trigger for the same selection -- its own
-// self-rescheduling poll, selectionSyncMiddleware on an env switch, a
-// cloud-context start/stop, and cancelPendingIdleStop. RTK Query's
-// condition() check bails a forced refetch out from under a pending request
-// for the same query before ever looking at forceRefetch, so a second
-// trigger landing while the poll's own request is still in flight used to
-// silently inherit that request's pre-event status. This proves the fix
-// behaviourally: a refresh triggered mid-flight still ends up with a second,
-// real fetch and fresh data, not the first fetch's stale result.
+// RTK Query bails a forced refetch while the same query is in flight, so a second
+// trigger must still get a fresh fetch.
 test('a refresh triggered during an in-flight getIdleStatus still produces a fresh fetch', async () => {
   const pendingCalls: Deferred[] = [];
   stubWailsBridge({
@@ -89,16 +79,11 @@ test('a refresh triggered during an in-flight getIdleStatus still produces a fre
   } as unknown as TerminalController | null;
 
   try {
-    // Simulate the self-rescheduling poll's own in-flight request.
     const polled = dispatch(refreshIdleStatus());
     await waitFor(() => pendingCalls.length === 1);
 
-    // A second trigger (e.g. cancelPendingIdleStop) fires while that poll is
-    // still in flight.
     const triggered = dispatch(refreshIdleStatus());
 
-    // The second refresh must wait for the in-flight request rather than
-    // starting a second one immediately.
     await new Promise((resolve) => setTimeout(resolve, 20));
     assert.equal(
       pendingCalls.length,
@@ -109,7 +94,6 @@ test('a refresh triggered during an in-flight getIdleStatus still produces a fre
     resolveCall(pendingCalls, 0, idleStatus('stopped'));
     await polled;
 
-    // Only now should the second refresh's forced refetch actually run.
     await waitFor(() => pendingCalls.length === 2);
     resolveCall(pendingCalls, 1, idleStatus('running'));
     await triggered;

@@ -9,18 +9,8 @@ import {
 } from './slices/diffReviewStatusSlice';
 import type { AppThunk } from './store';
 
-// diffReviewStatusThunks resolves the diff panel's review-status chip: reads
-// the environment's current branch (EnvironmentWorkingIssue -- the same read
-// createReviewDialogThunks already uses to prefill the "Open a review"
-// dialog's sourceBranch), then asks the platform where that branch's pair
-// with targetBranch sits on the review ladder (DiffReviewStatus), reusing the
-// exact reads the Reviews tab and merge queue already make rather than a
-// parallel query path.
-
-// loadDiffReviewStatus resolves one environment section's chip. It is a
-// background enrichment read, not a user action, so a precondition gap (no
-// branch known yet) renders as the honest "unavailable" state rather than an
-// error -- the chip must never present that gap as a confirmed "no review".
+// loadDiffReviewStatus renders an unknown branch as "unavailable", never as a
+// confirmed "no review".
 export const loadDiffReviewStatus =
   (
     envKey: string,
@@ -53,8 +43,6 @@ export const loadDiffReviewStatus =
     }
   };
 
-// pruneStaleDiffReviewStatuses drops chip state for environments no longer
-// shown, mirroring pruneEnvDiffs in reviewThunks.ts's loadReviewDiff.
 export const pruneStaleDiffReviewStatuses = (): AppThunk => (dispatch, getState) => {
   dispatch(pruneDiffReviewStatuses(selectReviewTargets(getState()).map((target) => target.envKey)));
 };

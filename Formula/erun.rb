@@ -1,8 +1,8 @@
 class Erun < Formula
   desc "Multi-tenant multi-environment deployment and management tool"
   homepage "https://github.com/sophium/erun"
-  url "https://github.com/sophium/erun/archive/refs/tags/v1.0.308.tar.gz"
-  sha256 "aee7295c81594f5f8a7cf5c02648fa903dd19c88d04b595668f0d696de8559f2"
+  url "https://github.com/sophium/erun/archive/refs/tags/v1.0.309.tar.gz"
+  sha256 "99d9be966a4f605b44cac2fbba26b2fa9d697f76144978a7346ad77de4e51241"
   license "MIT"
 
   depends_on "go" => :build
@@ -14,7 +14,7 @@ class Erun < Formula
       system "go", "build",
              *std_go_args(
                output:  bin/"erun",
-               ldflags: "-s -w -X github.com/sophium/erun/cmd.buildVersion=#{version}",
+               ldflags: "-s -w -X github.com/sophium/erun/cmd/shared.buildVersion=#{version}",
              ),
              "."
     end
@@ -23,7 +23,7 @@ class Erun < Formula
       system "go", "build",
              *std_go_args(
                output:  bin/"emcp",
-               ldflags: "-s -w -X github.com/sophium/erun/erun-mcp.buildVersion=#{version}",
+               ldflags: "-s -w -X github.com/sophium/erun/erun-mcp/tools/shared/buildinfo.buildVersion=#{version}",
              ),
              "./cmd/emcp"
     end
@@ -38,8 +38,7 @@ class Erun < Formula
     end
 
     cd "erun-ui" do
-      # The binding generator compiles this package, whose production assets
-      # embed frontend/dist, so the directory has to exist before the bundle.
+      # The binding generator compiles a package that embeds frontend/dist, so it must exist first.
       mkdir_p "frontend/dist"
       system "go", "tool", "wails", "generate", "module"
 
@@ -56,9 +55,7 @@ class Erun < Formula
       system "go", "build",
              "-trimpath",
              "-tags", "desktop,production",
-             # `main.`, not the module path: erun-app's build vars are declared
-             # in package main, and -X against a path no package declares is
-             # dropped in silence, leaving the binary reporting "dev".
+             # `main.`: erun-app declares its build vars in package main; -X on any other path is silently dropped.
              "-ldflags", "-s -w -X main.buildVersion=#{version}",
              "-o", bin/"erun-app",
              "."

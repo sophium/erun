@@ -31,12 +31,8 @@ import { AccessRemedyNote } from './AccessRemedyNote';
 import { InlineAlert, PermissionNotice } from './InlineAlert';
 import { PlatformErrorAlert } from './PlatformSignInAlert';
 
-// CreateReviewDialog opens a review from the desktop. Push is the precondition
-// of create — the platform can only reference a sourceBranch that already
-// exists on the remote — so both steps live in one dialog with their own
-// explicit buttons and their own busy/error state, rather than one combined
-// action the operator cannot see the pieces of. Every write here lands in one
-// named environment, so the dialog says which one before anything runs.
+// Create needs the sourceBranch on the remote, so push and create are separate
+// explicit steps in one dialog.
 export function CreateReviewDialog(): React.ReactElement {
   const dispatch = useAppDispatch();
   const dialog = useAppSelector((state) => state.createReviewDialog);
@@ -99,10 +95,6 @@ export function CreateReviewDialog(): React.ReactElement {
   );
 }
 
-// CreateReviewDialogNotes carries the two footer notes that are mutually
-// exclusive in practice (a known-missing field vs. an unresolved capability
-// probe) but each independently gated, split out of CreateReviewDialog to
-// keep that component's own branching under the module's complexity cap.
 function CreateReviewDialogNotes({
   dialog,
   missing,
@@ -127,9 +119,6 @@ function environmentLabel(dialog: CreateReviewDialogState): string {
   return dialog.environment ? `${dialog.tenant} / ${dialog.environment}` : dialog.tenant;
 }
 
-// missingToCreate names what the review still needs, so a create the operator
-// cannot yet run says why instead of presenting a dead button (Nielsen:
-// visibility of system status, error prevention).
 function missingToCreate(dialog: CreateReviewDialogState): string {
   if (dialog.committing || dialog.pushing) {
     return 'Wait for the branch step to finish.';
@@ -232,10 +221,6 @@ function PushBranchActions({ dialog }: { dialog: CreateReviewDialogState }): Rea
   );
 }
 
-// ReviewDetailsStep asks only for what the operator authors. The target branch
-// is a known set — the branches this tenant's reviews and queue already target
-// — so it is offered as choices that stay typeable for a branch that is new
-// here (recognition over recall).
 function ReviewDetailsStep({ dialog }: { dialog: CreateReviewDialogState }): React.ReactElement {
   const dispatch = useAppDispatch();
   const targetBranches = useAppSelector(selectReviewTargetBranches);

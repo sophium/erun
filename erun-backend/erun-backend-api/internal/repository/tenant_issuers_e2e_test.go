@@ -12,11 +12,6 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-// UpdateOrgScope's whole point is a two-table write (issuers.org_field_key
-// plus the existing tenant's tenant_issuers.org_field_value) that must commit
-// or fail together, which only means something proven against a real
-// migrated PostgreSQL — a fake repository would just agree with itself about
-// what it decided to persist.
 func tenantIssuersDatabase(t *testing.T) *sql.DB {
 	t.Helper()
 	databaseURL := testpg.URL(t)
@@ -26,13 +21,6 @@ func tenantIssuersDatabase(t *testing.T) *sql.DB {
 	return db
 }
 
-// TestTenantIssuerRepositoryUpdateOrgScopeConvertsAndBackfills proves the
-// migration path for erun#1605's second defect: an issuer already registered
-// single-tenant (org_field_key NULL, the state first-identity bootstrap
-// leaves an already-deployed platform in) can be converted to org-scoped, and
-// the existing tenant's own mapping is backfilled with an org value in the
-// same operation — not left NULL, which would stop that tenant resolving as
-// soon as the issuer stops being single-tenant.
 func TestTenantIssuerRepositoryUpdateOrgScopeConvertsAndBackfills(t *testing.T) {
 	db := tenantIssuersDatabase(t)
 	const issuer = "https://auth.erunpaas.example/migrate-e2e"
@@ -55,9 +43,7 @@ func TestTenantIssuerRepositoryUpdateOrgScopeConvertsAndBackfills(t *testing.T) 
 		}
 	})
 
-	// Seed the single-tenant registration first-identity bootstrap would have
-	// left behind: org_field_key NULL on issuers, org_field_value NULL on the
-	// existing tenant's own mapping.
+	// Seed the single-tenant state first-identity bootstrap leaves behind.
 	_, err := db.Exec(`INSERT INTO issuers (issuer) VALUES ($1)`, issuer)
 	mustNoErr(t, err, "seed single-tenant issuer")
 	_, err = db.Exec(
@@ -90,13 +76,6 @@ func TestTenantIssuerRepositoryUpdateOrgScopeConvertsAndBackfills(t *testing.T) 
 	}
 }
 
-// TestTenantIssuersUniqueConstraintRejectsAmbiguousMapping proves the
-// erun#1721 acceptance criterion that ambiguity between two candidate
-// tenant_issuers rows for the same (issuer, org) is impossible by
-// construction, not a runtime coin flip: the UNIQUE NULLS NOT DISTINCT
-// (issuer, org_field_value) constraint refuses a second row before
-// ResolveTenantByIssuer's exact-match query could ever see two candidates for
-// the same resolution key.
 func TestTenantIssuersUniqueConstraintRejectsAmbiguousMapping(t *testing.T) {
 	db := tenantIssuersDatabase(t)
 	const issuer = "https://auth.erunpaas.example/1721-ambiguity"

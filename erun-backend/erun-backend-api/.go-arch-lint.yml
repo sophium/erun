@@ -1,0 +1,245 @@
+version: 3
+workdir: .
+allow:
+  depOnAnyVendor: false
+  deepScan: false
+
+vendors:
+  github-com-aws-aws-sdk-go-v2:
+    in: ["github.com/aws/aws-sdk-go-v2", "github.com/aws/aws-sdk-go-v2/**"]
+  github-com-aws-aws-sdk-go-v2-config:
+    in: ["github.com/aws/aws-sdk-go-v2/config", "github.com/aws/aws-sdk-go-v2/config/**"]
+  github-com-aws-aws-sdk-go-v2-credentials:
+    in: ["github.com/aws/aws-sdk-go-v2/credentials", "github.com/aws/aws-sdk-go-v2/credentials/**"]
+  github-com-aws-aws-sdk-go-v2-service-ec2:
+    in: ["github.com/aws/aws-sdk-go-v2/service/ec2", "github.com/aws/aws-sdk-go-v2/service/ec2/**"]
+  github-com-aws-aws-sdk-go-v2-service-iam:
+    in: ["github.com/aws/aws-sdk-go-v2/service/iam", "github.com/aws/aws-sdk-go-v2/service/iam/**"]
+  github-com-aws-aws-sdk-go-v2-service-ssm:
+    in: ["github.com/aws/aws-sdk-go-v2/service/ssm", "github.com/aws/aws-sdk-go-v2/service/ssm/**"]
+  github-com-dbos-inc-dbos-transact-golang:
+    in: ["github.com/dbos-inc/dbos-transact-golang", "github.com/dbos-inc/dbos-transact-golang/**"]
+  github-com-go-git-go-git-v5:
+    in: ["github.com/go-git/go-git/v5", "github.com/go-git/go-git/v5/**"]
+  github-com-go-jose-go-jose-v4:
+    in: ["github.com/go-jose/go-jose/v4", "github.com/go-jose/go-jose/v4/**"]
+  github-com-google-uuid:
+    in: ["github.com/google/uuid", "github.com/google/uuid/**"]
+  github-com-jackc-pgerrcode:
+    in: ["github.com/jackc/pgerrcode", "github.com/jackc/pgerrcode/**"]
+  github-com-jackc-pgx-v5:
+    in: ["github.com/jackc/pgx/v5", "github.com/jackc/pgx/v5/**"]
+  github-com-miekg-dns:
+    in: ["github.com/miekg/dns", "github.com/miekg/dns/**"]
+  github-com-sophium-erun-erun-common:
+    in: ["github.com/sophium/erun/erun-common", "github.com/sophium/erun/erun-common/**"]
+  github-com-testcontainers-testcontainers-go:
+    in: ["github.com/testcontainers/testcontainers-go", "github.com/testcontainers/testcontainers-go/**"]
+  github-com-testcontainers-testcontainers-go-modules-postgres:
+    in: ["github.com/testcontainers/testcontainers-go/modules/postgres", "github.com/testcontainers/testcontainers-go/modules/postgres/**"]
+  github-com-uptrace-bun:
+    in: ["github.com/uptrace/bun", "github.com/uptrace/bun/**"]
+  github-com-uptrace-bun-dialect-pgdialect:
+    in: ["github.com/uptrace/bun/dialect/pgdialect", "github.com/uptrace/bun/dialect/pgdialect/**"]
+  k8s-io-api:
+    in: ["k8s.io/api", "k8s.io/api/**"]
+  k8s-io-apimachinery:
+    in: ["k8s.io/apimachinery", "k8s.io/apimachinery/**"]
+  k8s-io-client-go:
+    in: ["k8s.io/client-go", "k8s.io/client-go/**"]
+
+excludeFiles:
+  - "^.*/node_modules/.*$"
+
+components:
+  cmd-eapi:
+    in: "cmd/eapi"
+  internal-deployexec:
+    in: "internal/deployexec"
+  internal-dns01broker:
+    in: "internal/dns01broker"
+  internal-gitverify:
+    in: "internal/gitverify"
+  internal-jobexec:
+    in: "internal/jobexec"
+  internal-mcptoken:
+    in: "internal/mcptoken"
+  internal-model:
+    in: "internal/model"
+  internal-oidcbootstrap:
+    in: "internal/oidcbootstrap"
+  internal-provision:
+    in: "internal/provision"
+  internal-ratelimit:
+    in: "internal/ratelimit"
+  internal-registrytoken:
+    in: "internal/registrytoken"
+  internal-repository:
+    in: "internal/repository"
+  internal-routeroles:
+    in: "internal/routeroles"
+  internal-routes:
+    in: "internal/routes"
+  internal-secrets:
+    in: "internal/secrets"
+  internal-security:
+    in: "internal/security"
+  internal-service:
+    in: "internal/service"
+  internal-testpg:
+    in: "internal/testpg"
+  internal-zitadel:
+    in: "internal/zitadel"
+  root:
+    in: "."
+
+deps:
+  cmd-eapi:
+    mayDependOn:
+      - internal-dns01broker
+      - internal-mcptoken
+      - internal-oidcbootstrap
+      - internal-provision
+      - internal-repository
+      - internal-routes
+      - internal-secrets
+      - internal-testpg
+      - internal-zitadel
+      - root
+    canUse:
+      - github-com-dbos-inc-dbos-transact-golang
+      - github-com-jackc-pgx-v5
+      - github-com-sophium-erun-erun-common
+      - k8s-io-api
+      - k8s-io-apimachinery
+      - k8s-io-client-go
+  internal-deployexec:
+    mayDependOn:
+      - internal-jobexec
+    canUse:
+      - github-com-sophium-erun-erun-common
+      - k8s-io-api
+      - k8s-io-apimachinery
+      - k8s-io-client-go
+  internal-dns01broker:
+    canUse:
+      - github-com-miekg-dns
+  internal-gitverify:
+    canUse:
+      - github-com-go-git-go-git-v5
+  internal-jobexec:
+    canUse:
+      - k8s-io-api
+      - k8s-io-apimachinery
+      - k8s-io-client-go
+  internal-mcptoken:
+    canUse:
+      - github-com-sophium-erun-erun-common
+  internal-model:
+    canUse:
+      - github-com-sophium-erun-erun-common
+      - github-com-uptrace-bun
+  internal-oidcbootstrap:
+    mayDependOn:
+      - internal-zitadel
+    canUse:
+      - k8s-io-api
+      - k8s-io-apimachinery
+      - k8s-io-client-go
+  internal-provision:
+    mayDependOn:
+      - internal-deployexec
+      - internal-model
+      - internal-repository
+      - internal-secrets
+      - internal-security
+    canUse:
+      - github-com-aws-aws-sdk-go-v2
+      - github-com-aws-aws-sdk-go-v2-config
+      - github-com-aws-aws-sdk-go-v2-credentials
+      - github-com-aws-aws-sdk-go-v2-service-ec2
+      - github-com-aws-aws-sdk-go-v2-service-iam
+      - github-com-aws-aws-sdk-go-v2-service-ssm
+      - github-com-dbos-inc-dbos-transact-golang
+      - github-com-google-uuid
+      - github-com-sophium-erun-erun-common
+      - k8s-io-api
+      - k8s-io-apimachinery
+      - k8s-io-client-go
+  internal-registrytoken:
+    mayDependOn:
+      - internal-mcptoken
+      - internal-model
+      - internal-registrytoken
+      - internal-security
+      - root
+    canUse:
+      - github-com-sophium-erun-erun-common
+  internal-repository:
+    mayDependOn:
+      - internal-model
+      - internal-routeroles
+      - internal-secrets
+      - internal-security
+      - internal-testpg
+    canUse:
+      - github-com-jackc-pgerrcode
+      - github-com-jackc-pgx-v5
+      - github-com-sophium-erun-erun-common
+      - github-com-uptrace-bun
+      - github-com-uptrace-bun-dialect-pgdialect
+  internal-routes:
+    mayDependOn:
+      - internal-mcptoken
+      - internal-model
+      - internal-provision
+      - internal-ratelimit
+      - internal-repository
+      - internal-security
+      - internal-service
+      - internal-zitadel
+    canUse:
+      - github-com-google-uuid
+      - github-com-sophium-erun-erun-common
+  internal-service:
+    mayDependOn:
+      - internal-deployexec
+      - internal-model
+      - internal-repository
+      - internal-security
+      - internal-zitadel
+    canUse:
+      - github-com-dbos-inc-dbos-transact-golang
+      - github-com-sophium-erun-erun-common
+  internal-testpg:
+    canUse:
+      - github-com-jackc-pgx-v5
+      - github-com-testcontainers-testcontainers-go
+      - github-com-testcontainers-testcontainers-go-modules-postgres
+  root:
+    mayDependOn:
+      - internal-deployexec
+      - internal-dns01broker
+      - internal-gitverify
+      - internal-mcptoken
+      - internal-model
+      - internal-provision
+      - internal-registrytoken
+      - internal-repository
+      - internal-routeroles
+      - internal-routes
+      - internal-secrets
+      - internal-security
+      - internal-service
+      - internal-testpg
+      - internal-zitadel
+    canUse:
+      - github-com-dbos-inc-dbos-transact-golang
+      - github-com-go-jose-go-jose-v4
+      - github-com-google-uuid
+      - github-com-jackc-pgx-v5
+      - github-com-sophium-erun-erun-common
+      - github-com-testcontainers-testcontainers-go
+      - k8s-io-api
+      - k8s-io-apimachinery
+      - k8s-io-client-go

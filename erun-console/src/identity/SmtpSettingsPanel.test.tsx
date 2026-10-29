@@ -81,8 +81,6 @@ describe('SmtpSettingsPanel', () => {
     expect(screen.getByLabelText<HTMLInputElement>('From address', { exact: false }).value).toBe(
       'noreply@example.com',
     );
-    // Once configured, the password is optional — the operator only supplies
-    // it again to change it.
     expect(screen.getByLabelText('Password')).not.toHaveAttribute('required');
   });
 
@@ -153,8 +151,6 @@ describe('SmtpSettingsPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
 
     expect(await screen.findByText(/Could not save mail settings/)).toBeInTheDocument();
-    // The form survives the failure — the operator's input is still there and
-    // the Save button is still present to retry, not a dead-end error page.
     expect(screen.getByLabelText<HTMLInputElement>('Host', { exact: false }).value).toBe(
       'smtp.example.com',
     );

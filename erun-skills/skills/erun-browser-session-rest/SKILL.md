@@ -25,7 +25,8 @@ supply the host and the login URL; the SSO flow is whatever your browser does.
 
 ## Prerequisites
 
-- Node 18+ (native `fetch`/ESM) and Playwright with a browser:
+- Node 22.23.4+, 24.22.1+ or 26.12.1+ (native `fetch`/ESM; earlier releases decode
+  Brotli responses with a vulnerable decoder) and Playwright with a browser:
   `npx playwright install chromium` (one-time).
 - The two helpers ship beside this file: `save-session.mjs` (interactive login →
   saved session) and `request.mjs` (authenticated call, session rolled forward).
@@ -60,10 +61,11 @@ error (with the status on stderr), so it composes in pipelines and `jq`.
 ## Security caveats
 
 - **`session.json` is a live credential.** It carries active session cookies —
-  treat it like a password. Keep it out of git (`echo session.json >>
-  .gitignore`), off shared storage, and delete it when done. In a deployed ERun
-  env, write it under `${ERUN_OUTPUTS_DIR}` only if you intend to pull it out;
-  otherwise keep it on the pod's ephemeral disk.
+  treat it like a password. Both scripts write it readable by your user only
+  (mode `0600`, tightening an existing file first). Keep it out of git
+  (`echo session.json >> .gitignore`), off shared storage, and delete it when
+  done. In a deployed ERun env, write it under `${ERUN_OUTPUTS_DIR}` only if you
+  intend to pull it out; otherwise keep it on the pod's ephemeral disk.
 - **Sessions expire.** When calls start returning 401/redirect-to-login, re-run
   step 1. The session is short-lived by design — that is the host's policy, not
   a bug.

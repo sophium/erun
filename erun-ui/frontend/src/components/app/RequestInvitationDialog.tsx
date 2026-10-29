@@ -32,15 +32,7 @@ import {
 
 import { InlineAlert } from './InlineAlert';
 
-// RequestInvitationDialog is the "Request an invitation" action from
-// NotEnrolledState: the requester's identity (issuer/subject) is verified
-// from the token already in hand and is never a form
-// field (recognition over recall, root AGENTS.md's onboarding rule); the
-// tenant/environment names are the local ones already known, shown read-only
-// rather than re-typed. The only genuine choices are the request's kind
-// (a known 2-option set, so a segmented Tabs control rather than free text
-// or a dropdown — Professional UX "known option sets must use selectors")
-// and an optional note.
+// RequestInvitationDialog: identity comes from the token and names are already known, so only the kind and a note are chosen.
 export function RequestInvitationDialog({
   data,
   localEnvironmentName,
@@ -57,10 +49,7 @@ export function RequestInvitationDialog({
   const rateLimitedUntil = useAppSelector((state) => state.tenantDashboard.requestRateLimitedUntil);
   const [now, setNow] = React.useState(() => Date.now());
 
-  // Ticks once a second only while a rate-limit countdown is actually
-  // showing, so the disabled reason's remaining-seconds text stays live
-  // (Nielsen #1) without a permanent per-second re-render cost the rest of
-  // the time.
+  // Tick only while a rate-limit countdown shows.
   React.useEffect(() => {
     if (!open || rateLimitedUntil <= Date.now()) {
       return;
@@ -140,13 +129,7 @@ function RequestInvitationFields({
     <div className="grid gap-4 py-2">
       <IdentitySummary data={data} />
       <div className="grid gap-2">
-        {/* A real <label htmlFor> associates its target's accessible name --
-            fine for a single form control, wrong here where the target is
-            one of two tabs: FieldLabel's htmlFor previously pointed at the
-            "Join an existing tenant" tab's own id, silently overriding that
-            tab's accessible name to this heading's text instead of its own
-            label. This is a tablist's group heading, not a per-control
-            label, so it uses aria-labelledby on the group instead. */}
+        {/* A group heading for the tablist: <label htmlFor> would override a tab's accessible name. */}
         <Label id="request-kind-label">What are you asking for?</Label>
         <Tabs
           value={requestKindDraft}

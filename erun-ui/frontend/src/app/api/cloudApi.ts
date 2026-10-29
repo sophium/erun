@@ -37,8 +37,7 @@ async function pushApiStopMutationIntoCache(
     const { data } = await api.queryFulfilled;
     api.dispatch(cloudApi.util.updateQueryData('getCloudContextApiStop', name, () => data));
   } catch {
-    // Mutation failed; the toast surfaces the error and the next
-    // describe-on-remount reconciles the cache.
+    // The toast surfaces the error; the next describe reconciles the cache.
   }
 }
 
@@ -76,9 +75,8 @@ export const cloudApi = wailsApi.injectEndpoints({
       queryFn: wailsQueryFn<string, UICloudContextStatus>((name) =>
         DisableCloudContextApiStop(name),
       ),
-      // Avoid an invalidatesTags refetch: AWS's eventual-consistency window can
-      // return the pre-modify value and flip the lock icon back right after the
-      // success toast. The mutation result is authoritative, so cache it directly.
+      // Not invalidatesTags: AWS eventual consistency can return the old value and
+      // flip the lock icon back. The mutation result is authoritative.
       onQueryStarted: pushApiStopMutationIntoCache,
     }),
     enableCloudContextApiStop: builder.mutation<UICloudContextStatus, string>({

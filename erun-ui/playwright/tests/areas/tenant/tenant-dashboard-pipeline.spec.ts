@@ -8,10 +8,8 @@ import {
   uniqueEnvironmentName,
 } from '../../../fixtures/seedRoot.js';
 
-// Mirrors tenant-dashboard-reviews.spec.ts's own setup: the dashboard only calls
-// LoadTenantDashboard once it can resolve an API URL, so this stages one
-// throwaway env carrying one, purely to satisfy that gate -- the RPC itself is
-// stubbed below rather than hitting a real backend.
+// The dashboard loads only once an env has an apiUrl, so stage one; the RPC
+// itself is stubbed.
 function seedDashboardEnvironment(title: string): string {
   const environment = uniqueEnvironmentName(title);
   seedEnvironment(SEED_TENANT, environment, 'apiurl: http://127.0.0.1:1/unreachable\n');
@@ -45,8 +43,7 @@ function dashboardData(
   };
 }
 
-// A unit of planned work exists only as a record: no branch, no commit, no
-// review. It is what neither the Reviews tab nor the merge queue can show.
+// Planned work is only a record: no branch, commit, or review.
 const plannedJob = {
   jobId: 'job-planned',
   jobType: 'triage',
@@ -59,9 +56,6 @@ const plannedJob = {
 };
 
 test.describe('tenant dashboard — pipeline tab', () => {
-  // The whole point of the view: work, and the review beside it, filed under
-  // the one issue they belong to -- labelled by the rung each stands on. A
-  // planned job and a review are different records, and the row says which.
   test('unions planned work with the review pipeline, labelled by rung', async ({ app, page }) => {
     const environment = seedDashboardEnvironment('pipeline-union');
     try {
@@ -109,8 +103,6 @@ test.describe('tenant dashboard — pipeline tab', () => {
       await expect(app.tenantDashboard.pipelineRows()).toHaveCount(2);
       const plannedRow = app.tenantDashboard.pipelineRows().first();
       await expect(plannedRow).toContainText('Planned');
-      // The job states what kind of work it is and who holds it, and claims
-      // no branch.
       await expect(plannedRow).toContainText('plan the pipeline view');
       await expect(plannedRow).toContainText('job · triage · erun/ideas');
       await expect(plannedRow).toContainText('sophium/erun#2683');
@@ -119,15 +111,13 @@ test.describe('tenant dashboard — pipeline tab', () => {
       await expect(openRow).toContainText('Review open');
       await expect(openRow).toContainText('Add the view');
       await expect(openRow).toContainText('feature/2683-pipeline-view');
-      // Both halves are filed under the same issue: that is the union.
       await expect(openRow).toContainText('sophium/erun#2683');
     } finally {
       removeEnvironment(SEED_TENANT, environment);
     }
   });
 
-  // The provenance rule, rendered: a number parsed out of a branch name is a
-  // guess about the branch and must not read as something the author declared.
+  // A number parsed from a branch name is a guess, not something the author declared.
   test('marks a branch-derived issue link as inferred', async ({ app, page }) => {
     const environment = seedDashboardEnvironment('pipeline-inferred');
     try {
@@ -172,9 +162,6 @@ test.describe('tenant dashboard — pipeline tab', () => {
     }
   });
 
-  // The unlinked group is why the view shows work without an issue rather than
-  // guessing one for it. An empty cell would read as a row that failed to
-  // load; the panel names the absence instead.
   test('shows work that names no issue without inventing one', async ({ app, page }) => {
     const environment = seedDashboardEnvironment('pipeline-unlinked');
     try {
@@ -212,9 +199,7 @@ test.describe('tenant dashboard — pipeline tab', () => {
     }
   });
 
-  // A rung this build has never heard of is the platform being ahead of the
-  // desktop. It renders under its own spelling rather than being folded into a
-  // rung it resembles, which would describe work the panel cannot see.
+  // An unknown rung renders under its own spelling rather than a similar known one.
   test('renders an unrecognised rung under its own spelling', async ({ app, page }) => {
     const environment = seedDashboardEnvironment('pipeline-unknown-rung');
     try {
@@ -275,12 +260,8 @@ test.describe('tenant dashboard — pipeline tab', () => {
     }
   });
 
-  // The state a caller actually hits while the platform is older than this
-  // build: GET /v1/pipeline 404s, so the tab is a failed read, not a tenant
-  // with nothing going on. A regression that let it fall through to the empty
-  // state would read as "nothing is happening" while the view was simply
-  // unreadable -- and the neighbouring panel answered, so it must still show
-  // what it answered.
+  // An older platform 404s GET /v1/pipeline; that is a failed read, not an empty
+  // pipeline, and the other panel must still render.
   test('reports a failed pipeline read as a failure, not as an empty pipeline', async ({
     app,
     page,

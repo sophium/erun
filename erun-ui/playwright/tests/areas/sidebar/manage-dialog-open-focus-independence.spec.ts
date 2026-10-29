@@ -3,38 +3,15 @@ import type { Page } from '@playwright/test';
 import { expect, test } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
-// Opening the manage dialog must not depend on the row's edit button holding
-// focus.
-//
-// openManageDialogViaKeyboard drove that button by key — focus it, press
-// Enter — because a mouse press hovers the row first and the IconTooltip
-// popper that opens then swallows the click (see its own comment). That
-// settled the pointer race and left a focus race in its place: a
-// boot-reattached environment restores its terminal, which takes focus
-// asynchronously, and the keydown then lands on whatever took it. The step
-// re-focuses on every retry, so a thief that keeps winning does not fail
-// fast — it spends the calling test's whole budget and reds whichever spec
-// happened to call it (erun#2687: three gate runs, three different specs).
-//
-// The case below makes that dependency deterministic rather than
-// load-dependent: a capture-phase focusin listener drops focus straight back
-// out of the sidebar, so the edit button can never hold it. Pre-fix the
-// keydown never reaches the button and the step reds at the test's own
-// deadline; post-fix the step activates the button without focusing anything
-// and converges. This is the reproduction, not a slowdown — a merely slow
-// render is covered separately, by sidebar-pom-convergence-budget.spec.ts.
-//
-// Scoped to the sidebar rather than the whole document: the manage dialog is
-// a portal at document.body whose own focus trap (and focus-outside
-// handling) is not what this models and must be left alone.
+// Opening the manage dialog must not depend on the edit button holding focus, since a restored
+// terminal can take it asynchronously.
+// Scoped to the sidebar so the dialog portal's own focus trap is left alone.
 async function takeSidebarFocusAway(page: Page): Promise<void> {
   await page.evaluate(() => {
     const sidebar = document.querySelector('aside');
     const steal = (event: Event) => {
       const target = event.target;
       if (!(target instanceof HTMLElement) || !sidebar?.contains(target)) return;
-      // blur() returns focus to the document body — the same place a keydown
-      // ends up when the restored terminal has taken it.
       target.blur();
     };
     document.addEventListener('focusin', steal, true);

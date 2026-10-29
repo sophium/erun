@@ -2,16 +2,12 @@ import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 
 import type { AgentOutputEntry, UISelection } from '@/types';
 
-// Which producer's deliverables the dialog is showing. An environment's agent
-// writes them in a runtime pod; an orchestrator has no pod and writes them on
-// this host. Modelled as a union rather than two nullable fields so a target
-// cannot be half-set.
+// A union so a target cannot be half-set.
 export type OutputsTarget =
   | { kind: 'environment'; selection: UISelection }
   | { kind: 'orchestrator'; orchestratorId: string; name: string };
 
-// State for the Outputs dialog: the deliverables an agent produced. Read +
-// download (+ run on host) only; nothing mutates the producer.
+// Outputs dialog state; read-only toward the producer.
 export interface OutputsDialogState {
   open: boolean;
   loading: boolean;

@@ -2,9 +2,8 @@ import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 
 import type { UIGatewayRouting } from '@/uiOpenRouterTypes';
 
-// Drives the "apply the gateway change" dialog: the environments whose running
-// pod still routes where it was deployed to, after the gateway was switched in
-// ERun settings. Confirming redeploys them; this slice does not.
+// Drives the "apply the gateway change" dialog listing envs still routed to the
+// old gateway; this slice does not redeploy.
 export interface GatewayRedeployState {
   open: boolean;
   items: UIGatewayRouting[];

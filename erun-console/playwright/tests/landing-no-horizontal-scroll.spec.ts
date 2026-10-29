@@ -1,29 +1,13 @@
 import { expect, test, type Page } from '@playwright/test';
 
-// The console's unauthenticated front door, measured in a real engine. The
-// app's Vitest suite runs in jsdom, which implements no layout whatsoever --
-// `documentElement.scrollWidth` is always 0 there, so that suite cannot
-// observe this class of bug even in principle. The boundary this spec proves
-// is CSS layout, so it needs a real browser and nothing else: the landing
-// screen renders from bundled defaults with no token, and platform discovery
-// failing (there is deliberately no API behind this suite) is exactly the
-// "fall back, don't hard-fail" path `fetchPlatformConfig` already defines.
-// playwright.config.ts serves the built bundle with `vite preview`.
+// Needs a real browser: jsdom has no layout, so scrollWidth is always 0 there.
 
-// The hero visual's brand-tinted glow is inset -2rem on every side. Below
-// ~504px the visual spans the full content width, so its right-hand bleed
-// exceeds the section's 24px padding by 8px and widens the document's scroll
-// region at every phone width. 320 and 375 are the widths it was measured at.
+// The hero glow's -2rem inset bleeds past the 24px section padding below ~504px.
 const PHONE_WIDTHS = [320, 375, 414, 480];
 
 const GLOW = '[data-testid="landing-hero-glow"]';
 
-// The landing screen renders only once auth resolution settles; the glow
-// itself is the observable condition that it has, so nothing here waits on a
-// wall-clock sleep. Reduced motion keeps the measurement on the settled
-// layout: the hero's entrance animation is a translate, and a transformed
-// element contributes its transformed box to the scroll region, so a
-// mid-animation read would be measuring something else.
+// Reduced motion: the hero's entrance translate would otherwise widen the scroll region mid-animation.
 async function openLanding(page: Page, width: number, height = 812): Promise<void> {
   await page.setViewportSize({ width, height });
   await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -49,9 +33,7 @@ for (const width of PHONE_WIDTHS) {
     await openLanding(page, width);
     const { scrollWidth, clientWidth, innerWidth } = await horizontalOverflow(page);
 
-    // scrollWidth against clientWidth is the measurement this bug was reported
-    // with. Unlike a comparison against innerWidth it is unaffected by the
-    // width of the vertical scrollbar, which headless Chromium does reserve.
+    // clientWidth excludes the vertical scrollbar headless Chromium reserves.
     expect(scrollWidth - clientWidth).toBe(0);
     expect(scrollWidth).toBeLessThanOrEqual(innerWidth);
   });
@@ -81,17 +63,13 @@ test('the hero glow still renders and still bleeds past its parent at desktop wi
     };
   });
 
-  // The whole point of the element is a soft blurred wash bleeding outside the
-  // card it sits behind, so the assertions below are what keep the horizontal
-  // fix honest: one that deletes the glow, or shrinks it back inside its
-  // parent's box, fails here rather than passing as "no more overflow".
+  // The fix must keep the glow and its bleed, not delete or shrink it.
   expect(measured.glow.width).toBeGreaterThan(0);
   expect(measured.glow.height).toBeGreaterThan(0);
   expect(measured.glow.left).toBeLessThan(measured.parent.left);
   expect(measured.glow.right).toBeGreaterThan(measured.parent.right);
   expect(measured.filter).toContain('blur');
 
-  // The fix must not introduce overflow at desktop widths either.
   const { scrollWidth, clientWidth } = await horizontalOverflow(page);
   expect(scrollWidth - clientWidth).toBe(0);
 });

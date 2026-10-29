@@ -1,10 +1,5 @@
-// The reviews list's THREADS column and the review detail dialog's own
-// unresolved count describe the same review, so they must never report
-// different numbers for it. They are produced by two different reads — the
-// list row's dashboard enrichment and the dialog's comment load — which is
-// exactly how a row can render "-" while the dialog over it says
-// "1 unresolved". These tests pin the agreement on the shape that produced
-// that mismatch: one review, one thread, still OPEN.
+// The reviews list's THREADS column and the detail dialog's unresolved count
+// come from two different reads but must agree.
 import { describe, expect, it } from 'vitest';
 
 import type { UITenantDashboard } from '@/types';
@@ -18,10 +13,8 @@ import {
   unresolvedThreadsLabel,
 } from './tenantDashboardPanels';
 
-// oneUnresolvedThreadReview is the review as the dashboard list describes it:
-// the Go read model's per-row summary count, alongside the same review's
-// comment threads as the detail dialog loads them — one root comment, OPEN,
-// plus a reply that must not be counted as a second thread.
+// The dashboard row's summary count alongside the dialog's threads: one OPEN
+// root plus a reply that must not count as a second thread.
 const listRow = { reviewId: 'review-1', unresolvedThreads: 1 };
 const detail = {
   reviewId: 'review-1',
@@ -65,9 +58,7 @@ describe('unresolved-thread count agrees across the reviews list and the detail 
   });
 
   it('derives the detail count from the threads it renders rather than a drifting summary field', () => {
-    // The dialog has the thread list, so a stale summary count on the same
-    // payload must not win: the number shown is the number of threads shown,
-    // including after a resolve updates the threads without the summary.
+    // The thread list wins over a stale summary count on the same payload.
     const resolvedDetail = {
       reviewId: 'review-1',
       unresolvedThreads: 1,
@@ -84,9 +75,6 @@ describe('unresolved-thread count agrees across the reviews list and the detail 
   });
 
   it('brings a row with no computed count to the dialog’s count when the detail load writes back', () => {
-    // The exact defect: the dashboard row carries no count while the dialog
-    // over it reports one. Loading the detail is what makes them agree, so
-    // the reducer that carries that write-back is where this is pinned.
     const dashboard: UITenantDashboard = {
       reviews: [{ reviewId: 'review-1', name: 'Add widget' }],
     } as UITenantDashboard;

@@ -10,24 +10,23 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
-	eruncommon "github.com/sophium/erun/erun-common"
-
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 type stubCapabilityResolver struct {
-	candidates []eruncommon.PlatformCapability
-	permit     func(eruncommon.PlatformCapability) bool
+	candidates []model.PlatformCapability
+	permit     func(model.PlatformCapability) bool
 	err        error
 }
 
-func (r *stubCapabilityResolver) PermittedRoutes(_ context.Context, candidates []eruncommon.PlatformCapability) ([]eruncommon.PlatformCapability, error) {
+func (r *stubCapabilityResolver) PermittedRoutes(_ context.Context, candidates []model.PlatformCapability) ([]model.PlatformCapability, error) {
 	r.candidates = candidates
 	if r.err != nil {
 		return nil, r.err
 	}
-	var permitted []eruncommon.PlatformCapability
+	var permitted []model.PlatformCapability
 	for _, candidate := range candidates {
 		if r.permit == nil || r.permit(candidate) {
 			permitted = append(permitted, candidate)
@@ -52,9 +51,7 @@ func capabilityHandlerOptions(resolver *stubCapabilityResolver) HandlerOptions {
 	}
 }
 
-// undialedDatabase is a handle no test ever connects through. It is what makes
-// the full protected-route surface register — the catalog under test — without
-// a live PostgreSQL.
+// undialedDatabase is never connected; it lets the full route surface register without PostgreSQL.
 func undialedDatabase(t *testing.T) *sql.DB {
 	t.Helper()
 	db, err := sql.Open("pgx", "postgres://erun@127.0.0.1:1/erun?sslmode=disable")
@@ -65,7 +62,7 @@ func undialedDatabase(t *testing.T) *sql.DB {
 	return db
 }
 
-func whoamiCapabilities(t *testing.T, handler http.Handler) eruncommon.PlatformCapabilities {
+func whoamiCapabilities(t *testing.T, handler http.Handler) model.PlatformCapabilities {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, "/v1/whoami", nil)
 	req.Header.Set("Authorization", "Bearer valid-token")
@@ -75,7 +72,7 @@ func whoamiCapabilities(t *testing.T, handler http.Handler) eruncommon.PlatformC
 		t.Fatalf("unexpected status: %d body=%s", rec.Code, rec.Body.String())
 	}
 	var response struct {
-		Capabilities eruncommon.PlatformCapabilities `json:"capabilities"`
+		Capabilities model.PlatformCapabilities `json:"capabilities"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode whoami: %v", err)
@@ -83,12 +80,9 @@ func whoamiCapabilities(t *testing.T, handler http.Handler) eruncommon.PlatformC
 	return response.Capabilities
 }
 
-// TestWhoamiReportsTheCallersCapabilities is the contract a client degrades on:
-// whoami names the surfaces this caller may reach, so nothing has to guess from
-// role names.
 func TestWhoamiReportsTheCallersCapabilities(t *testing.T) {
 	resolver := &stubCapabilityResolver{
-		permit: func(candidate eruncommon.PlatformCapability) bool { return candidate.Method == http.MethodGet },
+		permit: func(candidate model.PlatformCapability) bool { return candidate.Method == http.MethodGet },
 	}
 	handler, err := NewHandler(capabilityHandlerOptions(resolver))
 	if err != nil {
@@ -101,12 +95,9 @@ func TestWhoamiReportsTheCallersCapabilities(t *testing.T) {
 	}
 }
 
-// TestWhoamiReportsAnEmptyCapabilitySetForAPermissionlessCaller is the state a
-// client must render as "you may not see this" rather than as "there is
-// nothing here": the read succeeds and reports no capabilities.
 func TestWhoamiReportsAnEmptyCapabilitySetForAPermissionlessCaller(t *testing.T) {
 	resolver := &stubCapabilityResolver{
-		permit: func(eruncommon.PlatformCapability) bool { return false },
+		permit: func(model.PlatformCapability) bool { return false },
 	}
 	handler, err := NewHandler(capabilityHandlerOptions(resolver))
 	if err != nil {
@@ -118,10 +109,6 @@ func TestWhoamiReportsAnEmptyCapabilitySetForAPermissionlessCaller(t *testing.T)
 	}
 }
 
-// TestCapabilityCandidatesAreTheHandlersOwnRoutes keeps the candidate set
-// honest in both directions: it may only name routes the handler actually
-// serves, and the whoami route that reports it — registered last — has to be
-// among them.
 func TestCapabilityCandidatesAreTheHandlersOwnRoutes(t *testing.T) {
 	resolver := &stubCapabilityResolver{}
 	options := capabilityHandlerOptions(resolver)
@@ -148,22 +135,18 @@ func TestCapabilityCandidatesAreTheHandlersOwnRoutes(t *testing.T) {
 			t.Errorf("capability candidate %s %s is not a route this handler serves", candidate.Method, candidate.Path)
 		}
 	}
-	if !eruncommon.PlatformCapabilities(candidates).Allows(http.MethodGet, "/v1/whoami") {
+	if !model.PlatformCapabilities(candidates).Allows(http.MethodGet, "/v1/whoami") {
 		t.Errorf("expected the whoami route itself among the candidates, got %+v", candidates)
 	}
 }
 
 var routeWildcardPattern = regexp.MustCompile(`\{[^}]*\}`)
 
-// concreteRequestPath fills a canonical route template's wildcards so a request
-// routes to the same handler the template registered.
 func concreteRequestPath(apiPath string) string {
 	return routeWildcardPattern.ReplaceAllString(apiPath, "placeholder")
 }
 
-// TestWhoamiFailsRatherThanClaimingNoCapabilities separates the two states a
-// client must not conflate: an empty capability set means "you may do nothing",
-// so a resolver that could not answer must not be reported as one.
+// An empty set means "you may do nothing", so a resolver failure must not report one.
 func TestWhoamiFailsRatherThanClaimingNoCapabilities(t *testing.T) {
 	resolver := &stubCapabilityResolver{err: errors.New("capability lookup failed")}
 	handler, err := NewHandler(capabilityHandlerOptions(resolver))
@@ -181,17 +164,12 @@ func TestWhoamiFailsRatherThanClaimingNoCapabilities(t *testing.T) {
 	}
 }
 
-// TestCapabilitiesDefaultToTheAuthorizerThatEnforcesThem pins the single-source
-// property: nothing has to be wired for the capability answer to come from the
-// code that enforces access.
 func TestCapabilitiesDefaultToTheAuthorizerThatEnforcesThem(t *testing.T) {
 	options := HandlerOptions{DB: undialedDatabase(t)}
 	authorizer := resolveAuthorizer(options)
 	if resolveCapabilities(options, authorizer) == nil {
 		t.Fatal("expected the database-backed authorizer to answer the capability set")
 	}
-	// An authorizer that cannot resolve capabilities leaves whoami without a
-	// set rather than reporting an empty one.
 	injected := HandlerOptions{Authorizer: AuthorizerFunc(func(context.Context, string, string) error { return nil })}
 	if resolveCapabilities(injected, resolveAuthorizer(injected)) != nil {
 		t.Fatal("expected no capability resolver for an authorizer that cannot resolve one")

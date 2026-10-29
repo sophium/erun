@@ -19,26 +19,20 @@ type RegistryCredential struct {
 	Password string
 }
 
-// Usable reports whether the credential can be presented at all; a half-filled
-// entry in a docker config is treated as no credential rather than sent.
+// Usable reports whether the credential is complete; a half-filled one is not sent.
 func (c RegistryCredential) Usable() bool {
 	return c.Username != "" && c.Password != ""
 }
 
-// RegistryCredentials resolves the credential a registry host is pulled with,
-// so a probe can ask the registry the same question the deploy Job's kubelet
-// gets to ask.
+// RegistryCredentials resolves the credential a registry host is pulled with.
 type RegistryCredentials interface {
-	// For returns host's credential, or ok=false when none is available, which
-	// leaves the probe unauthenticated and therefore unable to distinguish an
-	// absent repository from a private one.
+	// For returns ok=false when no credential is available, leaving the probe
+	// unable to tell an absent repository from a private one.
 	For(ctx context.Context, host string) (RegistryCredential, bool)
 }
 
-// KubeImagePullSecretCredentials reads the dockerconfigjson Secrets the deploy
-// Job's ServiceAccount pulls with, in the platform namespace the API itself
-// runs in. Reading them at probe time rather than at startup means a rotated
-// pull secret is picked up without restarting the API.
+// KubeImagePullSecretCredentials reads the deploy Job's pull secrets at probe
+// time, so a rotated secret is picked up without a restart.
 type KubeImagePullSecretCredentials struct {
 	kube      kubernetes.Interface
 	namespace string
@@ -50,9 +44,7 @@ func NewKubeImagePullSecretCredentials(kube kubernetes.Interface, namespace stri
 	return &KubeImagePullSecretCredentials{kube: kube, namespace: strings.TrimSpace(namespace), names: names}
 }
 
-// For returns the first credential any configured secret carries for host. An
-// unreadable secret (absent, or no RBAC to get it) is skipped rather than
-// fatal: the caller's contract is to stay inconclusive when it cannot tell.
+// For skips unreadable secrets: the probe stays inconclusive rather than failing.
 func (c *KubeImagePullSecretCredentials) For(ctx context.Context, host string) (RegistryCredential, bool) {
 	if c == nil || c.kube == nil || c.namespace == "" {
 		return RegistryCredential{}, false
@@ -74,12 +66,8 @@ func (c *KubeImagePullSecretCredentials) For(ctx context.Context, host string) (
 	return RegistryCredential{}, false
 }
 
-// warnCredentialMiss reports, once per process, that none of the configured
-// pull secrets yielded a usable credential for host. Fail-open behaviour does
-// not change -- ConfirmedMissing still stays inconclusive -- but the operator
-// otherwise has no way to tell a deliberate "no probe configured" state (no
-// names configured at all, which is not logged) apart from an unreadable or
-// misnamed secret, since both leave the registry probe unauthenticated.
+// warnCredentialMiss logs once per host so an unreadable or misnamed secret is
+// distinguishable from the deliberate "no secrets configured" state.
 func (c *KubeImagePullSecretCredentials) warnCredentialMiss(host string) {
 	if len(c.names) == 0 {
 		return
@@ -89,9 +77,7 @@ func (c *KubeImagePullSecretCredentials) warnCredentialMiss(host string) {
 	})
 }
 
-// dockerConfigCredential pulls host's entry out of a `.dockerconfigjson`
-// payload. Either the split username/password fields or the combined base64
-// `auth` field is accepted, because both are what a registry login writes.
+// dockerConfigCredential accepts either username/password or the base64 `auth` field.
 func dockerConfigCredential(payload []byte, host string) (RegistryCredential, bool) {
 	if len(payload) == 0 {
 		return RegistryCredential{}, false
@@ -121,9 +107,7 @@ func dockerConfigCredential(payload []byte, host string) (RegistryCredential, bo
 	return RegistryCredential{}, false
 }
 
-// registryHostMatches compares a docker config's registry key against a bare
-// host. A key may carry a scheme and a path (`https://ghcr.io/v1/`), both of
-// which docker itself ignores when matching.
+// registryHostMatches ignores scheme and path in the key, as docker does.
 func registryHostMatches(registry, host string) bool {
 	registry = strings.TrimSpace(registry)
 	if scheme := strings.Index(registry, "://"); scheme >= 0 {

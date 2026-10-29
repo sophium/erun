@@ -8,17 +8,12 @@ import { loadSavedPastContainerRegistries } from '@/app/storage';
 
 type EnvironmentDialog = AppState['environmentDialog'];
 
-// isHostedRegistryUsable is true only once the reachability probe has
-// actually confirmed the host is available — a pure function so this
-// decision does not add to ContainerRegistryField's own branching.
 function isHostedRegistryUsable(dialog: EnvironmentDialog): boolean {
   return dialog.hostedRegistry?.available === true && dialog.useErunRegistry;
 }
 
-// HostedRegistryToggle is disabled until the reachability probe resolves it
-// available — offering it unconditionally is the defect this fixes: selecting
-// a registry that does not resolve configured an environment whose pushes
-// went nowhere, with no error until the first build.
+// Disabled until the reachability probe confirms the host; an unreachable
+// registry would only fail at the first build.
 function HostedRegistryToggle({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
   const hosted = dialog.hostedRegistry;
@@ -34,9 +29,7 @@ function HostedRegistryToggle({ dialog }: { dialog: EnvironmentDialog }): React.
           checked={dialog.useErunRegistry}
           disabled={dialog.busy || !hostedAvailable}
           onCheckedChange={(value) => {
-            // The three choices are mutually exclusive, so selecting this one
-            // releases the cluster toggle rather than leaving both set and
-            // letting `erun init` reject the pair after the operator commits.
+            // The choices are mutually exclusive, which `erun init` enforces.
             dispatch(
               updateEnvironmentDialog({
                 useErunRegistry: value === true,
@@ -61,10 +54,8 @@ function HostedRegistryToggle({ dialog }: { dialog: EnvironmentDialog }): React.
   );
 }
 
-// ContainerRegistryField offers the in-cluster erun-registry (resolved from the
-// selected Kubernetes context) as the default when one is detected, and falls
-// back to a free-text registry otherwise. There is no hardcoded default host —
-// the deployed cluster registry is the default, not a placeholder like erunpaas.
+// ContainerRegistryField defaults to the detected in-cluster registry; there is
+// no hardcoded default host.
 export function ContainerRegistryField({
   dialog,
 }: {
@@ -123,11 +114,6 @@ export function ContainerRegistryField({
     );
   }
 
-  // A fresh install has no cluster registry detected and no past values to
-  // suggest, so the field would otherwise offer nothing to go on — no
-  // placeholder, no helper, no suggestions (Nielsen #6, recognition over
-  // recall). Name the format with an example and the route that detects a
-  // registry automatically instead of typing one.
   const showRegistryHelp = !clusterAvailable && containerRegistrySuggestions.length === 0;
   return (
     <div className="grid gap-2">

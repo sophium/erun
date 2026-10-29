@@ -1,9 +1,7 @@
 import { artifactPath } from '../../../fixtures/artifacts.js';
 import { test, expect } from '../../../fixtures/erunApp.js';
 
-// "Upgrade all" previews a cross-env upgrade plan before any deploy. This spec
-// owns the desktop dialog surface; the CLI dry-run goldens own plan resolution
-// and deploy composition.
+// This spec owns the dialog surface; CLI dry-run goldens own plan resolution.
 test.describe('sidebar Upgrade all', () => {
   test('the Upgrade all button opens the preview dialog and cancels cleanly', async ({ app }) => {
     await app.sidebar.openUpgradeAll();
@@ -11,8 +9,6 @@ test.describe('sidebar Upgrade all', () => {
     const dialog = app.sidebar.upgradeAllDialog();
     await expect(dialog).toBeVisible();
 
-    // Guards against a dialog stuck on the loading spinner: the body must
-    // settle into a plan table or the opted-in empty state.
     await expect
       .poll(async () => {
         const hasTable = await dialog.getByRole('table', { name: 'Upgrade plan' }).count();
@@ -27,20 +23,13 @@ test.describe('sidebar Upgrade all', () => {
     await expect(dialog).toBeHidden();
   });
 
-  // The dialog must render the same three-way outcome as the CLI's
-  // `erun upgrade`: an opted-in env lags a known channel latest, sits at the
-  // latest, or has no resolvable target. That third case once rendered as "up
-  // to date" with a "(unset)" target, mislabelling a failed lookup as success
-  // and making Upgrade all look like it did nothing — this test guards it.
-  //
-  // The unresolved case needs a tenant whose registry lookup fails, which the
-  // headless harness can't stage, so the plan is stubbed over /__erun_invoke.
+  // An unresolvable target must not render as "up to date". The plan is stubbed
+  // because a failing registry lookup cannot be staged headless.
   test('an unresolved channel target renders as "latest unknown", not "up to date"', async ({
     app,
     page,
   }) => {
-    // Realistic long *-snapshot-<timestamp> tags (the layout has to stay
-    // readable for these without wrapping mid-token).
+    // Long snapshot tags must not wrap mid-token.
     const plan = {
       items: [
         {
@@ -102,44 +91,31 @@ test.describe('sidebar Upgrade all', () => {
     const currentRow = dialog.locator('tr', { hasText: 'current-env' });
     await expect(currentRow).toContainText('up to date');
 
-    // The failure reason shows inline so the operator sees why the target is
-    // unknown without leaving the dialog — not the old "up to date" mislabel.
     const unresolvedRow = dialog.locator('tr', { hasText: 'unresolved-env' });
     await expect(unresolvedRow).toContainText('latest unknown');
     await expect(unresolvedRow).toContainText('ghcr token request failed: 403 Forbidden');
     await expect(unresolvedRow).toContainText('1.0.80-snapshot-20260101000000');
     await expect(unresolvedRow).not.toContainText('up to date');
 
-    // A snapshot member whose stream was superseded by a stable release keeps
-    // its channel but adopts the stable version as a regular upgrade.
+    // A snapshot member superseded by a stable release adopts it as an upgrade.
     const stableAdoptRow = dialog.locator('tr', { hasText: 'stable-adopt-env' });
     await expect(stableAdoptRow).toContainText('snapshot');
     await expect(stableAdoptRow).toContainText('1.0.87');
     await expect(stableAdoptRow).toContainText('will upgrade');
 
-    // The summary counts only lagging members; a separate line explains why an
-    // opted-in env won't be redeployed.
     await expect(dialog).toContainText('2 of 4 will be redeployed.');
     await expect(dialog).toContainText('be checked against the latest version');
 
     await expect(dialog.getByRole('button', { name: 'Upgrade 2' })).toBeEnabled();
 
-    // Capture the populated plan for visual review of the layout.
     await dialog.screenshot({ path: artifactPath('test-results/upgrade-all-plan.png') });
 
     await dialog.getByRole('button', { name: 'Cancel' }).click();
     await expect(dialog).toBeHidden();
   });
 
-  // Confirming fans out per member: each lagging env runs its own scoped
-  // `erun upgrade` in its own Local shell, in parallel — not one global run in
-  // a single env's terminal. The fan-out must not drag in each env's default
-  // tabs; the AI tab in particular once spawned a Claude session as a side
-  // effect of confirming, and this guards against that.
-  //
-  // Real parallel deploys aren't stageable headless, so every Start* RPC is
-  // stubbed; per-env command composition is owned by the upgrade dry-run
-  // goldens and the Go resolver tests.
+  // Each lagging env runs its own scoped `erun upgrade` in its Local shell, with
+  // no default-tab (AI) spawn. Start* RPCs are stubbed.
   test('confirming fans out one scoped run per lagging member, with no AI spawn', async ({
     app,
     page,
@@ -187,9 +163,7 @@ test.describe('sidebar Upgrade all', () => {
           body: JSON.stringify({ data: plan }),
         });
       }
-      // Count AI spawns only for the plan's fake tenants: the singleton backend
-      // may legitimately revive the AI tab of a real env an earlier spec left
-      // selected, and that background churn is not the invariant under test.
+      // Only the plan's fake tenants count: the backend may revive a real env's AI tab.
       if (body.method.startsWith('Start')) {
         const selection = body.args[0] ?? {};
         if (body.method === 'StartUpgradeEnvironmentSession') {
@@ -230,18 +204,13 @@ test.describe('sidebar Upgrade all', () => {
 
     expect(memberAISessions).toEqual([]);
 
-    // The pre-fix block message must never appear.
     await expect(page.getByText('No environments are configured to upgrade')).toHaveCount(0);
     await expect(page.getByText('Open an environment first')).toHaveCount(0);
     await expect(dialog).toBeHidden();
   });
 
-  // When an env's registries offer more than one newer version, Upgrade all
-  // must not silently auto-pick: the row carries every candidate (labelled by
-  // source registry) and the operator picks one before it can be redeployed.
-  // CLI/MCP skip such an env as ambiguous; the desktop is where the pick
-  // happens. Two disagreeing registries aren't stageable headless, so the plan
-  // is stubbed over /__erun_invoke.
+  // With several newer versions the operator must pick one per registry; the plan
+  // is stubbed because disagreeing registries cannot be staged headless.
   test('an ambiguous env offers a per-registry pick that drives the chosen version', async ({
     app,
     page,
@@ -313,8 +282,6 @@ test.describe('sidebar Upgrade all', () => {
     await expect(upgradeButton).toBeEnabled();
     await upgradeButton.click();
 
-    // The confirmed run carries the picked version so `erun upgrade` deploys
-    // exactly what the operator chose.
     await expect.poll(() => upgradeRuns.length).toBe(1);
     expect(upgradeRuns[0]?.environment).toBe('pick-env');
     expect(upgradeRuns[0]?.version).toBe(newer);

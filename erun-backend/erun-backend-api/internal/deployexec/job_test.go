@@ -42,16 +42,11 @@ func TestBuildDeployJobSpec(t *testing.T) {
 		t.Fatalf("container image = %+v", pod.Containers)
 	}
 	assertDeployBootstrapScript(t, pod.Containers[0].Command)
-	// No in-Job retries: a failed deploy must surface, not silently retry.
 	if job.Spec.BackoffLimit == nil || *job.Spec.BackoffLimit != 0 {
 		t.Fatalf("backoffLimit = %v, want 0", job.Spec.BackoffLimit)
 	}
 }
 
-// assertDeployBootstrapScript checks the Job's command seeds the in-cluster
-// kubeconfig and the environment's config before running the real `erun
-// deploy` — the Job's command replaces the image's entrypoint, so nothing
-// else seeds either.
 func assertDeployBootstrapScript(t *testing.T, command []string) {
 	t.Helper()
 	assertCommand(t, command[:2], []string{"sh", "-c"})
@@ -74,10 +69,6 @@ func assertDeployBootstrapScript(t *testing.T, command []string) {
 	}
 }
 
-// TestBuildDeployJobSpecWithNamespaceQuota: all three of MaxCPU/MaxMemory/
-// MaxStorage append the --max-cpu/--max-memory/--max-storage flags; a partial
-// set (only one configured) appends none, since erun deploy validates the
-// three together.
 func TestBuildDeployJobSpecWithNamespaceQuota(t *testing.T) {
 	params := testParams()
 	params.MaxCPU, params.MaxMemory, params.MaxStorage = "4000m", "9216Mi", "80Gi"
@@ -95,11 +86,6 @@ func TestBuildDeployJobSpecWithNamespaceQuota(t *testing.T) {
 	}
 }
 
-// TestBuildDeployCommandWithRuntimeImageOverride: a bootstrap deploy
-// threads --runtime-image at the in-Job `erun deploy` so the installed runtime
-// chart matches the canonical image the Job's own container runs, rather than
-// resolving the tenant's own (never-published) artifacts. Unset leaves the
-// command exactly as it was before this existed.
 func TestBuildDeployCommandWithRuntimeImageOverride(t *testing.T) {
 	params := testParams()
 	params.RuntimeImageOverride = "ghcr.io/sophium/erun-devops:1.0.149"
@@ -115,10 +101,6 @@ func TestBuildDeployCommandWithRuntimeImageOverride(t *testing.T) {
 	}
 }
 
-// TestBuildDeployJobSpecWithExpose: a configured ExposeTargetIP chains a
-// second, independently-skippable `erun expose` after the deploy rather than
-// teaching deploy itself about exposure — the Job is the caller composing
-// pure primitives.
 func TestBuildDeployJobSpecWithExpose(t *testing.T) {
 	params := testParams()
 	params.ExposeTargetIP = "203.0.113.10"
@@ -151,10 +133,6 @@ func TestBuildDeployJobSpecWithExpose(t *testing.T) {
 	}
 }
 
-// TestBuildDeployJobSpecWithExposePlatformCoordinates: when the control plane
-// supplies the services zone and platform namespace it already knows, they
-// thread onto the chained `erun expose` as --services-zone/--platform-namespace
-// so the sourceless Job can resolve a hostname without a git checkout.
 func TestBuildDeployJobSpecWithExposePlatformCoordinates(t *testing.T) {
 	params := testParams()
 	params.ExposeTargetIP = "203.0.113.10"
@@ -167,9 +145,7 @@ func TestBuildDeployJobSpecWithExposePlatformCoordinates(t *testing.T) {
 		t.Fatalf("script %q missing %q", script, want)
 	}
 
-	// Half the pair configured is the same as neither: expose falls back to its
-	// own project-based resolution rather than running with an incomplete
-	// override.
+	// Half the pair configured is the same as neither.
 	partial := testParams()
 	partial.ExposeTargetIP = "203.0.113.10"
 	partial.ExposeServicesZone = "services.erunpaas.com"
@@ -179,11 +155,6 @@ func TestBuildDeployJobSpecWithExposePlatformCoordinates(t *testing.T) {
 	}
 }
 
-// TestExposeChainScriptIsBestEffort: the chained expose step must never fail
-// the Job it rides on — a healthy deploy must not be recorded as a
-// failed provision just because DNS/Ingress wiring failed. On failure it
-// prints a marker line ExposeFailureFromOutput reads back out of the Job's
-// captured output.
 func TestExposeChainScriptIsBestEffort(t *testing.T) {
 	params := testParams()
 	params.ExposeTargetIP = "203.0.113.10"
@@ -196,9 +167,6 @@ func TestExposeChainScriptIsBestEffort(t *testing.T) {
 	}
 }
 
-// TestExposeFailureFromOutput: the marker line is how a *successful* Job
-// (deploy landed, expose did not) hands back the reason, since the Job's own
-// outcome no longer reflects an expose failure.
 func TestExposeFailureFromOutput(t *testing.T) {
 	output := "==> Deployed acme/prod 1.2.3 in 4s\n" +
 		"audit: erun expose --ip 203.0.113.10 --skip-if-unconfigured acme prod mcp\n" +
@@ -211,12 +179,6 @@ func TestExposeFailureFromOutput(t *testing.T) {
 	}
 }
 
-// TestExposeHostnameFromParams: the reported hostname must match exactly what
-// buildDeployCommand actually threads onto the chained `erun expose` call —
-// same tenant/environment namespace formula, same services zone — and stay
-// empty whenever the chain would not have run with resolved platform
-// coordinates (mirroring TestBuildDeployJobSpecWithExposePlatformCoordinates's
-// "half the pair configured is the same as neither" case).
 func TestExposeHostnameFromParams(t *testing.T) {
 	params := testParams()
 	params.ExposeTargetIP = "203.0.113.10"
@@ -241,10 +203,6 @@ func TestExposeHostnameFromParams(t *testing.T) {
 	}
 }
 
-// TestBuildDeployCommandWithMCPAuthPublicKey: the backend's own MCP-signing
-// public key is written to a fixed path via heredoc (never argv) and threaded
-// to `erun deploy` as --mcp-auth-public-key, so the runtime's MCP edge trusts
-// tokens the backend mints for the console.
 func TestBuildDeployCommandWithMCPAuthPublicKey(t *testing.T) {
 	params := testParams()
 	params.MCPAuthPublicKeyPEM = "-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----\n"
@@ -259,18 +217,12 @@ func TestBuildDeployCommandWithMCPAuthPublicKey(t *testing.T) {
 	if !strings.Contains(script, want) {
 		t.Fatalf("script %q missing %q", script, want)
 	}
-	// Empty stays exactly the plain deploy — no heredoc, no flag.
 	plain := buildDeployCommand(testParams())[2]
 	if strings.Contains(plain, "mcp-auth-public-key") {
 		t.Fatalf("script %q should not thread an empty key", plain)
 	}
 }
 
-// TestBuildDeployCommandWithTLSCertProvisioning: when the control plane mints
-// a per-env DNS-01 broker token and supplies the broker/ACME coordinates, the
-// deploy Job writes the token via heredoc and threads it plus the coordinates
-// onto the chained `erun expose` so it can provision the env's own TLS
-// Issuer+Certificate. Only takes effect alongside ExposeTargetIP.
 func TestBuildDeployCommandWithTLSCertProvisioning(t *testing.T) {
 	params := testParams()
 	params.ExposeTargetIP = "203.0.113.10"
@@ -289,8 +241,6 @@ func TestBuildDeployCommandWithTLSCertProvisioning(t *testing.T) {
 		t.Fatalf("script %q missing %q", script, want)
 	}
 
-	// Without ExposeTargetIP there is no chained expose to thread the TLS
-	// flags onto at all.
 	noExpose := testParams()
 	noExpose.TLSDNS01Token = "test-token"
 	noExpose.TLSDNS01BrokerURL = "https://api.example.com/v1/dns01"
@@ -300,7 +250,6 @@ func TestBuildDeployCommandWithTLSCertProvisioning(t *testing.T) {
 		t.Fatalf("script %q should not thread tls flags without ExposeTargetIP", noExposeScript)
 	}
 
-	// A partial TLS config is the same as none: expose stays plain.
 	partial := testParams()
 	partial.ExposeTargetIP = "203.0.113.10"
 	partial.TLSDNS01Token = "test-token"
@@ -310,14 +259,7 @@ func TestBuildDeployCommandWithTLSCertProvisioning(t *testing.T) {
 	}
 }
 
-// TestBuildDeployCommandWritesChainedStepFilesBeforeTheDeploy guards the
-// script's composition rather than its contents. exposeChainScript opens with
-// " && " so exposure stays conditional on the deploy succeeding, which means
-// anything appended after shellJoin(deploy) welds itself onto the deploy's last
-// quoted argument instead of becoming its own command. That turned
-// --mcp-auth-public-key into a path ending "pemcat" and failed every hosted
-// provision, while assertions asking only whether the script *contained* each
-// piece stayed green -- the corruption is a boundary, not a missing piece.
+// Checks boundaries, not contents: appended text would weld onto the deploy's last argument.
 func TestBuildDeployCommandWritesChainedStepFilesBeforeTheDeploy(t *testing.T) {
 	params := testParams()
 	params.MCPAuthPublicKeyPEM = "-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----"
@@ -347,9 +289,6 @@ func TestBuildDeployCommandWritesChainedStepFilesBeforeTheDeploy(t *testing.T) {
 	}
 }
 
-// TestBuildDeployCommandQuotesArguments guards the shell-injection surface: an
-// argument carrying a single quote must stay a single shell word — the
-// canonical way a naively-quoted value breaks out of its own quoting.
 func TestBuildDeployCommandQuotesArguments(t *testing.T) {
 	params := testParams()
 	params.Environment = "prod'; rm -rf /; echo"
@@ -362,8 +301,6 @@ func TestBuildDeployCommandQuotesArguments(t *testing.T) {
 	}
 }
 
-// assertCommand compares the deploy argv element by element, so a mismatch names
-// the position that differs.
 func assertCommand(t *testing.T, got, want []string) {
 	t.Helper()
 	if len(got) != len(want) {
@@ -376,16 +313,13 @@ func assertCommand(t *testing.T, got, want []string) {
 	}
 }
 
-// TestDeployJobNameSeparatesAttempts: a re-deploy must be a new Job, otherwise
-// it would re-read the previous attempt's terminal outcome instead of running.
 func TestDeployJobNameSeparatesAttempts(t *testing.T) {
 	first := DeployJobName("acme", "prod", "1.0.149", "3f2a91cc-1111-2222-3333-444455556666")
 	second := DeployJobName("acme", "prod", "1.0.149", "9b7d40aa-1111-2222-3333-444455556666")
 	if first == second {
 		t.Fatalf("two attempts share the job name %q", first)
 	}
-	// The create path passes no attempt id and keeps its stable name, so a
-	// resumed workflow still re-watches the Job it already created.
+	// Without an attempt id the name stays stable so a resumed workflow re-watches it.
 	if got := DeployJobName("acme", "prod", "1.0.149", ""); got != "erun-deploy-acme-prod-1-0-149" {
 		t.Fatalf("name without an attempt id = %q", got)
 	}
@@ -394,8 +328,6 @@ func TestDeployJobNameSeparatesAttempts(t *testing.T) {
 	}
 }
 
-// TestDeployJobNameFitsKubernetesLimit: names are trimmed in the descriptive
-// middle, never in the attempt suffix that keeps two deploys apart.
 func TestDeployJobNameFitsKubernetesLimit(t *testing.T) {
 	longEnv := strings.Repeat("e", 63)
 	first := DeployJobName("verylongtenantname", longEnv, "1.0.149-rc.20260816", "3f2a91cc-aaaa")
@@ -410,9 +342,6 @@ func TestDeployJobNameFitsKubernetesLimit(t *testing.T) {
 	}
 }
 
-// TestRunWatchesTheDeployJob holds the launcher to creating and watching the Job
-// its params describe; the watch and failure read-back themselves belong to
-// jobexec and are covered there.
 func TestRunWatchesTheDeployJob(t *testing.T) {
 	p := testParams()
 	kube := fake.NewSimpleClientset(&batchv1.Job{
@@ -433,14 +362,7 @@ func TestRunWatchesTheDeployJob(t *testing.T) {
 	}
 }
 
-// TestRunProvisionsThePlacementSecretBeforeTheJob locks #1112's ordering: a
-// deploy targeting a remote context must have its credential Secret in place
-// before the Job that reads it via secretKeyRef is created, or the Job's
-// container fails to start on a missing Secret. The pre-seeded Job here
-// (mirroring TestRunWatchesTheDeployJob) lets the runner's create-tolerant-
-// of-AlreadyExists path just watch it; the Job's own container/env wiring is
-// covered directly by TestBuildDeployJobSpecWithPlacement, which builds the
-// Job object without going through a fake watch.
+// The Secret must exist before the Job that reads it via secretKeyRef.
 func TestRunProvisionsThePlacementSecretBeforeTheJob(t *testing.T) {
 	p := testParams()
 	p.Placement = PlacementParams{ContextID: "ctx-1", KubernetesContext: "prod-cluster", ServerURL: "https://203.0.113.10:6443", AdminToken: "the-token"}
@@ -465,8 +387,6 @@ func TestRunProvisionsThePlacementSecretBeforeTheJob(t *testing.T) {
 	}
 }
 
-// TestBuildDeployJobSpecWithPlacement locks that a remote placement's Job
-// carries the env var sourcing its admin token from the placement Secret.
 func TestBuildDeployJobSpecWithPlacement(t *testing.T) {
 	p := testParams()
 	p.Placement = PlacementParams{ContextID: "ctx-1", KubernetesContext: "prod-cluster", ServerURL: "https://203.0.113.10:6443"}

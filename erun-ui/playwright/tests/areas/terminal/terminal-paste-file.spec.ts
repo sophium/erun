@@ -1,17 +1,8 @@
 import { expect, test } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
-// terminal-paste-file guards the desktop terminal's clipboard paste: an
-// image-only MIME filter used to silently drop a pasted PDF / CSV / archive.
-// Now any pasted file is copied into the runtime pod, its original filename
-// preserved, and its remote path typed into the shell.
-//
-// Harness limitation: the real copy is a `kubectl exec` into a live runtime
-// pod that the headless harness deliberately lacks (kubectl is an inert stub),
-// so this spec mocks the copy and asserts only the reachable frontend
-// behaviour. The copy, filename derivation, and path-traversal safety are
-// covered by the Go tests in erun-ui/app_test.go (TestSavePastedFile*,
-// TestPastedFileFilenameDerivation, TestPastedFileFilenameRejectsTraversal).
+// Any pasted file is copied into the pod and its path typed. The kubectl copy
+// is mocked; the copy itself is Go-tested.
 
 interface InvokeBody {
   method?: string;
@@ -26,8 +17,7 @@ interface PastePayload {
 
 const REMOTE_PATH = '/home/erun/.codex/attachments/paste-20260101-000000.000000000-report.pdf';
 
-// The production paste handler reads event.clipboardData.items, so the
-// synthetic paste event must carry the file there to drive the real path.
+// The paste handler reads event.clipboardData.items.
 async function dispatchFilePaste(
   page: import('@playwright/test').Page,
   file: { name: string; type: string; text: string },
@@ -58,7 +48,6 @@ test.describe('terminal paste of any file (#584)', () => {
       const body = JSON.parse(request.postData() ?? '{}') as InvokeBody;
       if (body.method === 'SavePastedFile') {
         savePayload = body.args?.[1] ?? {};
-        // Stand in for the live `kubectl exec` copy the harness can't perform.
         return route.fulfill({
           contentType: 'application/json',
           body: JSON.stringify({ data: { path: REMOTE_PATH } }),
@@ -70,14 +59,10 @@ test.describe('terminal paste of any file (#584)', () => {
       await route.continue();
     });
 
-    // Open a seeded env so a terminal session exists (the paste handler is a
-    // no-op until store.terminal.sessionId > 0).
+    // The paste handler is a no-op until a session exists.
     await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
 
-    // Re-dispatch until the session is established and the handler fires. Each
-    // dispatch is an idempotent synthetic event; before the session is ready it
-    // returns early without an RPC, so the poll closes the open→session race
-    // without a brittle fixed wait.
+    // Re-dispatch until the session is ready; earlier dispatches return without an RPC.
     await expect
       .poll(
         async () => {
@@ -92,8 +77,6 @@ test.describe('terminal paste of any file (#584)', () => {
       )
       .toBe('application/pdf');
 
-    // The original filename is preserved so an agent sees report.pdf, not a
-    // generic paste-….bin.
     expect(savePayload?.name).toBe('report.pdf');
     expect(typeof savePayload?.data).toBe('string');
     expect(savePayload?.data?.length ?? 0).toBeGreaterThan(0);

@@ -15,8 +15,7 @@ interface DiffArgs {
   options: UIDiffOptions;
 }
 
-// DirectoryDiffArgs is DiffArgs for a target that is a path rather than an
-// environment: no tenant, no environment, no MCP edge to call.
+// DirectoryDiffArgs addresses a path rather than an environment.
 interface DirectoryDiffArgs {
   directory: string;
   options: UIDiffOptions;
@@ -30,11 +29,8 @@ export const reviewApi = wailsApi.injectEndpoints({
       ),
       providesTags: ['Diff'],
     }),
-    // getDirectoryDiff is the path-addressed sibling of getDiff: the same
-    // result, fetched by reading the directory's own working tree with host git
-    // instead of a pod's MCP edge. It is a separate endpoint rather than a branch
-    // inside one queryFn because the two take different arguments, and RTK
-    // Query keys a query by its args.
+    // Reads the directory with host git; separate from getDiff because RTK Query
+    // keys queries by args.
     getDirectoryDiff: builder.query<DiffResult, DirectoryDiffArgs>({
       queryFn: wailsQueryFn<DirectoryDiffArgs, DiffResult>(
         ({ directory, options }) => LoadDirectoryDiff(directory, options) as Promise<DiffResult>,

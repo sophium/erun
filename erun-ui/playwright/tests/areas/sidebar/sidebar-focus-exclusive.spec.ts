@@ -3,16 +3,8 @@ import type { Page } from '@playwright/test';
 import { expect, test } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_ORCHESTRATOR, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
-// #1204: the tenant dashboard, an orchestrator's session, and an environment's
-// session each used to compute their own "active"/"selected" sidebar
-// highlight from a different state slice, with nothing enforcing that only
-// one applied. Opening an orchestrator while the tenant dashboard was open
-// attached its session but never showed it (the dashboard stayed painted
-// over the terminal pane) while both rows rendered selected at once. The fix
-// is a single derived focus value every row reads from, and this spec
-// exercises all three pairings of the invariant it restores: at most one of
-// the tenant dashboard, an orchestrator row, and an environment row is ever
-// the sidebar's focused row, and the main pane always agrees with it.
+// At most one of the tenant dashboard, an orchestrator row, and an env row is focused, and the main
+// pane agrees.
 
 const RUNNING_SESSION_ID = 4242;
 
@@ -30,10 +22,7 @@ function runningOrchestratorSnapshot() {
   };
 }
 
-// Stubs ListOrchestrators so the seeded orchestrator reads as already
-// running with a fixed session id — clicking its row then dispatches the
-// synchronous "open" path (openOrchestrator), not a real orchestrator spawn,
-// which the isolated harness has no credentials to perform.
+// A running orchestrator stub makes clicking its row open, not spawn.
 async function stubRunningOrchestrator(page: Page): Promise<void> {
   await page.route('**/__erun_invoke', async (route, request) => {
     const body = JSON.parse(request.postData() ?? '{}') as { method?: string };
@@ -68,13 +57,10 @@ test.describe('sidebar focus is mutually exclusive across dashboard, orchestrato
 
     await app.sidebar.openOrchestratorSession(SEED_ORCHESTRATOR);
 
-    // The dashboard is gone — not just deselected in the sidebar — and the
-    // orchestrator's session is what the pane actually shows instead.
     await expect(tenantDashboardHeading(app)).toHaveCount(0);
     await expect(app.tabStrip.orchestratorMode()).toBeVisible();
     await expect(app.tabStrip.environmentMode()).toBeHidden();
 
-    // Exactly one row is highlighted.
     await expect(app.sidebar.tenantDashboardButton(SEED_TENANT)).not.toHaveAttribute(
       'aria-current',
       'page',

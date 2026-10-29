@@ -39,11 +39,8 @@ func (r *ReviewReviewerRepository) Create(ctx context.Context, reviewer model.Re
 	return created, err
 }
 
-// List returns the caller's tenant's review reviewers, optionally narrowed to
-// one review. Scoped explicitly by tenant_id from the security context
-// rather than left to RLS: erun_operations' policy is unconditional, so an
-// OPERATIONS caller's empty filter would otherwise read every tenant's review
-// reviewers.
+// List returns the caller's tenant's review reviewers, scoped explicitly by
+// tenant_id because erun_operations' RLS policy is unconditional.
 func (r *ReviewReviewerRepository) List(ctx context.Context, filter ReviewReviewerFilter) ([]model.ReviewReviewer, error) {
 	var reviewers []model.ReviewReviewer
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {

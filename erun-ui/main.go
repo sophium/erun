@@ -12,20 +12,20 @@ import (
 	"strings"
 	"syscall"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/config/projectroot"
 	"github.com/sophium/erun/erun-ui/headlessserver"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
 )
 
-// defaultHeadlessPort stays clear of 34115, which `wails dev` claims for its
-// asset server, so the headless build and `wails dev` can run side-by-side.
+// defaultHeadlessPort avoids 34115, which `wails dev` claims.
 const defaultHeadlessPort = 34123
 
-// cliUsage is printed for --help/-h and ahead of an unrecognized-flag error.
-// Keep it in sync with the flags parseHeadlessFlags actually recognizes.
+// Keep in sync with the flags parseHeadlessFlags recognizes.
 const cliUsage = `Usage: erun-app [flags]
 
 erun-app is the ERun desktop application. Run with no flags to launch it.
@@ -41,9 +41,7 @@ Flags:
 `
 
 func main() {
-	// This must run before any other work (app identity, durable logging,
-	// Wails startup): --help/-h and an unrecognized flag must produce no
-	// side effects at all, not just skip launching the app.
+	// Must run first: help and unknown flags must have no side effects at all.
 	parsed := parseHeadlessFlags(os.Args[1:])
 	if parsed.Help {
 		_, _ = fmt.Fprint(os.Stdout, cliUsage)
@@ -54,59 +52,57 @@ func main() {
 		_, _ = fmt.Fprint(os.Stderr, cliUsage)
 		os.Exit(1)
 	}
+	if !launch(parsed) {
+		os.Exit(1)
+	}
+}
 
+// A failure is logged here while the durable log is still open.
+func launch(parsed parsedCLIFlags) bool {
 	setAppIdentity("ERun")
 	defer initDurableAppLog()()
 
 	headless, port := parsed.Headless, parsed.Port
-	// Strip recognized flags from os.Args before Wails parses them, so the
-	// Wails CLI machinery (which scans os.Args directly) does not reject
-	// our additions in normal mode.
+	// Wails scans os.Args directly and would reject our flags.
 	os.Args = append([]string{os.Args[0]}, parsed.Leftover...)
 
 	app := NewApp(desktopDeps(headless))
 
 	if headless {
 		if err := runHeadless(app, port); err != nil {
-			log.Fatal(err)
+			log.Print(err)
+			return false
 		}
-		return
+		return true
 	}
 
 	runWails(app)
+	return true
 }
 
-// desktopDeps is the composition-root dependency set for one launch mode.
 func desktopDeps(headless bool) erunUIDeps {
 	deps := erunUIDeps{
-		store:           eruncommon.ConfigStore{},
-		findProjectRoot: eruncommon.FindProjectRoot,
-		resolveCLIPath:  resolveCLIExecutable,
+		store:           config.ConfigStore{},
+		findProjectRoot: projectroot.FindProjectRoot,
+		resolveCLIPath:  terminal.ResolveCLIExecutable,
 		windowStatePath: defaultAppWindowStatePath(),
 	}
 	if headless {
-		// Wails' runtime.WindowIsMaximised panics without a hosting
-		// window, so the headless build supplies a stub. Window state
-		// is irrelevant when there is no window to restore.
+		// runtime.WindowIsMaximised panics without a window.
 		deps.windowMaximised = func(context.Context) bool { return false }
-		// A headless backend is started by a harness or a terminal that hands
-		// it its environment on purpose; importing the login shell's PATH would
-		// replace the stubs the Playwright harness puts first on it.
+		// The login shell's PATH would replace the stubs the Playwright harness
+		// puts first on it.
 		deps.skipLoginShellEnv = true
 	}
 	return deps
 }
 
-// parsedCLIFlags is the outcome of parsing erun-app's own command-line
-// flags. Help and Unknown are mutually exclusive with a normal run: main
-// checks them before doing anything else that has a side effect.
 type parsedCLIFlags struct {
 	Headless bool
 	Port     int
 	Leftover []string
 	Help     bool
-	// Unknown holds the first unrecognized flag encountered, if any.
-	Unknown string
+	Unknown  string
 }
 
 func parseHeadlessFlags(args []string) parsedCLIFlags {
@@ -230,8 +226,6 @@ func runWails(app *App) {
 
 func runHeadless(app *App, port int) error {
 	server := headlessserver.New(app, frontendDistFS())
-	// Headless has no Wails, so the app's existing event-emit call sites reach
-	// the browser through the SSE fan-out instead.
 	app.SetEmitter(func(name string, args ...any) {
 		server.Emit(name, args...)
 	})
@@ -239,22 +233,14 @@ func runHeadless(app *App, port int) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// wailsruntime.Quit requires a context Wails itself constructed (it looks
-	// up a "frontend" value that is never set here) and calls log.Fatal
-	// otherwise, so ConfirmWindowClose's quit — and any other caller of
-	// deps.quitApp — must not reach it in headless mode. Cancelling this
-	// context instead unblocks the select below the same way a SIGTERM does,
-	// which server.Listen already turns into a graceful HTTP shutdown.
+	// wailsruntime.Quit log.Fatals without a Wails-built context, so headless quit
+	// cancels this context instead.
 	app.deps.quitApp = cancel
 
-	// The desktop PTY/session code assumes a non-nil a.ctx, which Wails would
-	// normally supply, so mirror its startup/teardown lifecycle by hand here.
+	// PTY/session code assumes a non-nil a.ctx, normally supplied by Wails.
 	app.startup(ctx)
 
-	// Bind here, not inside the server, so the announcement below names the
-	// address this process is really serving on: --port is a preference (see
-	// listenHeadless), and a caller that assumed the port it asked for would be
-	// reading a listener that may not exist.
+	// Bind here so the announcement names the address actually bound.
 	listener, bindErr := listenHeadless(fmt.Sprintf("127.0.0.1:%d", port))
 	if bindErr == nil {
 		log.Printf("erun-app headless: listening on http://%s/", listener.Addr().String())
@@ -287,16 +273,8 @@ func runHeadless(app *App, port int) error {
 	return listenErr
 }
 
-// listenHeadless binds the address the headless server will serve on and
-// returns the listener, so the caller can announce the address actually bound.
-//
-// --port is a preference, not a guarantee. A port another process already holds
-// is not fatal: falling back to an OS-assigned port keeps a stale listener — a
-// backend left behind by a run that died partway, or any host process that
-// reached the port first — from failing the whole run, which is exactly what a
-// caller that reads the announcement back is set up to absorb. Only
-// address-in-use falls back; every other bind error (a bad address, a port this
-// process may not have) is returned and stays fatal.
+// listenHeadless treats --port as a preference: address-in-use falls back to
+// an OS-assigned port; every other bind error stays fatal.
 func listenHeadless(addr string) (net.Listener, error) {
 	listener, err := net.Listen("tcp", addr)
 	if err == nil {

@@ -1,26 +1,8 @@
 import { expect, test } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
-// Producing a new version is the desktop's explicit "Create & deploy new
-// version" action: for a builds-here agent env it composes the pure primitives
-// build -> push -> deploy (root AGENTS.md § "Command primitives vs
-// orchestration"), never `build --deploy` and never a plain in-shell deploy.
-// The backend signals that orchestrated deploy with orchestrated=true, and the
-// desktop shows no foreground shell because progress lives in the activity
-// queue. The plain Deploy button, by contrast, installs an existing version by
-// reference and never builds (#739).
-//
-// This spec locks only the reachable, deterministic half: the create-version
-// action on the seeded local-agent env returns orchestrated=true. The env type
-// resolves synchronously before the background build matters, and the seeded
-// repo has nothing to build so that build fails fast without ever touching the
-// activity queue.
-//
-// The full per-env-type decision (runtime / pinned-version => install by
-// reference; remote-agent => builds in its pod) and the real build -> push ->
-// deploy — which needs a Docker daemon and cluster the headless harness
-// deliberately lacks — are covered by erun-ui/deploy_orchestration_test.go's
-// deployNeedsBuildOrchestration table.
+// Only the reachable half: create-version on a local-agent env reports orchestrated=true.
+// The per-type decision is covered by deploy_orchestration_test.go.
 test.describe('agent-env create-version orchestration (#558, #739)', () => {
   test('creating a new version on a builds-here agent env returns an orchestrated deploy', async ({
     app,
@@ -40,12 +22,9 @@ test.describe('agent-env create-version orchestration (#558, #739)', () => {
       data?: { orchestrated?: boolean };
     };
 
-    // The backend resolved pw/alpha as a builds-here agent env and chose the
-    // build -> push -> deploy orchestration.
     expect(payload.data?.orchestrated).toBe(true);
 
-    // The orchestrated branch leaves no foreground shell to switch to, so the
-    // dialog just closes once the create-version deploy round-trips.
+    // No foreground shell to switch to.
     await app.manageDialog.waitForClosed();
   });
 });

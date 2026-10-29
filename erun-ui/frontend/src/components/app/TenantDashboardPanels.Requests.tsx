@@ -39,11 +39,7 @@ import {
   type TenantDashboardData,
 } from './TenantDashboardMessage';
 
-// TenantDashboardPanels.Requests.tsx is the operator/admin queue for
-// invite-requests: who is waiting, what they asked for, and
-// the Issue invitation / Decline actions. A pending count belongs on the tab
-// itself (RequestsTabLabel), visible without opening this panel — the
-// issue's own named failure mode is "an unattended queue nobody sees."
+// RequestsPanel is the operator/admin queue for invite requests.
 export function RequestsPanel({ data }: { data: TenantDashboardData }): React.ReactElement {
   const requests = data?.inviteRequests ?? [];
   return (
@@ -178,10 +174,7 @@ function RequestRow({
   );
 }
 
-// DeclineInviteRequestDialog requires a non-empty reason before the
-// destructive confirm enables — a decline with no reason reaches nobody, and
-// root AGENTS.md forbids that dead end. Mirrors DeactivateUserDialog's
-// outline-Cancel/destructive-confirm/spinner-while-busy shape.
+// DeclineInviteRequestDialog requires a reason: a reasonless decline reaches nobody.
 function DeclineInviteRequestDialog({
   inviteRequestId,
 }: {
@@ -250,10 +243,7 @@ function DeclineInviteRequestDialog({
   );
 }
 
-// IssuedInviteLinkNotice keeps the just-minted invite link on screen after
-// Issue invitation succeeds — the transferable artefact and manual fallback
-// — since the approved row itself disappears from the pending list the
-// moment the queue refetches.
+// IssuedInviteLinkNotice keeps the minted link visible after the approved row leaves the queue.
 function IssuedInviteLinkNotice(): React.ReactElement | null {
   const link = useAppSelector((state) => state.tenantDashboard.issuedInviteLink);
   if (!link) {

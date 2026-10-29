@@ -12,15 +12,7 @@ import { RuntimePanelNotice } from '@/components/app/RuntimePanelNotice';
 import type { UISelection } from '@/types';
 import type { UIRuntimeProcessGroup } from '@/uiRuntimeTypes';
 
-// RuntimeActivityField answers "why is this environment heavy?" where the
-// operator is already looking at its resource figures. Two readings, one probe:
-// how many persistent sessions actually have a live program behind them, and
-// what is holding the memory.
-//
-// Read-only by default (Nielsen #3, user control): the panel shows what is
-// there, and only an explicit click stops anything. Reclaimable classes are
-// build leftovers — Gradle daemons that outlive their build, a build cache that
-// outlives its images — never the operator's own agent session.
+// RuntimeActivityField shows live sessions and memory holders; only an explicit click reclaims, never the agent session.
 export function RuntimeActivityField({
   selection,
   disabled,
@@ -91,9 +83,7 @@ export function RuntimeActivityField({
   );
 }
 
-// Success and failure are separate lines with separate roles: a failed reclaim
-// must be announced as an alert and stay on screen with the button still
-// enabled, so the operator can retry (Nielsen #9).
+// A failed reclaim is an alert that stays, with the button enabled for retry.
 function ReclaimOutcome({
   outcome,
   failure,
@@ -133,9 +123,7 @@ function RuntimeActivitySummary({
       </p>
     );
   }
-  // An unreadable pod explains itself rather than rendering an empty panel that
-  // reads as "nothing is running", through the Runtime tab's one rendering for
-  // a failed read so this panel cannot drift from its neighbours.
+  // Shares the Runtime tab's failed-read rendering.
   return (
     <RuntimePanelNotice failure={message} empty="Open the environment to see what it is running." />
   );

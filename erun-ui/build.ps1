@@ -20,12 +20,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# Make the toolchain (go/node/yarn/gcc, Scoop-installed and persisted to PATH)
-# resolvable even if the launching shell has a stale in-memory PATH. Dedup the
-# result: blindly appending compounds an already-long inherited PATH (the nested
-# app -> run.ps1 -> PTY-tab launch chain each prepend), and once PATH passes
-# cmd.exe's ~8 KB limit, yarn's spawned cmd child truncates it and drops node
-# ("'node' is not recognized"), silently skipping the frontend build.
+# Re-resolve the persisted PATH (the shell's may be stale) and dedup it: past
+# cmd.exe's ~8 KB limit yarn's child drops node and skips the frontend build.
 $persisted = ([Environment]::GetEnvironmentVariable('Path','Machine'), [Environment]::GetEnvironmentVariable('Path','User')) -join ';'
 $env:Path = (($persisted + ';' + $env:Path) -split ';' | Where-Object { $_ -ne '' } | Select-Object -Unique) -join ';'
 
@@ -42,7 +38,6 @@ Require-Cmd node "Install with: scoop install nodejs"
 Require-Cmd yarn "Install with: scoop install yarn"
 Require-Cmd gcc  "erun-app.exe needs a C compiler. Install with: scoop install mingw"
 
-# --- version stamp (mirror build.sh) --------------------------------------
 $versionFile = Join-Path $RepoRoot "erun-devops\VERSION"
 $buildVersion = if (Test-Path $versionFile) { (Get-Content $versionFile -Raw).Trim() } else { "dev" }
 $buildCommit = ""
@@ -54,7 +49,6 @@ if (git -C $ScriptDir rev-parse --is-inside-work-tree 2>$null) {
 
 Push-Location $ScriptDir
 try {
-    # --- frontend bindings (Wails CLI is a go.mod tool) --------------------
     Write-Host ">> generating frontend bindings ..."
     # The generator compiles this package, whose production assets embed
     # frontend\dist, so the directory has to exist before the bundle does.
@@ -62,30 +56,21 @@ try {
     go tool wails generate module
     if ($LASTEXITCODE -ne 0) { throw "failed to generate frontend bindings" }
 
-    # --- frontend ----------------------------------------------------------
     Push-Location (Join-Path $ScriptDir "frontend")
     try {
         Write-Host ">> yarn install ..."
-        if (Test-Path "yarn.lock") { yarn install --frozen-lockfile } else { yarn install }
+        # A workspace member installs against the repository root's yarn.lock.
+        yarn install --frozen-lockfile
         if ($LASTEXITCODE -ne 0) { throw "failed to install frontend dependencies" }
         Write-Host ">> yarn build ..."
         yarn build
         if ($LASTEXITCODE -ne 0) { throw "failed to build frontend assets" }
     } finally { Pop-Location }
 
-    # --- desktop binary ----------------------------------------------------
     Write-Host ">> building $([System.IO.Path]::GetFileName($Target)) ($buildVersion) ..."
-    # The skills stamp mirrors build.sh: the desktop installs these for a host
-    # orchestrator, and the binary is routinely run from outside the checkout it
-    # was built in, where no source tree sits above it. Single-quoted so a
-    # checkout path with spaces survives -ldflags splitting.
-    #
-    # `main.`, not the module path — see the same note in build.sh. A -X path no
-    # package declares is dropped in silence, so the wrong prefix stamps nothing
-    # and leaves the binary looking correctly built.
+    # Single-quoted so a checkout path with spaces survives -ldflags splitting.
+    # `main.`, not the module path: -X silently ignores a path no package declares.
     $skillsSource = Join-Path $RepoRoot "erun-skills\skills"
-    # Same reasoning as $skillsSource above, for the reusable agent definitions
-    # (erun-builder/erun-reviewer) the desktop installs into ~/.claude/agents.
     $agentsSource = Join-Path $RepoRoot "erun-skills\agents"
     $ldflags = "-s -w -H windowsgui " +
                "-X main.buildVersion=$buildVersion " +

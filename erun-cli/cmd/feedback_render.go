@@ -1,135 +1,24 @@
 package cmd
 
 import (
-	"fmt"
 	"strings"
-	"time"
 
-	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/cmd/shared/clicmd"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
 
 const (
-	dryRunFlagUsage  = "Resolve and trace mutating actions without executing them."
 	timeFlagUsage    = "Print the elapsed runtime after the command finishes."
-	verboseFlagUsage = "Increase verbosity: -v streams external tool output, -vv adds erun command traces."
-	outputFlagUsage  = "Result format: text (default, human stream) or json (structured result on stdout for orchestrators)."
-
-	timingWrappedAnnotation = "erun.dev/timing-wrapped"
+	VerboseFlagUsage = "Increase verbosity: -v streams external tool output, -vv adds erun command traces."
 )
 
-func addDryRunFlag(cmd *cobra.Command) {
-	cmd.Flags().Bool("dry-run", false, dryRunFlagUsage)
-}
-
-func addTimeFlag(cmd *cobra.Command) {
+func AddTimeFlag(cmd *cobra.Command) {
 	cmd.PersistentFlags().Bool("time", false, timeFlagUsage)
 }
 
-func addOutputFlag(cmd *cobra.Command) {
-	cmd.PersistentFlags().String("output", "text", outputFlagUsage)
-}
-
-// commandOutputMode falls back to text on an unset or unparsable value so output
-// rendering never blocks; strict --output validation lives elsewhere.
-func commandOutputMode(cmd *cobra.Command) common.OutputMode {
-	raw, err := cmd.Flags().GetString("output")
-	if err != nil {
-		return common.OutputText
-	}
-	mode, err := common.ParseOutputMode(raw)
-	if err != nil {
-		return common.OutputText
-	}
-	return mode
-}
-
-// commandWantsJSON unifies the global --output json with the per-command --json
-// some commands grew first. Both spellings mean the same thing, so a caller that
-// follows only the documented global flag gets the structured result rather than
-// prose; --json stays a supported alias rather than a second, rival contract.
-func commandWantsJSON(commandCtx common.Context, jsonFlag bool) bool {
-	return jsonFlag || commandCtx.Output == common.OutputJSON
-}
-
-func isDryRunCommand(cmd *cobra.Command) bool {
-	dryRun, err := cmd.Flags().GetBool("dry-run")
-	return err == nil && dryRun
-}
-
-func shouldPrintElapsedTime(cmd *cobra.Command) bool {
-	printTime, err := cmd.Flags().GetBool("time")
-	return err == nil && printTime
-}
-
-func commandVerbosity(cmd *cobra.Command) int {
-	verbosity, err := cmd.Flags().GetCount("verbose")
-	if err != nil {
-		verbosity = 0
-	}
-	userAskedForVerbose := err == nil && verbosity > 0
-	if isExecCommand(cmd) && verbosity < common.VerbosityDebug {
-		verbosity = common.VerbosityDebug
-	}
-	if isDryRunCommand(cmd) && verbosity < common.VerbosityTrace {
-		verbosity = common.VerbosityTrace
-	}
-	if verbosity > common.VerbosityTrace {
-		verbosity = common.VerbosityTrace
-	}
-	if shouldSilenceNoShellOutput(cmd, userAskedForVerbose) {
-		return common.VerbosityInfo - 1
-	}
-	return verbosity
-}
-
-// shouldSilenceNoShellOutput keeps an `eval "$(erun open ... --no-shell)"` alias
-// silent on stderr as the docs promise; its audit/trace lines would otherwise
-// surface in the wrapping terminal on every alias invocation.
-func shouldSilenceNoShellOutput(cmd *cobra.Command, userAskedForVerbose bool) bool {
-	return !userAskedForVerbose && !isDryRunCommand(cmd) && isNoShellCommand(cmd)
-}
-
-func isNoShellCommand(cmd *cobra.Command) bool {
-	noShell, err := cmd.Flags().GetBool("no-shell")
-	return err == nil && noShell
-}
-
-// commandScopesTenantByFlag reports whether cmd's --tenant scopes resolution.
-// Commands whose --tenant means something else (list's selects version-drift
-// reporting) return false, so their failures never offer it as the tenant fix;
-// resolution failures name the flag only when it is the real next step.
-func commandScopesTenantByFlag(cmd *cobra.Command) bool {
-	if cmd.Flags().Lookup("tenant") == nil {
-		return false
-	}
-	return !commandTenantFlagIsNotScoping(cmd)
-}
-
-// commandTenantFlagIsNotScoping names the commands whose --tenant flag is not a
-// tenant-scoping flag, so it must never be offered as the tenant remedy.
-func commandTenantFlagIsNotScoping(cmd *cobra.Command) bool {
-	return cmd.Name() == "list"
-}
-
-func commandContext(cmd *cobra.Command) common.Context {
-	verbosity := commandVerbosity(cmd)
-	return common.Context{
-		Logger:                    common.NewLoggerWithWriters(verbosity, cmd.ErrOrStderr(), cmd.ErrOrStderr()),
-		Verbosity:                 verbosity,
-		DryRun:                    isDryRunCommand(cmd),
-		Output:                    commandOutputMode(cmd),
-		Command:                   cmd.CommandPath(),
-		CommandScopesTenantByFlag: commandScopesTenantByFlag(cmd),
-		Stdin:                     cmd.InOrStdin(),
-		Stdout:                    cmd.OutOrStdout(),
-		Stderr:                    cmd.ErrOrStderr(),
-	}
-}
-
-func auditCommand(cmd *cobra.Command, args []string) {
-	ctx := commandContext(cmd)
+func AuditCommand(cmd *cobra.Command, args []string) {
+	ctx := clicmd.CommandContext(cmd)
 	ctx.Trace("audit: " + formatAuditCommand(cmd, args))
 }
 
@@ -180,9 +69,7 @@ func redactAuditArgs(args []string) []string {
 	return redacted
 }
 
-// Only a flag can carry a secret, so a bare word is never treated as one: a
-// command named `token` would otherwise redact the argument after it, and the
-// audit line would claim a secret was passed where none was.
+// Only flags can carry secrets; a bare word like a `token` command name is never redacted.
 func isSensitiveFlag(value string) bool {
 	if !strings.HasPrefix(value, "-") {
 		return false
@@ -194,80 +81,4 @@ func isSensitiveFlag(value string) bool {
 		}
 	}
 	return false
-}
-
-func isExecCommand(cmd *cobra.Command) bool {
-	for current := cmd; current != nil; current = current.Parent() {
-		if current.Name() == "exec" {
-			return true
-		}
-	}
-	return false
-}
-
-func wrapCommandTreeWithElapsedTime(cmd *cobra.Command) {
-	if cmd == nil || commandTimingWrapped(cmd) {
-		return
-	}
-
-	markCommandTimingWrapped(cmd)
-	wrapCommandWithElapsedTime(cmd)
-	for _, child := range cmd.Commands() {
-		wrapCommandTreeWithElapsedTime(child)
-	}
-}
-
-func wrapCommandWithElapsedTime(cmd *cobra.Command) {
-	if cmd.RunE != nil {
-		run := cmd.RunE
-		cmd.RunE = func(cmd *cobra.Command, args []string) (err error) {
-			if !shouldPrintElapsedTime(cmd) {
-				return run(cmd, args)
-			}
-
-			started := time.Now()
-			defer func() {
-				printElapsedTime(cmd, time.Since(started))
-			}()
-			return run(cmd, args)
-		}
-		return
-	}
-
-	if cmd.Run == nil {
-		return
-	}
-
-	run := cmd.Run
-	cmd.Run = func(cmd *cobra.Command, args []string) {
-		if !shouldPrintElapsedTime(cmd) {
-			run(cmd, args)
-			return
-		}
-
-		started := time.Now()
-		defer func() {
-			printElapsedTime(cmd, time.Since(started))
-		}()
-		run(cmd, args)
-	}
-}
-
-func printElapsedTime(cmd *cobra.Command, elapsed time.Duration) {
-	rounded := elapsed.Round(time.Millisecond)
-	if elapsed > 0 && rounded == 0 {
-		rounded = time.Millisecond
-	}
-	_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "elapsed: %s\n", rounded)
-}
-
-func commandTimingWrapped(cmd *cobra.Command) bool {
-	return cmd.Annotations != nil && cmd.Annotations[timingWrappedAnnotation] == "true"
-}
-
-func markCommandTimingWrapped(cmd *cobra.Command) {
-	if cmd.Annotations == nil {
-		cmd.Annotations = make(map[string]string)
-	}
-	cmd.Annotations[timingWrappedAnnotation] = "true"
 }

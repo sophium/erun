@@ -171,9 +171,7 @@ describe('RequestsPanel', () => {
     renderPanel();
 
     fireEvent.click(await screen.findByRole('button', { name: 'Decline' }));
-    // The dialog's own confirm button is also named "Decline" -- the row's
-    // button stays mounted behind the open dialog, so every lookup below is
-    // scoped to the dialog to disambiguate.
+    // Scoped to the dialog: its confirm button is also named "Decline".
     const dialog = screen.getByRole('dialog');
     const dialogConfirm = within(dialog).getByRole('button', { name: 'Decline' });
     expect(dialogConfirm).toBeDisabled();
@@ -210,9 +208,7 @@ describe('RequestsPanel', () => {
   });
 
   it('keeps Issue invitation/Decline attemptable when whoami reports no capability set at all (null)', async () => {
-    // capabilities: null means the platform could not resolve a set, not
-    // that it resolved to "nothing" -- distinct from the [] case above,
-    // which is a real, known refusal of both actions.
+    // null means the set is unknown, unlike the [] case above.
     mockFetch((req) => {
       if (req.url.startsWith('/v1/invite-requests')) {
         return jsonResponse([PENDING_REQUEST]);

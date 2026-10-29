@@ -1,6 +1,5 @@
 import type { Locator, Page } from '@playwright/test';
 
-// EnvironmentInitDialog drives the "New environment" dialog.
 export class EnvironmentInitDialog {
   constructor(public readonly page: Page) {}
 
@@ -44,14 +43,12 @@ export class EnvironmentInitDialog {
     return this.page.locator('#environment-kubernetes-context');
   }
 
-  // createButton matches the submit button in both its idle ("Create") and
-  // in-flight ("Creating...") copy so callers can assert its enabled state.
+  // Matches both "Create" and "Creating...".
   createButton(): Locator {
     return this.locator().getByRole('button', { name: /^(Create|Creating)/ });
   }
 
-  // submitReason is the live-region status line that explains why Create is
-  // blocked; it stays mounted (empty) when the dialog is submittable.
+  // Stays mounted (empty) when submittable.
   submitReason(): Locator {
     return this.page.locator('#environment-dialog-submit-reason');
   }
@@ -64,8 +61,6 @@ export class EnvironmentInitDialog {
     return this.page.locator('#environment-use-erun-registry');
   }
 
-  // selectKubernetesContext opens the context dropdown and picks an option by
-  // its label (the context name).
   async selectKubernetesContext(name: string): Promise<void> {
     await this.kubernetesContextTrigger().click();
     await this.page.getByRole('option', { name, exact: true }).click();
@@ -98,14 +93,10 @@ export class EnvironmentInitDialog {
   }
 
   async getKubernetesContextStatus(): Promise<string> {
-    // Both the populated and empty states render text near the label; just
-    // capture whatever the field area currently says.
     const field = this.page.locator('#environment-kubernetes-context');
     if (await field.isVisible().catch(() => false)) {
       return (await field.textContent()) || '';
     }
-    // No-contexts empty state renders an EmptyState body; read the
-    // dialog text as a fallback.
     return (await this.locator().textContent()) || '';
   }
 }

@@ -2,10 +2,7 @@ import playwright from 'eslint-plugin-playwright';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
-// Playwright lint config. Same type-aware bug-finding baseline as the
-// frontend; complexity + max-lines budgets are relaxed because spec files
-// describe long user flows. eslint-plugin-playwright catches the common
-// flakey-test patterns (await on expect, no .only in committed code).
+// Spec files describe long user flows, so complexity and size budgets are relaxed.
 
 export default tseslint.config(
   {

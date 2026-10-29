@@ -4,10 +4,7 @@ import type * as React from 'react';
 import { consoleBrandLabel } from './brand';
 import { BrandMark } from './BrandMark';
 
-// CenteredCard is the shared frame for every pre-shell screen (sign-in, not
-// enrolled, error, loading): a branded card centered in the viewport, so the
-// first thing an Operator of any hosted instance sees carries that instance's
-// own identity instead of an unstyled paragraph.
+// CenteredCard frames every pre-shell screen.
 export function CenteredCard({
   brand,
   title,

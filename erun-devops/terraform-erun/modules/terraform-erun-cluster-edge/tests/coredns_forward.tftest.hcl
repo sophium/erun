@@ -1,16 +1,9 @@
-# Locks the fix for a cluster that cannot resolve the platform's own published
-# names because k3s's CoreDNS falls through to the node's resolver for
-# anything outside cluster.local: install_coredns_forward declares a CoreDNS
-# custom server block for base_domain_name instead of leaving that resolution
-# to whatever the node happens to do. Runs entirely against mocked providers:
-# no real cluster is touched.
+# install_coredns_forward against mocked providers; no real cluster is touched.
 
 mock_provider "helm" {}
 
 mock_provider "kubernetes" {
-  # The forward only works if CoreDNS's Corefile imports the custom directory,
-  # so the module reads the Corefile back and refuses to apply otherwise. The
-  # default mock is a k3s-shaped Corefile that does import it.
+  # The module refuses a Corefile that does not import the custom directory.
   mock_data "kubernetes_config_map" {
     defaults = {
       data = {
@@ -35,8 +28,6 @@ variables {
   cloudflare_api_token = "test-token"
 }
 
-# Adding this module version to an already-applied cluster must not change its
-# DNS behavior until the operator opts in.
 run "coredns_forward_disabled_by_default_preserves_existing_clusters" {
   command = plan
 
@@ -90,8 +81,6 @@ run "coredns_forward_installs_the_custom_server_block" {
   }
 }
 
-# An air-gapped or policy-constrained cluster must be able to point the forward
-# at its own resolvers instead of the public default.
 run "coredns_forward_upstreams_are_configurable" {
   command = plan
 
@@ -117,14 +106,6 @@ run "coredns_forward_requires_base_domain_name" {
   expect_failures = [kubernetes_config_map.coredns_custom]
 }
 
-# ---------------------------------------------------------------------------
-# #1165: the three findings below are what this resource got wrong.
-# ---------------------------------------------------------------------------
-
-# Finding 1. Entries go straight into a `forward .` directive. A malformed one
-# writes an invalid server block, and CoreDNS keeps serving from its loaded
-# config -- so nothing looks wrong until its next restart, when the cluster has
-# no DNS at all and the cause is an apply from days earlier.
 run "malformed_upstreams_are_refused_at_apply_time" {
   command = plan
 
@@ -170,9 +151,6 @@ run "legitimate_upstream_forms_are_accepted" {
   }
 }
 
-# Finding 1, lower-severity half: a server block for a cluster-internal zone
-# would shadow CoreDNS's kubernetes plugin and kill .svc.cluster.local
-# resolution for the whole cluster. The domain regex happily accepts it.
 run "a_cluster_internal_base_domain_is_refused" {
   command = plan
 
@@ -184,10 +162,7 @@ run "a_cluster_internal_base_domain_is_refused" {
   expect_failures = [var.base_domain_name]
 }
 
-# Finding 3. The whole mechanism depends on the Corefile importing the custom
-# directory. Without it the ConfigMap applies cleanly, the module reports
-# success, and in-cluster resolution is completely unchanged -- a false success
-# that goes unnoticed until a certificate issuance or renewal fails.
+# Without the custom import the ConfigMap applies cleanly but changes nothing.
 run "a_corefile_without_the_custom_import_is_refused" {
   command = plan
 
@@ -213,10 +188,6 @@ run "a_corefile_without_the_custom_import_is_refused" {
   expect_failures = [kubernetes_config_map_v1_data.coredns_forward[0]]
 }
 
-# Finding 2. coredns-custom is a shared extension point. An operator whose
-# cluster already has one -- with keys this module knows nothing about -- must
-# be able to keep the module out of the object's lifecycle entirely, while it
-# still manages its own key.
 run "the_shared_configmap_lifecycle_can_be_left_to_someone_else" {
   command = plan
 

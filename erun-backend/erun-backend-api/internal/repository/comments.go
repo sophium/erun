@@ -49,11 +49,8 @@ func (r *CommentRepository) Get(ctx context.Context, commentID string) (model.Co
 	return comment, err
 }
 
-// List returns the caller's tenant's comments, optionally narrowed to one
-// review. Scoped explicitly by tenant_id from the security context rather
-// than left to RLS: erun_operations' policy is unconditional, so an
-// OPERATIONS caller's empty filter would otherwise read every tenant's
-// comments.
+// List returns the tenant's comments, optionally for one review. tenant_id is
+// filtered explicitly because erun_operations' RLS policy is unconditional.
 func (r *CommentRepository) List(ctx context.Context, filter CommentFilter) ([]model.Comment, error) {
 	var comments []model.Comment
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
@@ -91,13 +88,8 @@ func (r *CommentRepository) Update(ctx context.Context, comment model.Comment) (
 	return updated, err
 }
 
-// classifyCommentError maps the comments table's foreign keys and CHECK
-// constraints, and the erun_validate_comments trigger's RAISE EXCEPTIONs,
-// onto the repository's sentinel errors so callers see a 4xx instead of a
-// bare 500 — a reviewId/parentCommentId the caller's tenant cannot see fails
-// the same foreign key check whether the row genuinely doesn't exist or just
-// isn't this tenant's, matching the "doesn't exist or isn't visible" 404
-// documented in collaboration/comments.md.
+// classifyCommentError maps constraint and trigger errors to sentinel errors; an
+// invisible reviewId/parentCommentId fails the FK like a missing one, yielding 404.
 func classifyCommentError(err error) error {
 	code, ok := pgErrorCode(err)
 	if !ok {

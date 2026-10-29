@@ -1,11 +1,5 @@
-// titlebarFailureReport turns a titlebar error status into the same
-// paste-ready, labelled report shape ActivityQueueDrawer.helpers.ts'
-// buildFailureReport produces for a failed activity entry — the desktop's
-// investigation_bounds.go floor looks for exactly these labels ("Target:",
-// "Message:", "Output:") to decide a report carries something to act on, so a
-// titlebar status (which has no ActivityQueueEntry behind it) needs its own
-// builder that still passes that floor for a genuine error.
-
+// The "Target:"/"Message:"/"Output:" labels are what investigation_bounds.go
+// requires of an actionable report.
 export interface TitlebarFailureReportSource {
   message: string;
   detail: string;

@@ -20,8 +20,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/secrets"
 )
 
-// TestProvisionContextEndToEnd is an opt-in end-to-end gate, like the k3d e2e
-// test: it runs the real provisioning workflow against live infra (not mocks).
+// TestProvisionContextEndToEnd is opt-in: it provisions against live infra.
 const e2eDevToken = "DEV-TOKEN"
 
 func TestProvisionContextEndToEnd(t *testing.T) {
@@ -89,8 +88,6 @@ func TestProvisionContextEndToEnd(t *testing.T) {
 	awaitContextRunning(t, srv.URL, created.Context.ContextID)
 }
 
-// awaitContextRunning polls the context until the durable workflow reports a
-// terminal state, failing on a failed provision or on timeout.
 func awaitContextRunning(t *testing.T, baseURL, contextID string) {
 	t.Helper()
 	deadline := time.Now().Add(120 * time.Second)

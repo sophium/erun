@@ -111,7 +111,9 @@ yarn format:check && yarn build && yarn test` here. The console image's `test`
   `docker build -f erun-devops/docker/erun-console/Dockerfile --target test .`
   from the repository root runs the same gate.
 - Vitest collects `src/`, not the independent Playwright package. Test setup
-  supplies jsdom's missing ResizeObserver/matchMedia behavior.
+  supplies jsdom's missing ResizeObserver/matchMedia behavior, and its shared
+  `afterEach` unmounts each test and lets Radix's 0ms unmount timers run while
+  that file's jsdom is still alive (`unmountAndFlushTimers`).
 - Auth lifecycle and WebSocket attach changes are proven after deploy, by
   `erun e2e --component console` against an environment running the change.
   Changes crossing the MCP operate or REST write boundary run the owning Go

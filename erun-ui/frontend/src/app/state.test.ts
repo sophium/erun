@@ -15,11 +15,6 @@ import {
   SIDEBAR_HARD_COLLAPSE_WIDTH,
 } from './state';
 
-// The narrow-viewport shell defect (a 640px window left <main> at 292px) was
-// arithmetic: the sidebar's own MIN_SIDEBAR_WIDTH plus the divider plus a
-// usable <main> exceeds a 640px viewport once the sidebar is anywhere near
-// its old default. These lock the arithmetic that replaces it.
-
 test('a comfortably wide viewport lets the sidebar reach its own maximum', () => {
   assert.equal(computeMaxSidebarWidth(1440), MAX_SIDEBAR_WIDTH);
 });
@@ -37,12 +32,7 @@ test('effectiveSidebarWidth is zero while collapsed regardless of the stored wid
 });
 
 test('effectiveSidebarWidth reclamps a too-wide stored width to what the viewport allows', () => {
-  // A viewport just above the collapse breakpoint still shows the sidebar
-  // (narrower viewports auto-collapse it instead, see nextSidebarHidden), so
-  // this is the narrowest case where the reclamp math alone — not the
-  // collapse decision — must keep <main> from starving. The default 338px
-  // stored width has to squeeze down for the 10px divider and
-  // MIN_DASHBOARD_PANE_WIDTH to both fit in 800px.
+  // Just above the collapse breakpoint, the reclamp alone must leave room for main.
   const width = effectiveSidebarWidth(false, 338, 800);
   const mainWidth = 800 - width - 10;
   assert.ok(
@@ -56,8 +46,6 @@ test('effectiveSidebarWidth leaves a wide stored width untouched on a wide viewp
 });
 
 test('computeMaxReviewWidth no longer floors at its own minimum when nothing fits', () => {
-  // Previously floored at MIN_REVIEW_WIDTH (420) even when fittable was
-  // negative, forcing the review panel wider than the viewport had room for.
   const maxWidth = computeMaxReviewWidth(500, 300);
   assert.ok(
     maxWidth < 420,

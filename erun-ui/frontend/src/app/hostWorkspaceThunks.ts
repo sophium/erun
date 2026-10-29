@@ -13,10 +13,8 @@ import { setSelected } from './slices/selectionSlice';
 import type { AppThunk } from './store';
 import { ideLabel, ideOpenFailure } from './terminalStatus';
 
-// openHostIDE launches VS Code / IntelliJ against the env's host workspace — the
-// local-agent worktree or the remote-agent's synced mirror — rather than the
-// in-pod copy. This is what makes IDE review work on Windows, where the in-pod
-// worktree is not directly openable by a host editor.
+// openHostIDE opens the host workspace, not the in-pod copy, which a host editor
+// cannot open on Windows.
 export const openHostIDE =
   (selection: UISelection, ide: IDEKind): AppThunk<Promise<void>> =>
   async (dispatch) => {

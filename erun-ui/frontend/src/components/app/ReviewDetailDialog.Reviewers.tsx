@@ -23,10 +23,7 @@ import { AccessRemedyNote } from './AccessRemedyNote';
 import { InlineAlert, PermissionNotice } from './InlineAlert';
 import { PlatformErrorAlert } from './PlatformSignInAlert';
 
-// ReviewDetailReviewers is the desktop's Add reviewers action, alongside the
-// CLI's `erun review reviewers` and MCP's `review_reviewers_*` tools.
-// Reviewers gate no status transition — assigning one only makes `erun
-// review list --waiting-on-me` (and this same list) reachable for that user.
+// ReviewDetailReviewers gates no status transition; assigning only feeds `--waiting-on-me`.
 export function ReviewDetailReviewers({
   data,
   detail,
@@ -136,10 +133,7 @@ function ReviewerRow({
   );
 }
 
-// AddReviewerAction degrades by permission (canAssignReviewers), matching
-// CloseReviewAction's own shape. The picker offers only availableReviewers —
-// the tenant's own enrolled users — never a free-text id, which is what
-// keeps a cross-tenant userId structurally unreachable from this control.
+// Offers only the tenant's enrolled users, so a cross-tenant id is unreachable.
 function AddReviewerAction({
   data,
   detail,
@@ -174,9 +168,7 @@ function AddReviewerAction({
   return <AddReviewerPicker choices={choices} detail={detail} />;
 }
 
-// NoReviewersLeftToAssign is the "no dead ends" case the picker cannot show
-// an empty option list as: the remedy names the exact administrator command
-// and makes it copyable, rather than leaving the operator to reconstruct it.
+// NoReviewersLeftToAssign gives the copyable administrator command.
 function NoReviewersLeftToAssign(): React.ReactElement {
   const dispatch = useAppDispatch();
   return (
@@ -266,9 +258,6 @@ function AddReviewerPicker({
   );
 }
 
-// CopyCommandButton mirrors TenantPlatformState.tsx's not-enrolled hand-off:
-// an administrator recovering from "no one left to assign" gets the exact
-// command copyable, not something to retype by hand.
 function CopyCommandButton({ command }: { command: string }): React.ReactElement {
   const dispatch = useAppDispatch();
   return (

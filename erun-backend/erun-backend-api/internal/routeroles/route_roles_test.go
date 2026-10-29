@@ -6,9 +6,6 @@ import (
 	"testing"
 )
 
-// permissionSet turns a derived grant list into the "METHOD path" keys the
-// Routes map is keyed by, so a set of grants can be compared with a set of
-// route keys directly.
 func permissionSet(permissions []RoutePermission) map[string]bool {
 	set := make(map[string]bool, len(permissions))
 	for _, permission := range permissions {
@@ -26,9 +23,7 @@ func sortedKeys(set map[string]bool) []string {
 	return keys
 }
 
-// TestEveryRouteKeyIsWellFormed guards the derivation itself: permissionsFor
-// silently skips a key it cannot split, so a malformed entry would drop out
-// of every derived role's grants with no other symptom.
+// permissionsFor silently skips a malformed key, so it must be caught here.
 func TestEveryRouteKeyIsWellFormed(t *testing.T) {
 	t.Parallel()
 	for key := range Routes {
@@ -37,17 +32,11 @@ func TestEveryRouteKeyIsWellFormed(t *testing.T) {
 			t.Errorf("route key %q does not split into a method and an absolute path", key)
 		}
 	}
-	// A key the splitter cannot handle must be reported, not skipped.
 	if _, _, ok := splitRouteKey("GET/v1/reviews"); ok {
 		t.Error("expected a key with no separating space to be rejected")
 	}
 }
 
-// TestTenantAgentIsAStrictSubsetOfTenantUser is the property the membership
-// set exists to make expressible: the machine role must never reach a route
-// TenantUser cannot. It is the invariant a fourth single-valued class could
-// not have held, because the machine role is deliberately narrower than
-// TenantUser rather than a peer of it.
 func TestTenantAgentIsAStrictSubsetOfTenantUser(t *testing.T) {
 	t.Parallel()
 	agent := permissionSet(TenantAgentPermissions())
@@ -66,9 +55,6 @@ func TestTenantAgentIsAStrictSubsetOfTenantUser(t *testing.T) {
 	}
 }
 
-// TestTenantAdminSupersetOfTenantUser pins the relationship the three roles
-// have carried since TenantAdmin was introduced, now expressed through the
-// same masks: everything TenantUser grants, TenantAdmin grants too.
 func TestTenantAdminSupersetOfTenantUser(t *testing.T) {
 	t.Parallel()
 	admin := permissionSet(TenantAdminPermissions())
@@ -79,28 +65,16 @@ func TestTenantAdminSupersetOfTenantUser(t *testing.T) {
 	}
 }
 
-// TestTenantAgentPermissionsAreExactlyTheMergeQueueAndSelfReportRoutes is the
-// closed list of what the machine role may do, and it is deliberately closed:
-// adding a route to the machine role forces a change here, so the widening is
-// a reviewed decision rather than a side effect of a route's classification.
-// The two boundaries worth naming are asserted on both sides -- the
-// environment's own `erun build` self-report is granted while the tenant-wide
-// build history is not, and the reads that make up reading a review are
-// granted while writing a comment or assigning a reviewer is not.
+// A closed list: widening the machine role must change this test.
 func TestTenantAgentPermissionsAreExactlyTheMergeQueueAndSelfReportRoutes(t *testing.T) {
 	t.Parallel()
 	want := map[string]bool{
-		// Its own identity and capability set.
-		"GET /v1/whoami": true,
-		// Reading the reviews it is merging, and the queue it is
-		// promoted from -- including the reads `erun review show` makes.
+		"GET /v1/whoami":                       true,
 		"GET /v1/reviews":                      true,
 		"GET /v1/reviews/merge-queue":          true,
 		"GET /v1/reviews/{review_id}":          true,
 		"GET /v1/reviews/{review_id}/comments": true,
 		"GET /v1/reviews/{review_id}/builds":   true,
-		// Recording the build of the prepared merge commit, reporting the
-		// merge, and the unattached build self-report.
 		"POST /v1/reviews/{review_id}/builds":  true,
 		"PATCH /v1/reviews/{review_id}/status": true,
 		"POST /v1/builds":                      true,
@@ -119,17 +93,12 @@ func TestTenantAgentPermissionsAreExactlyTheMergeQueueAndSelfReportRoutes(t *tes
 	}
 }
 
-// TestTenantAgentIsRefusedTheRoutesThatBreakOrBroadenIt names the refusals
-// the machine role's design turns on, so a later reclassification cannot hand
-// any of them back silently.
 func TestTenantAgentIsRefusedTheRoutesThatBreakOrBroadenIt(t *testing.T) {
 	t.Parallel()
 	agent := permissionSet(TenantAgentPermissions())
 	refused := []string{
-		// The tenant-wide build history: an operator surface with no
-		// environment caller. The self-report only needs the POST half.
+		// The tenant-wide build history has no environment caller.
 		"GET /v1/builds",
-		// Widening the machine role past the merge-queue workflow.
 		"POST /v1/reviews",
 		"POST /v1/reviews/merge-queue/advance",
 		"POST /v1/reviews/merge-queue/override-advance",
@@ -139,7 +108,6 @@ func TestTenantAgentIsRefusedTheRoutesThatBreakOrBroadenIt(t *testing.T) {
 		"GET /v1/reviews/{review_id}/reviewers",
 		"POST /v1/releases",
 		"GET /v1/releases",
-		// Tenant administration and the operator surface.
 		"POST /v1/environments",
 		"DELETE /v1/environments/{environment_id}",
 		"POST /v1/environments/{environment_id}/deploy",
@@ -157,10 +125,6 @@ func TestTenantAgentIsRefusedTheRoutesThatBreakOrBroadenIt(t *testing.T) {
 	}
 }
 
-// TestOperationsOnlyRoutesGrantNothingToAnyNarrowerRole pins the zero value's
-// meaning through all three derivations: a route no narrower role grants must
-// stay out of every derived set, which is what keeps the wildcard
-// ReadAll/WriteAll the only way to reach an operations surface.
 func TestOperationsOnlyRoutesGrantNothingToAnyNarrowerRole(t *testing.T) {
 	t.Parallel()
 	derived := map[string]map[string]bool{

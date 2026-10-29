@@ -3,20 +3,8 @@ import type { Page } from '@playwright/test';
 import { expect, test, withTestBudget } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
-// The Diagnostics panel used to derive its evidence from the sidebar's
-// environment selection alone, so an orchestrator session — which never
-// touches that selection — left it reading "environment: none selected" with
-// no trace: an operator opening Diagnostics with an orchestrator focused hit
-// a blank panel in the context they spend most of their time in (#1241).
-// This spec drives the fix: an orchestrator session gets its own context
-// (identity, linked environments, its own log), and the "Report an erun
-// issue" action opens a prefilled github.com/sophium/erun issue for whatever
-// context is active.
-//
-// formatDiagnosticsReport's per-context text is covered directly by
-// diagnosticsReport.test.ts; this locks the rendered panel and the report
-// button's browser/clipboard side effects, which only a real boot can
-// exercise.
+// An orchestrator session never touches the sidebar selection, so Diagnostics
+// must use its own context; report text is covered by diagnosticsReport.test.ts.
 
 const ORCHESTRATOR_ID = 'pw-orch-diag';
 const RUNNING_SESSION_ID = 9101;
@@ -55,8 +43,6 @@ test.describe('diagnostics panel — orchestrator context (#1241)', () => {
   test.beforeEach(async ({ app }) => {
     if (!(await app.debugPanel.isOpen())) {
       await app.debugPanel.toggle();
-      // Converge through the panel's own helper rather than expect's fixed
-      // budget, then on the tab the test needs.
       await app.debugPanel.waitForOpen();
     }
   });
@@ -69,9 +55,7 @@ test.describe('diagnostics panel — orchestrator context (#1241)', () => {
     await app.reboot();
     await app.sidebar.openOrchestratorSession(ORCHESTRATOR_ID);
 
-    // waitFor (not expect) converges the panel's own re-labeling against the
-    // enclosing test's budget rather than expect's fixed one: the primary tab
-    // renames itself once the selected context resolves.
+    // The primary tab renames itself once the selected context resolves.
     await app.debugPanel.tab('orchestrator').waitFor({ state: 'visible' });
     await expect(app.debugPanel.tab('orchestrator')).toBeVisible();
     await expect(app.debugPanel.tab('orchestrator')).toHaveAttribute('aria-selected', 'true');
@@ -101,9 +85,7 @@ test.describe('diagnostics panel — orchestrator context (#1241)', () => {
     await stubRunningOrchestrator(page);
     await app.reboot();
     await app.sidebar.openOrchestratorSession(ORCHESTRATOR_ID);
-    // waitFor (not expect) converges the panel's own re-labeling against the
-    // enclosing test's budget rather than expect's fixed one: the primary tab
-    // renames itself once the selected context resolves.
+    // The primary tab renames itself once the selected context resolves.
     await app.debugPanel.tab('orchestrator').waitFor({ state: 'visible' });
     await expect(app.debugPanel.tab('orchestrator')).toBeVisible();
 
@@ -121,9 +103,7 @@ test.describe('diagnostics panel — orchestrator context (#1241)', () => {
     page,
   }) => {
     await stubRunningOrchestrator(page);
-    // The desktop must never depend on a live network call to file this --
-    // stub github.com itself rather than letting the popup hit the real
-    // (unauthenticated, redirect-to-login) site.
+    // Stub github.com so the popup never hits the real site.
     await page
       .context()
       .route('https://github.com/**', (route) =>
@@ -159,8 +139,6 @@ test.describe('diagnostics panel — orchestrator context (#1241)', () => {
     const written = req.postData() ?? '';
     expect(written).toContain(`orchestrator: ${ORCHESTRATOR_ID}`);
 
-    // The label flips once the popup the click opened has loaded, so it
-    // converges on this test's own budget rather than expect's 10s default.
     await expect(app.debugPanel.reportIssueButton()).toHaveText(/Opened/, withTestBudget());
   });
 });

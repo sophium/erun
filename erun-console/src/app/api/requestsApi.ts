@@ -1,6 +1,4 @@
-// RTK Query endpoints for the invite-request queue: the operator's own
-// request/approve view, and the operations-only rate-limit editor for the
-// platform's first admission limiter.
+// RTK Query endpoints for the invite-request queue and its rate-limit editor.
 import { asOptionalString, asString, isRecord } from 'erun-kit';
 
 import { platformApi } from './platformApi';
@@ -8,8 +6,7 @@ import { platformApi } from './platformApi';
 export type InviteRequestKind = 'JOIN_TENANT' | 'CREATE_TENANT';
 export type InviteRequestStatus = 'PENDING' | 'APPROVED' | 'DECLINED';
 
-// InviteRequest mirrors erun-backend-api's model.InviteRequest wire shape
-// (internal/model/invite_request.go) verbatim.
+// InviteRequest mirrors erun-backend-api's model.InviteRequest wire shape.
 export interface InviteRequest {
   inviteRequestId: string;
   issuer: string;
@@ -92,19 +89,13 @@ function parsePlatformRateLimit(raw: unknown): PlatformRateLimit {
   };
 }
 
-// Both the nav-level pending-count badge (AppShell.tsx) and the panel's own
-// list (requests/controller.ts) subscribe to listInviteRequests with this
-// same interval, so RTK Query shares one poll rather than running two --
-// see either call site for why a poll (not an event) is the right mechanism
-// here: an approval can land in someone else's session with nothing local
-// to react to.
+// Shared by the nav badge and the panel so RTK Query runs one poll. Polled because an
+// approval can land in another session with nothing local to react to.
 export const PENDING_REQUESTS_POLL_MS = 30000;
 
 export const requestsApi = platformApi.injectEndpoints({
   endpoints: (builder) => ({
-    // listInviteRequests only ever asks for the pending queue -- the operator
-    // view is a work queue, not a history; a decided request is done and has
-    // nothing left for this list to do with it.
+    // Pending only: the view is a work queue, not a history.
     listInviteRequests: builder.query<InviteRequest[], string>({
       query: (token) => ({
         url: '/v1/invite-requests?status=PENDING',
@@ -141,10 +132,7 @@ export const requestsApi = platformApi.injectEndpoints({
       invalidatesTags: ['PendingRequests'],
     }),
 
-    // setInviteRequestRateLimit invalidates 'Config' (not 'PendingRequests')
-    // -- the window it changes is read back through GET /v1/config's
-    // inviteRequestRateLimitWindowSeconds, the same field every tenant's
-    // requests panel reads for its read-only display.
+    // Invalidates 'Config': the window is read back through GET /v1/config.
     setInviteRequestRateLimit: builder.mutation<
       PlatformRateLimit,
       { token: string; windowSeconds: number }

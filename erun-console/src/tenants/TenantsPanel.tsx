@@ -26,9 +26,6 @@ import { useTenantsController } from './controller';
 import { EnrollTenantUserDialog } from './EnrollTenantUserDialog';
 import { TenantQuotaDialog } from './TenantQuotaDialog';
 
-// The identity model's own explanation of org-scoped (shared) issuers — see
-// erun-docs/docs/agent-reference/api-protocol.md#tenant-issuers — so
-// orgFieldKey/orgFieldValue isn't guesswork.
 const ORG_SCOPED_ISSUER_DOCS_PATH = '/agent-reference/api-protocol#tenant-issuers';
 
 const TENANT_TYPES = ['COMPANY', 'OPERATIONS'];
@@ -50,9 +47,7 @@ function FieldError({ message }: { message: string | undefined }): React.ReactEl
   );
 }
 
-// CreateFeedback carries only the failures that aren't pinned to one field
-// (a malformed body, the operations-only refusal) — the field-scoped ones
-// render inline next to the control they're about instead.
+// CreateFeedback shows failures not tied to one field.
 function CreateFeedback({
   createState,
 }: {
@@ -76,10 +71,6 @@ function CreateFeedback({
   return null;
 }
 
-// useCreateTenantFormValues holds every field of the create-tenant form as
-// one unit, so CreateTenantForm only has one hook call to account for
-// instead of six repeated pairs (mirrors OrgSettingsPanel's
-// usePasswordComplexityFields).
 function useCreateTenantFormValues(): {
   name: string;
   setName: (value: string) => void;
@@ -154,9 +145,6 @@ function NameAndTypeFields({
   );
 }
 
-// OrgScopedIssuerFields carries the issuer and its optional org-scoping pair
-// together, since the org-scoped-issuer explanation link right below them is
-// about how the two relate.
 function OrgScopedIssuerFields({
   values,
   createState,
@@ -277,12 +265,7 @@ function formatCreatedAt(createdAt: string): string {
   return Number.isNaN(parsed.getTime()) ? createdAt : parsed.toLocaleDateString();
 }
 
-// TenantUserCountBadge is the Tenants view's own noticing point for an inert
-// tenant (erun#1744): a tenant registered through the product but with no
-// console-reachable way to add a user reads identically to a healthy one
-// unless the zero itself is flagged here, where it was created. `undefined`
-// (the count did not load, rather than genuinely being zero) renders as
-// "Unknown" so a fetch hiccup never gets mistaken for the inert state.
+// `undefined` (count not loaded) renders as Unknown, never as zero.
 function TenantUserCountBadge({
   userCount,
 }: {
@@ -303,13 +286,8 @@ function TenantUserCountBadge({
   );
 }
 
-// TenantSignInBadge is where a tenant nobody can ever sign in to stops being
-// invisible: a tenant whose issuer mapping contradicts its issuer's
-// org-scoping mode exists, lists, and accepts enrollments while no token can
-// resolve to it. `POST /v1/tenants` refuses to create that shape now, so this
-// is for the rows a platform already carries. `undefined` (the read did not
-// compute it) renders as "Unknown" rather than as working, for the same
-// reason the user count does.
+// TenantSignInBadge flags tenants whose issuer mapping no token can resolve
+// to; `undefined` renders as Unknown.
 function TenantSignInBadge({
   resolvable,
 }: {
@@ -440,9 +418,7 @@ function TenantsBody({
   );
 }
 
-// TenantsPanel is the console's tenant-registration surface: the one action
-// only an OPERATIONS tenant can take, mirroring Users/Org settings. Only
-// rendered for an OPERATIONS tenant — see shell/sections.ts.
+// TenantsPanel is rendered only for an OPERATIONS tenant.
 export function TenantsPanel({
   token,
   docsUrl,

@@ -9,11 +9,7 @@ import type {
 
 export interface TenantsState {
   tenants: UITenant[];
-  // Distinguishes "the initial list has not come back yet" from "it came
-  // back and is genuinely empty" — the two render identically as
-  // tenants: [] otherwise, and a consumer (the sidebar) needs to tell them
-  // apart to avoid asserting "no environments" before boot's first read
-  // resolves.
+  // Distinguishes "not loaded yet" from "genuinely empty".
   tenantsLoaded: boolean;
   cloudProviders: UICloudProviderStatus[];
   versionSuggestions: UIVersionSuggestion[];
@@ -45,8 +41,6 @@ export const tenantsSlice = createSlice({
     setVersionSuggestionNotices(state, action: PayloadAction<UIVersionSuggestionNotice[]>) {
       state.versionSuggestionNotices = action.payload;
     },
-    // Optimistically reflect a persisted AutoStart change so the next env-open
-    // uses the new policy without waiting for a full state reload.
     patchTenantEnvironmentAutoStart(
       state,
       action: PayloadAction<{

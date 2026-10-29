@@ -6,12 +6,12 @@ import (
 	"strings"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
+	orchestratorsvc "github.com/sophium/erun/erun-ui/internal/orchestrator"
 )
 
-// requireLoneRestartPreviewNotice fails unless the preview names only id, with
-// a notice carrying every one of wants.
-func requireLoneRestartPreviewNotice(t *testing.T, preview []eruncommon.DesktopRestartReopen, id string, wants ...string) {
+func requireLoneRestartPreviewNotice(t *testing.T, preview []model.DesktopRestartReopen, id string, wants ...string) {
 	t.Helper()
 	if len(preview) != 1 || preview[0].OrchestratorID != id {
 		t.Fatalf("expected one row for %s, got %+v", id, preview)
@@ -23,18 +23,14 @@ func requireLoneRestartPreviewNotice(t *testing.T, preview []eruncommon.DesktopR
 	}
 }
 
-// TestARestartPreviewWarnsWhenTheNextLaunchWouldBeRefused: the agent keeps
-// running through a restart, but a desktop that refuses to reopen it leaves the
-// operator without a terminal on it, so the preview says so while it can still
-// be fixed.
 func TestARestartPreviewWarnsWhenTheNextLaunchWouldBeRefused(t *testing.T) {
 	app, restoreDir := restartTestApp(t)
 	var credentialErr error
-	app.deps.resolveGatewayCredential = func(*eruncommon.OpenRouterConfig) (string, error) {
+	app.deps.resolveGatewayCredential = func(*config.OpenRouterConfig) (string, error) {
 		return testGatewayToken, credentialErr
 	}
 	stageGatewayCatalog(app)
-	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "", orchestratorLaunchInput{UseGateway: true})
+	created, err := app.CreateOrchestrator("agent", []orchestratorsvc.EnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "", orchestratorsvc.LaunchInput{UseGateway: true})
 	mustNoErr(t, err, "CreateOrchestrator")
 	_, err = app.StartOrchestrator(created.ID, 80, 24)
 	mustNoErr(t, err, "StartOrchestrator")
@@ -56,7 +52,7 @@ func TestARestartPreviewWarnsWhenTheNextLaunchWouldBeRefused(t *testing.T) {
 	}
 
 	credentialErr = nil
-	app.deps.store.(stubUIStore).config.OpenRouter = nil
+	stubStore(app).config.OpenRouter = nil
 	requireLoneRestartPreviewNotice(t, app.orchestratorRestartPreview(id), id,
 		"no gateway catalog is configured", "configure the gateway catalog")
 }

@@ -79,9 +79,7 @@ func (r CommentRoutes) updateCommentStatus(w http.ResponseWriter, req *http.Requ
 	writeJSON(w, http.StatusOK, comment)
 }
 
-// writeCommentError gives comments.md's documented business codes their
-// exact machine code; every other failure falls through to the generic
-// status-derived code.
+// writeCommentError maps comments.md's documented business codes.
 func writeCommentError(w http.ResponseWriter, req *http.Request, err error) {
 	var invalidCommitID *service.InvalidCommitIDError
 	if errors.As(err, &invalidCommitID) {

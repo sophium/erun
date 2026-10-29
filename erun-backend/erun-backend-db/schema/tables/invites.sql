@@ -10,11 +10,7 @@ CREATE TABLE invites (
   created_at TIMESTAMPTZ,
   updated_at TIMESTAMPTZ,
   FOREIGN KEY (tenant_id) REFERENCES tenants (tenant_id),
-  -- Unlike reviews.author_user_id, an invite's creator is not necessarily a
-  -- member of the invite's own target tenant: an OPERATIONS caller may mint
-  -- an invite for a different tenant entirely (#1483 item 4), so this
-  -- references the global users.user_id primary key rather than the
-  -- tenant-scoped (tenant_id, user_id) composite key reviews.sql uses.
+  -- Global users key: an OPERATIONS caller may mint an invite for another tenant.
   FOREIGN KEY (created_by_user_id) REFERENCES users (user_id),
   CONSTRAINT invites_issuer_check CHECK (length(trim(issuer)) > 0),
   CONSTRAINT invites_token_check CHECK (length(trim(token)) > 0),

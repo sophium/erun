@@ -1,11 +1,5 @@
-# Locks #2252: the public front door served plaintext. Traefik answers :80 for
-# every host it routes, so whether a visitor who types the bare domain -- or
-# follows a relative redirect issued behind the edge, as the IdP's own login
-# chain does -- is upgraded to https is a property of the entrypoint, not of
-# each Ingress. These runs pin that policy, its opt-outs, and the HSTS
-# middleware that has to exist for the header to be served at all.
-#
-# Runs entirely against mocked providers: no real cluster.
+# Plaintext redirect and HSTS are entrypoint properties, not per-Ingress ones.
+# Runs against mocked providers.
 
 mock_provider "helm" {}
 mock_provider "kubernetes" {}
@@ -21,7 +15,7 @@ run "plaintext_redirects_to_https_and_hsts_is_served_by_default" {
 
   assert {
     condition = toset([for s in helm_release.traefik[0].set : s.value]) == toset([
-      "--entryPoints.web.http.redirections.entryPoint.to=websecure",
+      "--entryPoints.web.http.redirections.entryPoint.to=:443",
       "--entryPoints.web.http.redirections.entryPoint.scheme=https",
       "--entryPoints.web.http.redirections.entryPoint.permanent=true",
       "--entryPoints.websecure.http.middlewares=${local.hsts_middleware_ref}",
@@ -34,9 +28,8 @@ run "plaintext_redirects_to_https_and_hsts_is_served_by_default" {
     error_message = "the HSTS middleware reference must resolve to the ingress namespace's own namespace/name, not a literal"
   }
 
-  # The header is only served because this object exists: an entrypoint naming
-  # a middleware that was never created is reported by Traefik and the response
-  # goes out without it, which is indistinguishable from the bug.
+  # Traefik serves responses without a middleware the entrypoint names but
+  # that was never created.
   assert {
     condition = anytrue([
       for v in helm_release.traefik[0].values :
@@ -54,9 +47,24 @@ run "plaintext_redirects_to_https_and_hsts_is_served_by_default" {
   }
 }
 
-# HSTS is a commitment a browser cannot be talked out of early, so the shipped
-# default is the conservative one: one day, no includeSubDomains, no preload.
-# Raising it is a deliberate edit, not a drift.
+# Traefik resolves a named redirect target to that entrypoint's listen port, and
+# the chart listens on :8443 behind a Service that publishes 443, so naming
+# websecure sends every plaintext visitor to https://<host>:8443/.
+run "the_plaintext_redirect_lands_on_the_public_https_port" {
+  command = plan
+
+  assert {
+    condition     = [for s in helm_release.traefik[0].set : s.value if strcontains(s.value, "redirections.entryPoint.to=")] == ["--entryPoints.web.http.redirections.entryPoint.to=:443"]
+    error_message = "the plaintext redirect must target the published port :443, which Traefik leaves out of the Location; a named entrypoint (websecure) resolves to its :8443 listen port, which nothing outside the pod reaches"
+  }
+
+  assert {
+    condition     = contains(output.edge_transport_policy.traefik_additional_arguments, "--entryPoints.web.http.redirections.entryPoint.to=:443")
+    error_message = "a bring-your-own controller is handed the same redirect target, since the upstream Traefik chart (which k3s also bundles) listens on :8443 behind 443 there too"
+  }
+}
+
+# A browser cannot be talked out of HSTS early, so the default stays conservative.
 run "hsts_defaults_stay_conservative" {
   command = plan
 
@@ -77,8 +85,6 @@ run "hsts_defaults_stay_conservative" {
   }
 }
 
-# A platform that has verified every name under the domain raises the
-# commitment explicitly; the switches have to reach the rendered middleware.
 run "hsts_commitment_can_be_raised" {
   command = plan
 
@@ -97,8 +103,6 @@ run "hsts_commitment_can_be_raised" {
   }
 }
 
-# An edge fronting a host that is deliberately plaintext turns each half off
-# independently: the redirect and the header are separate decisions.
 run "redirect_and_hsts_are_independently_switchable" {
   command = plan
 
@@ -140,11 +144,6 @@ run "hsts_can_be_turned_off_without_dropping_the_redirect" {
   }
 }
 
-# A cluster that already runs an ingress controller gets no edge from this
-# module at all -- and therefore no transport policy either: the controller it
-# already has owns that. Saying so is now required rather than assumed, because
-# the plan that assumed it applied cleanly while every public host served
-# cleartext.
 run "an_existing_ingress_controller_is_left_alone" {
   command = plan
 
@@ -164,12 +163,6 @@ run "an_existing_ingress_controller_is_left_alone" {
   }
 }
 
-# The reported defect: with no controller installed and the policy left
-# managed, every transport switch is accepted, defaulted, documented -- and
-# dropped. The plan applied cleanly and reported success while
-# http://<any exposed host> answered 200 with no redirect and no
-# Strict-Transport-Security, which is exactly the symptom the switches exist to
-# prevent. This run fails without the output's precondition.
 run "installing_no_controller_while_still_managing_the_policy_is_refused" {
   command = plan
 
@@ -180,10 +173,6 @@ run "installing_no_controller_while_still_managing_the_policy_is_refused" {
   expect_failures = [output.edge_transport_policy]
 }
 
-# Refusal is not the only way out, and it is not the one a bring-your-own
-# cluster wants: the policy is exposed as data, so the controller that is
-# already there can carry it without a hand-rolled overlay that duplicates the
-# module's own defaults and then drifts from them.
 run "the_policy_is_exposed_for_a_controller_this_module_does_not_install" {
   command = plan
 
@@ -194,7 +183,7 @@ run "the_policy_is_exposed_for_a_controller_this_module_does_not_install" {
 
   assert {
     condition = toset(output.edge_transport_policy.traefik_additional_arguments) == toset([
-      "--entryPoints.web.http.redirections.entryPoint.to=websecure",
+      "--entryPoints.web.http.redirections.entryPoint.to=:443",
       "--entryPoints.web.http.redirections.entryPoint.scheme=https",
       "--entryPoints.web.http.redirections.entryPoint.permanent=true",
       "--entryPoints.websecure.http.middlewares=${local.hsts_middleware_ref}",
@@ -213,13 +202,8 @@ run "the_policy_is_exposed_for_a_controller_this_module_does_not_install" {
   }
 }
 
-# The trap the entrypoint-wide redirect sets for an HTTP-01 tenant. Traefik
-# evaluates that redirect for every request on the plaintext entrypoint, so it
-# covers /.well-known/acme-challenge/ as well: Let's Encrypt follows the 301 to
-# https, the solver's Ingress has no TLS block there, and the certificate fails
-# to renew -- weeks later, as an expiry rather than as a plan error. This module
-# cannot see a foreign Issuer, so the caller states the fact, and the module
-# stops producing the shape that starves it.
+# Traefik applies the entrypoint-wide redirect to /.well-known/acme-challenge/
+# too, which starves an HTTP-01 solver.
 run "the_acme_challenge_path_can_be_exempted_from_the_redirect" {
   command = plan
 
@@ -227,8 +211,7 @@ run "the_acme_challenge_path_can_be_exempted_from_the_redirect" {
     acme_challenge_path_exempt = true
   }
 
-  # Both forms at once would race, and the blanket one is the one that cannot
-  # be narrowed, so it has to be absent -- not merely outnumbered.
+  # Both forms at once would race, so the blanket one must be absent.
   assert {
     condition     = alltrue([for s in helm_release.traefik[0].set : !strcontains(s.value, "redirections.entryPoint")])
     error_message = "the exempting form must drop the entrypoint-wide redirect entirely, not emit both"
@@ -242,9 +225,6 @@ run "the_acme_challenge_path_can_be_exempted_from_the_redirect" {
     error_message = "the redirect must ride on a router whose rule excludes the ACME challenge prefix; a Middleware alone carries no rule and would still catch the solver"
   }
 
-  # The router is only as good as the Middleware it names, and an entrypoint
-  # naming one that does not exist is reported by Traefik while the request is
-  # served anyway -- the same silent no-op this policy exists to remove.
   assert {
     condition = anytrue([
       for v in helm_release.traefik[0].values :
@@ -259,18 +239,8 @@ run "the_acme_challenge_path_can_be_exempted_from_the_redirect" {
   }
 }
 
-# The blocker that made the exemption above silently ineffective, and the only
-# case in this file that fails on a render without it. Traefik derives a
-# router's priority from the length of its rule, so this catch-all competes on
-# its own 43 characters while the host routers it has to redirect are longer:
-# a Host(<name>) && PathPrefix(/) rule is 27 characters longer than the name in
-# it, so every one for a hostname of 17 characters or more outranks the
-# catch-all. Traefik routes to the longer rule, the plaintext request reaches
-# the application, and the redirect never runs -- so it is not applied on
-# exactly the hosts the exemption was added for, `console.` (20) and `auth.`
-# (17) in the reported tenant among them. The route therefore has to carry an
-# explicit priority, and one no rule length can reach. The host rule below is
-# the reported tenant's own, at its real length of 47.
+# Traefik derives router priority from rule length, so without an explicit
+# priority a longer Host() rule outranks the catch-all and skips the redirect.
 run "the_exempting_router_outranks_a_longer_host_rule" {
   command = plan
 
@@ -281,18 +251,13 @@ run "the_exempting_router_outranks_a_longer_host_rule" {
   assert {
     condition = alltrue([
       for r in local.acme_exempt_redirect_router.spec.routes :
-      # The priority Traefik would actually route on: the declared one where
-      # there is one, and otherwise the rule's own length, which is the default
-      # this route was silently getting.
+      # Traefik's effective priority: declared, else the rule's length.
       try(r.priority, length(r.match)) > length("Host(`console.erunpaas.com`) && PathPrefix(`/`)")
     ])
     error_message = "the ACME-exempting catch-all must declare a priority that outranks the host routers it has to redirect; on Traefik's derived default (the rule's own length, 43 here) it loses to any Host(...) rule longer than that, and the redirect silently never applies to those hosts"
   }
 
-  # What makes it safe to put this above every other user router: the rule is
-  # negated, so the challenge path is never a candidate for this router and no
-  # priority it carries can take a solver's request away from the host router
-  # that answers it.
+  # Safe above every host router only because the rule excludes the challenge path.
   assert {
     condition = alltrue([
       for r in local.acme_exempt_redirect_router.spec.routes :
@@ -302,9 +267,6 @@ run "the_exempting_router_outranks_a_longer_host_rule" {
   }
 }
 
-# The exemption is opt-in, and the default is what erun's own estate runs today:
-# every challenge solved over DNS-01, so the challenge path needs no carve-out
-# and gets none.
 run "the_blanket_redirect_carries_no_exemption_until_opted_in" {
   command = plan
 
@@ -324,15 +286,11 @@ run "the_blanket_redirect_carries_no_exemption_until_opted_in" {
   }
 
   assert {
-    condition     = length([for s in helm_release.traefik[0].set : s.value if strcontains(s.value, "redirections.entryPoint.to=websecure")]) == 1
+    condition     = length([for s in helm_release.traefik[0].set : s.value if strcontains(s.value, "redirections.entryPoint.to=")]) == 1
     error_message = "the default must stay the entrypoint-wide redirect that already covers /.well-known/acme-challenge/"
   }
 }
 
-# The reported configuration, and a DELIBERATE failure: this run fails without
-# the output's precondition. Declaring the HTTP-01 fact while still holding the
-# blanket redirect is a contradiction, not a default -- the module refuses it
-# instead of applying cleanly and letting the certificates lapse.
 run "an_http01_issuer_without_the_exemption_is_refused" {
   command = plan
 
@@ -343,8 +301,6 @@ run "an_http01_issuer_without_the_exemption_is_refused" {
   expect_failures = [output.edge_transport_policy]
 }
 
-# The precondition is about the redirect, not about HTTP-01: with nothing
-# redirected there is no path for a solver to be starved on.
 run "an_http01_issuer_with_no_redirect_at_all_is_not_refused" {
   command = plan
 
@@ -359,10 +315,6 @@ run "an_http01_issuer_with_no_redirect_at_all_is_not_refused" {
   }
 }
 
-# The bring-your-own-controller case this exists for: the cluster that cannot
-# take the blanket redirect is exactly the one that installs no controller here,
-# so the exempting objects have to survive into the output rather than only into
-# a release this module does not create.
 run "the_exemption_is_exported_for_a_controller_this_module_does_not_install" {
   command = plan
 
@@ -378,10 +330,6 @@ run "the_exemption_is_exported_for_a_controller_this_module_does_not_install" {
     error_message = "a bring-your-own controller must be handed both halves: the Middleware and the router that narrows it"
   }
 
-  # This caller applies the policy itself, so the module's own resources tell it
-  # nothing: the declaration it made has to reach it through the output it reads
-  # the policy from, or it cannot tell an exemption that was granted from one
-  # that was silently defaulted away.
   assert {
     condition     = output.edge_transport_policy.http01_acme_challenges_present == true
     error_message = "the exposed policy must echo the HTTP-01 declaration it was resolved against, not just the objects that resulted from it"
@@ -411,8 +359,6 @@ run "the_exemption_is_exported_for_a_controller_this_module_does_not_install" {
   }
 }
 
-# The object half of the policy is assembled independently of HSTS: the redirect
-# is still an object even when the header is switched off.
 run "the_exempting_objects_survive_hsts_being_turned_off" {
   command = plan
 
@@ -432,10 +378,6 @@ run "the_exempting_objects_survive_hsts_being_turned_off" {
   }
 }
 
-# The switch is about who applies the policy, not about the controller: a
-# platform that wants Traefik installed but keeps its transport policy (and the
-# HSTS commitment a browser cannot be talked out of) in its own hands gets a
-# controller with the arguments left off.
 run "managing_no_policy_installs_the_controller_without_transport_arguments" {
   command = plan
 

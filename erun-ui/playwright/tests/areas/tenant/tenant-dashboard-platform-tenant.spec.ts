@@ -8,13 +8,8 @@ import {
   uniqueEnvironmentName,
 } from '../../../fixtures/seedRoot.js';
 
-// tenant-dashboard-platform-tenant.spec.ts covers the header naming whose rows
-// the dashboard is rendering. A local tenant is bound to a platform tenant only
-// by whichever cloud alias its credential reaches, so a dashboard opened from
-// one local tenant can render a different platform tenant's reviews, queue,
-// users and audit. See tenant-dashboard-refresh.spec.ts for why this stages a
-// throwaway env with an apiUrl and stubs the RPC rather than using the seeded
-// baseline or a real backend.
+// A local tenant reaches a platform tenant only through its alias credential,
+// so the header must name whose rows are shown.
 
 function seedDashboardEnvironment(title: string): string {
   const environment = uniqueEnvironmentName(title);
@@ -36,16 +31,8 @@ async function stubLoadTenantDashboard(
   });
 }
 
-// readyDashboard is a loaded dashboard for SEED_TENANT, with the caller's own
-// identity row as whoami reports it. tenantName is what the platform calls the
-// tenant the bearer resolves to; '' stages a platform that names none.
-//
-// A name that is not SEED_TENANT's is the mismatch, which the backend answers
-// with platformState 'tenant-mismatch' and no rows at all — so the payload
-// says so here too. The rows below a mismatched credential are the other
-// tenant's by construction, and the card that replaces them is
-// tenant-dashboard-platform-state.spec.ts's subject; this file's claim is the
-// header line, which is rendered whichever state the body is in.
+// readyDashboard stages whoami's tenantName; '' means the platform names none,
+// and a name other than SEED_TENANT is a mismatch with no rows.
 function readyDashboard(environment: string, tenantName: string): Record<string, unknown> {
   const mismatched = Boolean(tenantName) && tenantName !== SEED_TENANT;
   return {
@@ -72,16 +59,11 @@ test.describe('tenant dashboard — the header names the platform tenant', () =>
     try {
       await waitForSeededRow(app, SEED_TENANT, environment);
 
-      // The reported state: the local tenant is 'pw' (SEED_TENANT) and the
-      // credential reaches a platform tenant called something else. Before
-      // this, the heading named 'pw' and every panel below rendered another
-      // tenant's rows with nothing on the surface saying so.
       await stubLoadTenantDashboard(page, readyDashboard(environment, 'erun'));
 
       await app.sidebar.openTenantDashboard(SEED_TENANT);
 
-      // No waitForOpen: this state's body replaces the tab strip, so the
-      // header line is asserted directly rather than after a tab appears.
+      // The mismatch body replaces the tab strip, so assert the header directly.
       await expect(app.tenantDashboard.platformTenantLine()).toContainText('erun');
       await expect(app.tenantDashboard.tabs()).toHaveCount(0);
     } finally {
@@ -97,9 +79,7 @@ test.describe('tenant dashboard — the header names the platform tenant', () =>
     try {
       await waitForSeededRow(app, SEED_TENANT, environment);
 
-      // The agreeing case still names it, so the line's absence means only
-      // "the platform reported no name" -- never "the two agreed", which is
-      // the reading that let the mismatch go unnoticed.
+      // The agreeing case still shows the name, so absence means only "unreported".
       await stubLoadTenantDashboard(page, readyDashboard(environment, SEED_TENANT));
 
       await app.sidebar.openTenantDashboard(SEED_TENANT);
@@ -116,9 +96,7 @@ test.describe('tenant dashboard — the header names the platform tenant', () =>
     try {
       await waitForSeededRow(app, SEED_TENANT, environment);
 
-      // An older platform answers whoami without a tenant name. The dashboard
-      // still loads; it simply has no name to show, and must not invent one by
-      // echoing the local tenant.
+      // An older platform omits the name; the dashboard must not echo the local one.
       await stubLoadTenantDashboard(page, readyDashboard(environment, ''));
 
       await app.sidebar.openTenantDashboard(SEED_TENANT);

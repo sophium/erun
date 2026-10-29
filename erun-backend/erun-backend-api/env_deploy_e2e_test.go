@@ -17,25 +17,20 @@ import (
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/provision"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/portforward"
 	"k8s.io/client-go/transport/spdy"
-
-	eruncommon "github.com/sophium/erun/erun-common"
-
-	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/provision"
-	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
-	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
-// envDeployE2E is the opt-in environment for the live env-deploy gate. It needs
-// a real Kubernetes cluster (any conformant one — a local k3d/kind cluster is
-// enough, no virtualization required), a migrated Postgres, and a tenant runtime
-// image the cluster can run, because the deploy executor's whole job is to
-// launch that image as a Job and watch it install the runtime chart.
+// envDeployE2E configures the opt-in live gate: a real cluster, migrated Postgres,
+// and a runnable tenant runtime image.
 type envDeployE2E struct {
 	databaseURL    string
 	dbosURL        string
@@ -44,9 +39,7 @@ type envDeployE2E struct {
 	version        string
 	namespace      string
 	serviceAccount string
-	// pullSecrets names dockerconfigjson secrets in the platform namespace. Only
-	// the bootstrap scenario needs them: confirming a tenant image absent from a
-	// private registry namespace is impossible without the credential.
+	// Only the bootstrap scenario needs pull secrets, to confirm an image absent.
 	pullSecrets []string
 }
 
@@ -81,8 +74,6 @@ func envDeployE2EFromEnv(t *testing.T) envDeployE2E {
 	return config
 }
 
-// e2ePullSecretNames splits the comma-separated secret names the deploy Job's
-// registry credential lives in, matching how the chart names them to the API.
 func e2ePullSecretNames(value string) []string {
 	var names []string
 	for _, name := range strings.Split(value, ",") {
@@ -93,17 +84,12 @@ func e2ePullSecretNames(value string) []string {
 	return names
 }
 
-// TestDeployEnvironmentEndToEnd drives the deploy endpoint against a live
-// cluster: the durable workflow must launch a real deploy Job, watch it install
-// the runtime chart into the per-env namespace, and land the environment on
-// `running` naming the version it deployed.
 func TestDeployEnvironmentEndToEnd(t *testing.T) {
 	config := envDeployE2EFromEnv(t)
 	srv, db, kube, kubeConfig := startEnvDeployAPI(t, config, "erun-env-deploy-e2e")
 
 	tenant := e2eTenantName(t, srv.URL)
-	// Registered without a pinned version, so nothing deploys on create and the
-	// explicit endpoint is unambiguously what performs the deploy.
+	// No pinned version, so only the explicit endpoint deploys.
 	environmentID := e2eRegisterEnvironment(t, srv.URL, "prod")
 
 	assertDeployClaimIsExclusive(t, db, environmentID)
@@ -120,22 +106,11 @@ func TestDeployEnvironmentEndToEnd(t *testing.T) {
 	assertMCPReachable(t, kubeConfig, kube, namespace, tenant)
 	assertRedeployReruns(t, kube, srv.URL, config, environmentID)
 	assertDeployRejectedWhileInFlight(t, db, srv.URL, environmentID, config.version)
-	// Teardown last: this is the full lifecycle #605's e2e gate asks for — a
-	// provisioned env reaching Running with its MCP reachable, then torn down.
 	assertEnvironmentTornDown(t, srv.URL, kube, environmentID, namespace)
 }
 
-// TestDeployEnvironmentBootstrapsOnCanonicalImage drives the core hosted PaaS
-// promise: a tenant that never ran `erun push` — so its own <tenant>-devops
-// image was never published — still gets a real environment. It needs a
-// version whose canonical erun-devops image and chart ARE published but whose
-// <tenant>-devops image never was (any real erun release version the bootstrap
-// tenant never built its own image at qualifies), because that gap is exactly
-// what RuntimeImageChecker confirms missing and what selects the bootstrap
-// path instead of refusing the request. It also needs the registry pull
-// credential: without it the probe cannot tell an image that was never
-// published from one in a namespace it may not read, so nothing is confirmed
-// and no deploy is diverted.
+// Needs a version whose canonical image is published but whose <tenant>-devops
+// image is not, plus pull credentials so the probe can confirm the absence.
 func TestDeployEnvironmentBootstrapsOnCanonicalImage(t *testing.T) {
 	config := envDeployE2EFromEnv(t)
 	version := os.Getenv("ERUN_E2E_ENV_DEPLOY_BOOTSTRAP_VERSION")
@@ -158,22 +133,13 @@ func TestDeployEnvironmentBootstrapsOnCanonicalImage(t *testing.T) {
 
 	awaitEnvironmentRunning(t, srv.URL, environmentID, version)
 	namespace := tenant + "-bootstrap"
-	// The release is still named <tenant>-devops even though the pod runs the
-	// canonical erun-devops image: resolvePublishedDevopsDeploySpecWithReason
-	// keeps ReleaseName on RuntimeReleaseName(tenant) regardless of which image
-	// backs it, so this stays the same assertion the tenant's-own-image path uses.
+	// The release keeps the <tenant>-devops name even on the canonical image.
 	assertRuntimeChartInstalled(t, kube, tenant)
 	assertMCPReachable(t, kubeConfig, kube, namespace, tenant)
-	// Teardown last: this is the full lifecycle a provisioned env reaching
-	// Running with its MCP reachable, then torn down, should complete cleanly.
 	assertEnvironmentTornDown(t, srv.URL, kube, environmentID, namespace)
 }
 
-// assertMCPReachable proves the per-env MCP edge (erun-devops/AGENTS.md: it
-// runs inside the runtime container, sharing its toolchain) is actually
-// serving requests, not just that a pod landed. It port-forwards to the
-// runtime pod's MCP port and drives a real JSON-RPC `initialize` call — the
-// same handshake `erun-mcp/AGENTS.md`'s in-pod diagnostic recipe uses.
+// assertMCPReachable drives a real JSON-RPC initialize through a port-forward.
 func assertMCPReachable(t *testing.T, kubeConfig *rest.Config, kube kubernetes.Interface, namespace, tenant string) {
 	t.Helper()
 	ctx := context.Background()
@@ -185,7 +151,7 @@ func assertMCPReachable(t *testing.T, kubeConfig *rest.Config, kube kubernetes.I
 	}
 	podName := pods.Items[0].Name
 
-	localPort := forwardToPod(t, kubeConfig, kube, namespace, podName, eruncommon.LowerServicePort)
+	localPort := forwardToPod(t, kubeConfig, kube, namespace, podName, configpkg.LowerServicePort)
 
 	initBody := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"erun-e2e","version":"1.0.0"}}}`
 	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://127.0.0.1:%d/mcp", localPort), bytes.NewBufferString(initBody))
@@ -205,8 +171,6 @@ func assertMCPReachable(t *testing.T, kubeConfig *rest.Config, kube kubernetes.I
 	}
 }
 
-// forwardToPod opens a client-go SPDY port-forward to the pod's targetPort and
-// returns the local port it picked, cleaned up when the test ends.
 func forwardToPod(t *testing.T, kubeConfig *rest.Config, kube kubernetes.Interface, namespace, podName string, targetPort int) int {
 	t.Helper()
 	transport, upgrader, err := spdy.RoundTripperFor(kubeConfig)
@@ -238,9 +202,6 @@ func forwardToPod(t *testing.T, kubeConfig *rest.Config, kube kubernetes.Interfa
 	return int(ports[0].Local)
 }
 
-// assertEnvironmentTornDown drives the stop then delete lifecycle endpoints —
-// #605's acceptance criterion ends with "tear it down" — and confirms the
-// namespace is actually gone, not just that the API answered.
 func assertEnvironmentTornDown(t *testing.T, baseURL string, kube kubernetes.Interface, environmentID, namespace string) {
 	t.Helper()
 	code, body := e2eRequest(t, baseURL, http.MethodPost, "/v1/environments/"+environmentID+"/stop", nil)
@@ -262,9 +223,6 @@ func assertEnvironmentTornDown(t *testing.T, baseURL string, kube kubernetes.Int
 	t.Fatalf("namespace %s still exists after delete", namespace)
 }
 
-// startEnvDeployAPI wires the API the way the control plane runs it — real
-// Kubernetes client, real Postgres, real durable workflow — and hands back the
-// pieces a scenario asserts against.
 func startEnvDeployAPI(t *testing.T, config envDeployE2E, appName string) (*httptest.Server, *sql.DB, kubernetes.Interface, *rest.Config) {
 	t.Helper()
 
@@ -307,18 +265,8 @@ func startEnvDeployAPI(t *testing.T, config envDeployE2E, appName string) (*http
 	return srv, db, kube, kubeConfig
 }
 
-// TestDeployEnvironmentRecordsAnUnpullableChart is the failure this hardening
-// exists for. erun publishes its runtime chart only beside the runtime image it
-// releases, so a version whose chart was never pushed — or a deploy registry that
-// only ever holds the tenant's own app images — cannot be installed at all. The
-// in-Job `erun deploy` already says so, naming the version and every coordinate
-// its resolution ladder probed; what the control plane must do is put that in the
-// environment's provisionError instead of recording that a Job exited.
-//
-// It needs a version whose <tenant>-devops IMAGE the cluster can pull but whose
-// chart is not published, because the deploy has to get far enough to attempt the
-// chart pull. Re-tagging the runtime image under an unpublished version is the
-// cheapest way to produce one.
+// An unpullable chart must surface the in-Job error in provisionError. Needs a
+// version whose image is pullable but whose chart is unpublished.
 func TestDeployEnvironmentRecordsAnUnpullableChart(t *testing.T) {
 	config := envDeployE2EFromEnv(t)
 	version := os.Getenv("ERUN_E2E_ENV_DEPLOY_UNPUBLISHED_VERSION")
@@ -338,8 +286,6 @@ func TestDeployEnvironmentRecordsAnUnpullableChart(t *testing.T) {
 
 	reason := awaitEnvironmentFailed(t, srv.URL, environmentID)
 	t.Logf("recorded provisionError:\n%s", reason)
-	// The version and the registry are what an operator has to change, so an
-	// error that names neither is the opaque Job exit this test exists to reject.
 	for _, want := range []string{version, config.registry, "chart"} {
 		if !strings.Contains(reason, want) {
 			t.Fatalf("provisionError does not mention %q, so it is not actionable:\n%s", want, reason)
@@ -350,9 +296,6 @@ func TestDeployEnvironmentRecordsAnUnpullableChart(t *testing.T) {
 	}
 }
 
-// awaitEnvironmentFailed polls until the durable workflow reports a terminal
-// state and returns the reason it recorded, failing if the deploy somehow
-// succeeded.
 func awaitEnvironmentFailed(t *testing.T, baseURL, environmentID string) string {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Minute)
@@ -378,9 +321,6 @@ func awaitEnvironmentFailed(t *testing.T, baseURL, environmentID string) string 
 	return ""
 }
 
-// deleteDeployJobs clears the Jobs a scenario left in the platform namespace, so
-// a failed deploy does not leave its pod sitting in the operator's cluster until
-// the TTL reaps it.
 func deleteDeployJobs(t *testing.T, kube kubernetes.Interface, namespace, environmentID string) {
 	t.Helper()
 	jobs, err := kube.BatchV1().Jobs(namespace).List(context.Background(), metav1.ListOptions{
@@ -401,11 +341,7 @@ func deleteDeployJobs(t *testing.T, kube kubernetes.Interface, namespace, enviro
 	}
 }
 
-// assertRedeployReruns is the reason the endpoint exists: deploying the same
-// version again must actually run again. An environment-keyed Job and workflow
-// would both be terminal by now, so a replay would report the old outcome
-// without touching the cluster — this holds the second deploy to producing its
-// own Job.
+// A redeploy of the same version must run a new Job, not replay the terminal one.
 func assertRedeployReruns(t *testing.T, kube kubernetes.Interface, baseURL string, config envDeployE2E, environmentID string) {
 	t.Helper()
 	before := deployJobNames(t, kube, config.namespace)
@@ -434,9 +370,7 @@ func deployJobNames(t *testing.T, kube kubernetes.Interface, namespace string) [
 	return names
 }
 
-// assertDeployRejectedWhileInFlight holds the claim directly rather than racing
-// two real deploys, so the conflict the endpoint must report is observed
-// deterministically over HTTP.
+// Holds the claim directly so the conflict is deterministic.
 func assertDeployRejectedWhileInFlight(t *testing.T, db *sql.DB, baseURL, environmentID, version string) {
 	t.Helper()
 	environments := repository.NewEnvironmentRepository(repository.NewTxManager(db, repository.DialectPostgres))
@@ -452,16 +386,11 @@ func assertDeployRejectedWhileInFlight(t *testing.T, db *sql.DB, baseURL, enviro
 	if code != http.StatusConflict {
 		t.Fatalf("deploy while one is in flight: HTTP %d (want 409): %s", code, body)
 	}
-	// Hand the claim back, so the test does not leave behind an environment that
-	// looks wedged mid-deploy.
 	mustNoErr(t, environments.UpdateProvisioningStatus(ctx, tenantID, environmentID, repository.EnvironmentStatusUpdate{
 		Status: "running",
 	}), "release the held claim")
 }
 
-// e2eTenantName reads the tenant the bootstrap identity resolved to. It decides
-// both the deploy namespace and the tenant runtime image, so the test asserts
-// against the real one rather than assuming it.
 func e2eTenantName(t *testing.T, baseURL string) string {
 	t.Helper()
 	code, body := e2eRequest(t, baseURL, http.MethodGet, "/v1/config", nil)
@@ -498,11 +427,8 @@ func e2eRegisterEnvironment(t *testing.T, baseURL, name string) string {
 	return created.EnvironmentID
 }
 
-// assertDeployClaimIsExclusive exercises the claim against the real database,
-// which is where its correctness actually lives: the concurrency guard is one
-// conditional UPDATE, and a stale claim must stay re-claimable so a control
-// plane that crashed mid-deploy never locks an environment out. Run before the
-// deploy, then handed back so the deploy under test starts from `registered`.
+// A stale claim must stay re-claimable so a crashed control plane never locks an
+// environment out.
 func assertDeployClaimIsExclusive(t *testing.T, db *sql.DB, environmentID string) {
 	t.Helper()
 	environments := repository.NewEnvironmentRepository(repository.NewTxManager(db, repository.DialectPostgres))
@@ -519,7 +445,7 @@ func assertDeployClaimIsExclusive(t *testing.T, db *sql.DB, environmentID string
 	if claimed {
 		t.Fatal("second claim succeeded, so two concurrent deploys could run into the same release")
 	}
-	// A zero window makes every claim stale, which is the wedged-deploy recovery.
+	// A zero window makes every claim stale.
 	claimed, err = environments.ClaimDeploy(ctx, tenantID, environmentID, 0)
 	mustNoErr(t, err, "stale claim")
 	if !claimed {
@@ -530,8 +456,6 @@ func assertDeployClaimIsExclusive(t *testing.T, db *sql.DB, environmentID string
 	}), "reset status")
 }
 
-// e2eOperationsContext rebuilds the request-scoped security context the
-// repositories' row-level-security wiring needs, bound to the bootstrap tenant.
 func e2eOperationsContext(t *testing.T, db *sql.DB) context.Context {
 	t.Helper()
 	var tenantID, tenantType string
@@ -540,9 +464,6 @@ func e2eOperationsContext(t *testing.T, db *sql.DB) context.Context {
 	return security.WithContext(context.Background(), security.Context{TenantID: tenantID, TenantType: tenantType})
 }
 
-// e2eOperationsTenantID names the tenant e2eOperationsContext is bound to, for
-// the repository calls that take the owning tenant explicitly rather than
-// reading it back from the security context.
 func e2eOperationsTenantID(t *testing.T, ctx context.Context) string {
 	t.Helper()
 	securityContext, ok := security.FromContext(ctx)
@@ -552,8 +473,6 @@ func e2eOperationsTenantID(t *testing.T, ctx context.Context) string {
 	return securityContext.TenantID
 }
 
-// awaitEnvironmentRunning polls the environment until the durable workflow
-// reports a terminal state, and holds it to naming the version it deployed.
 func awaitEnvironmentRunning(t *testing.T, baseURL, environmentID, version string) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Minute)
@@ -582,9 +501,6 @@ func awaitEnvironmentRunning(t *testing.T, baseURL, environmentID, version strin
 	t.Fatal("timed out waiting for the deploy to reach running")
 }
 
-// assertRuntimeChartInstalled proves the deploy reached the cluster, not just
-// the database: the per-env namespace exists, it carries the runtime workload,
-// and Helm recorded a release under the runtime release name.
 func assertRuntimeChartInstalled(t *testing.T, kube kubernetes.Interface, tenant string) {
 	t.Helper()
 	ctx := context.Background()

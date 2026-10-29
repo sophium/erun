@@ -23,8 +23,7 @@ export interface LayoutState {
   filesWidth: number;
   filesOpen: boolean;
   sidebarHidden: boolean;
-  // Distinct from sidebarHidden so a viewport resize can drive the boolean
-  // without erasing (or being blocked by) a deliberate operator toggle.
+  // Separate from sidebarHidden so a resize never erases a deliberate toggle.
   sidebarUserOverride: SidebarUserOverride;
   reviewOpen: boolean;
   changedFilesOpen: boolean;
@@ -38,9 +37,7 @@ const initialState: LayoutState = {
   reviewWidth: typeof window !== 'undefined' ? loadSavedReviewWidth() : DEFAULT_REVIEW_WIDTH,
   filesWidth: typeof window !== 'undefined' ? loadSavedFilesWidth() : DEFAULT_FILES_WIDTH,
   filesOpen: typeof window !== 'undefined' ? loadSavedFilesOpen() : true,
-  // Seed the initial collapse from the window's own launch width so a narrow
-  // launch renders collapsed on the first paint instead of flashing open and
-  // then collapsing once the resize-driven reconciliation catches up.
+  // Seeded from launch width so a narrow launch paints collapsed.
   sidebarHidden:
     typeof window !== 'undefined' ? nextSidebarHidden(false, null, window.innerWidth) : false,
   sidebarUserOverride: null,

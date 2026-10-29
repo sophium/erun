@@ -28,9 +28,6 @@ func (s *stubBuildService) Create(_ context.Context, build model.Build) (model.B
 	return build, nil
 }
 
-// ownEnvironmentGetter resolves the named ids as the caller's own and refuses
-// everything else, standing in for the real row-level-security-scoped
-// environment read.
 func ownEnvironmentGetter(ids ...string) EnvironmentGetter {
 	known := make(map[string]bool, len(ids))
 	for _, id := range ids {
@@ -49,12 +46,9 @@ func (s ownEnvironments) Get(_ context.Context, environmentID string) (model.Env
 }
 
 type stubBuildRepository struct {
-	build model.Build
-	err   error
-	// gotTenantID records the tenant the route named, so a test can hold the
-	// handler to passing the caller's own rather than merely passing one.
-	gotTenantID string
-	// gotListFilter records the filter the tenant-wide list was asked for.
+	build         model.Build
+	err           error
+	gotTenantID   string
 	gotListFilter apirepository.BuildListFilter
 }
 
@@ -75,9 +69,6 @@ func (s *stubBuildRepository) ListPage(_ context.Context, filter apirepository.B
 	return apirepository.BuildPage{Builds: []model.Build{s.build}}, nil
 }
 
-// TestCreateBuildRefusesTheRetiredGateKind: a merge-queue build is recorded
-// as an ordinary RECORDED build, so an older client still sending GATE is
-// refused before anything is written and told what to send instead.
 func TestCreateBuildRefusesTheRetiredGateKind(t *testing.T) {
 	service := &stubBuildService{}
 	routes := BuildRoutes{service: service}
@@ -103,8 +94,6 @@ func TestCreateBuildRefusesTheRetiredGateKind(t *testing.T) {
 	}
 }
 
-// TestCreateBuildDefaultsAnOmittedKindToRecorded: kind is optional on the
-// wire and always lands as RECORDED.
 func TestCreateBuildDefaultsAnOmittedKindToRecorded(t *testing.T) {
 	service := &stubBuildService{}
 	routes := BuildRoutes{service: service}
@@ -123,8 +112,6 @@ func TestCreateBuildDefaultsAnOmittedKindToRecorded(t *testing.T) {
 	}
 }
 
-// TestCreateBuildRejectsAnUnknownKind: kind is a closed value, not an open
-// string.
 func TestCreateBuildRejectsAnUnknownKind(t *testing.T) {
 	service := &stubBuildService{}
 	routes := BuildRoutes{service: service}
@@ -140,8 +127,6 @@ func TestCreateBuildRejectsAnUnknownKind(t *testing.T) {
 	}
 }
 
-// TestCreateBuildInvalidCommitIDReportsItsCode: builds.md documents
-// INVALID_COMMIT_ID as 400 for a commitId that is not 40 lowercase hex chars.
 func TestCreateBuildInvalidCommitIDReportsItsCode(t *testing.T) {
 	service := &stubBuildService{err: &service.InvalidCommitIDError{CommitID: "bad"}}
 	routes := BuildRoutes{service: service}
@@ -160,8 +145,6 @@ func TestCreateBuildInvalidCommitIDReportsItsCode(t *testing.T) {
 	}
 }
 
-// TestCreateBuildInvalidVersionReportsItsCode: builds.md documents
-// INVALID_VERSION as 400 for a version failing the version grammar.
 func TestCreateBuildInvalidVersionReportsItsCode(t *testing.T) {
 	service := &stubBuildService{err: &service.InvalidVersionError{Version: "bad"}}
 	routes := BuildRoutes{service: service}
@@ -185,8 +168,6 @@ func TestGetBuildReturnsTheRepositoryResult(t *testing.T) {
 	routes := BuildRoutes{builds: builds}
 	req := httptest.NewRequest(http.MethodGet, "/v1/reviews/review-1/builds/build-1", nil)
 	req.SetPathValue("build_id", "build-1")
-	// The read names the caller's tenant, so the handler needs the scoped
-	// security context the auth middleware would have installed.
 	req = req.WithContext(security.WithContext(req.Context(), security.Context{TenantID: "tenant-1", TenantType: string(model.TenantTypeCompany)}))
 	rec := httptest.NewRecorder()
 
@@ -200,10 +181,6 @@ func TestGetBuildReturnsTheRepositoryResult(t *testing.T) {
 	}
 }
 
-// TestCreateUnattachedBuildClearsAnyCallerSuppliedReviewID: POST /v1/builds
-// is the unattached path -- a caller-supplied reviewId in the body must not
-// smuggle a review link in through it (that is what the nested route is
-// for).
 func TestCreateUnattachedBuildClearsAnyCallerSuppliedReviewID(t *testing.T) {
 	service := &stubBuildService{}
 	routes := BuildRoutes{service: service, environments: ownEnvironmentGetter("env-1")}
@@ -224,8 +201,6 @@ func TestCreateUnattachedBuildClearsAnyCallerSuppliedReviewID(t *testing.T) {
 	}
 }
 
-// TestCreateUnattachedBuildRejectsTheRetiredGateKind: GATE is refused on the
-// unattached route too.
 func TestCreateUnattachedBuildRejectsTheRetiredGateKind(t *testing.T) {
 	service := &stubBuildService{}
 	routes := BuildRoutes{service: service, environments: ownEnvironmentGetter("env-1")}
@@ -240,8 +215,6 @@ func TestCreateUnattachedBuildRejectsTheRetiredGateKind(t *testing.T) {
 	}
 }
 
-// TestCreateUnattachedBuildReportsMissingEnvironmentCode: a build with
-// neither a review nor an environment has no identity to report against.
 func TestCreateUnattachedBuildReportsMissingEnvironmentCode(t *testing.T) {
 	service := &stubBuildService{err: &service.UnattachedBuildRequiresEnvironmentError{}}
 	routes := BuildRoutes{service: service}
@@ -259,9 +232,6 @@ func TestCreateUnattachedBuildReportsMissingEnvironmentCode(t *testing.T) {
 	}
 }
 
-// TestListAllBuildsReturnsAPagedEnvelope: GET /v1/builds' response is
-// {builds, nextCursor}, not a bare array -- distinct from the review-nested
-// list, which stays a bare array since it never paginates.
 func TestListAllBuildsReturnsAPagedEnvelope(t *testing.T) {
 	routes := BuildRoutes{builds: &stubBuildRepository{build: model.Build{BuildID: "build-1"}}}
 	req := httptest.NewRequest(http.MethodGet, "/v1/builds", nil)
@@ -277,9 +247,6 @@ func TestListAllBuildsReturnsAPagedEnvelope(t *testing.T) {
 	}
 }
 
-// TestListAllBuildsFiltersByCommit: `?commit=` narrows the history to the
-// builds of one commit, which is how a caller finds the build recorded for a
-// commit that landed.
 func TestListAllBuildsFiltersByCommit(t *testing.T) {
 	builds := &stubBuildRepository{build: model.Build{BuildID: "build-1"}}
 	routes := BuildRoutes{builds: builds}
@@ -299,8 +266,6 @@ func TestListAllBuildsFiltersByCommit(t *testing.T) {
 	}
 }
 
-// TestListAllBuildsRejectsAMalformedSuccessfulFilter: a query filter with the
-// wrong shape is a 400, not a repository error.
 func TestListAllBuildsRejectsAMalformedSuccessfulFilter(t *testing.T) {
 	routes := BuildRoutes{builds: &stubBuildRepository{}}
 	req := httptest.NewRequest(http.MethodGet, "/v1/builds?successful=maybe", nil)
@@ -313,9 +278,7 @@ func TestListAllBuildsRejectsAMalformedSuccessfulFilter(t *testing.T) {
 	}
 }
 
-// stubTrackingEnvironmentGetter records every id it was asked about, so a
-// test can tell "the environment was never consulted" from "it was consulted
-// and answered not-found".
+// stubTrackingEnvironmentGetter records lookups to tell "never consulted" from "not found".
 type stubTrackingEnvironmentGetter struct {
 	own   ownEnvironments
 	asked []string
@@ -326,7 +289,6 @@ func (s *stubTrackingEnvironmentGetter) Get(_ context.Context, environmentID str
 	return s.own.Get(context.Background(), environmentID)
 }
 
-// postBuild drives one of the two build-reporting handlers.
 func postBuild(t *testing.T, routes BuildRoutes, path, environmentID, reviewID, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(body))
@@ -342,16 +304,7 @@ func postBuild(t *testing.T, routes BuildRoutes, path, environmentID, reviewID, 
 	return rec
 }
 
-// TestBuildRoutesRefuseAnotherTenantsEnvironmentBeforeCreating covers both
-// build-reporting routes: an environmentId the caller's own RLS-scoped read
-// cannot see is refused before the build is ever written, so the route is
-// never the place that decides whether an id exists somewhere the caller
-// cannot look.
 func TestBuildRoutesRefuseAnotherTenantsEnvironmentBeforeCreating(t *testing.T) {
-	// The getter's rule is the real one: an id the caller's tenant does not
-	// own is simply not found. Cross-tenant and nonexistent are then distinct
-	// inputs -- only one of them names a row that really exists -- which is
-	// exactly why their answers must not differ.
 	environments := &stubTrackingEnvironmentGetter{own: ownEnvironments{"env-mine": true}}
 
 	cases := []struct {
@@ -403,8 +356,6 @@ func TestBuildRoutesRefuseAnotherTenantsEnvironmentBeforeCreating(t *testing.T) 
 		responses[tc.name] = rec.Body.String()
 	}
 
-	// The refusal must not depend on which of the two it was: a caller that
-	// does not own the id must learn nothing about whether it exists.
 	if responses["unattached, another tenant's environment"] != responses["unattached, an environment that exists nowhere"] {
 		t.Fatalf("the two unattached refusals differ:\n  other tenant: %q\n  nonexistent:  %q",
 			responses["unattached, another tenant's environment"], responses["unattached, an environment that exists nowhere"])
@@ -415,8 +366,6 @@ func TestBuildRoutesRefuseAnotherTenantsEnvironmentBeforeCreating(t *testing.T) 
 	}
 }
 
-// TestBuildRoutesAcceptTheCallersOwnEnvironment: the guard refuses ids the
-// caller does not own, not environmentId itself.
 func TestBuildRoutesAcceptTheCallersOwnEnvironment(t *testing.T) {
 	environments := &stubTrackingEnvironmentGetter{own: ownEnvironments{"env-mine": true}}
 	service := &stubBuildService{}
@@ -433,10 +382,6 @@ func TestBuildRoutesAcceptTheCallersOwnEnvironment(t *testing.T) {
 	}
 }
 
-// TestUnattachedBuildWithNoEnvironmentIsNotAnEnvironmentLookup: an omitted
-// environmentId is a real case (the build's own identity rule then decides),
-// not an id that failed to resolve -- so the guard must not invent a lookup
-// for it.
 func TestUnattachedBuildWithNoEnvironmentIsNotAnEnvironmentLookup(t *testing.T) {
 	environments := &stubTrackingEnvironmentGetter{own: ownEnvironments{}}
 	service := &stubBuildService{err: &service.UnattachedBuildRequiresEnvironmentError{}}

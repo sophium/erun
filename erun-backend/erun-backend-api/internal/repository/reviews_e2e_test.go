@@ -7,20 +7,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
-
-	eruncommon "github.com/sophium/erun/erun-common"
-
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
-
-	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
 )
 
-// Review authorship, reviewer assignment, and the one-live-review-per-branch
-// index all live in SQL (a DB-side default, a join table under RLS, a partial
-// unique index), so they are exercised against a real migrated PostgreSQL
-// rather than a fake that agrees with itself.
 func reviewsDatabase(t *testing.T) (*sql.DB, string) {
 	t.Helper()
 	databaseURL := testpg.URL(t)
@@ -38,10 +30,7 @@ func seedReviewsTenant(t *testing.T, db *sql.DB, label string) string {
 	return seedReviewsTenantOfType(t, db, label, "COMPANY")
 }
 
-// seedReviewsTenantOfType is seedReviewsTenant's general form, for the
-// OPERATIONS-caller scoping regression tests below: erun_operations' RLS
-// policy is unconditional (USING (true)), so only an OPERATIONS-typed tenant
-// can actually exercise the bypass List/ListMergeQueue must guard against.
+// Only an OPERATIONS tenant exercises erun_operations' unconditional RLS policy.
 func seedReviewsTenantOfType(t *testing.T, db *sql.DB, label string, tenantType string) string {
 	t.Helper()
 	var tenantID string
@@ -55,8 +44,7 @@ func seedReviewsTenantOfType(t *testing.T, db *sql.DB, label string, tenantType 
 
 func clearReviewsTenant(t *testing.T, db *sql.DB, tenantID string) {
 	t.Helper()
-	// reviews and builds reference each other (last_*_build_id / review_id), so
-	// the cycle has to be broken before either can be deleted.
+	// reviews and builds reference each other; break the cycle before deleting.
 	if _, err := db.Exec(`
 		UPDATE reviews
 		   SET status = 'CLOSED', last_failed_build_id = NULL, last_ready_build_id = NULL, last_merged_build_id = NULL
@@ -88,17 +76,12 @@ func reviewsContext(tenantID, userID string) context.Context {
 	})
 }
 
-// reviewsContextOfType is reviewsContext's general form, for the
-// OPERATIONS-caller scoping regression tests below.
 func reviewsContextOfType(tenantID, userID, tenantType string) context.Context {
 	return security.WithContext(context.Background(), security.Context{
 		TenantID: tenantID, TenantType: tenantType, ErunUserID: userID,
 	})
 }
 
-// TestReviewAuthorDefaultsToTheAuthenticatedCallerAndIgnoresACallerSuppliedOne
-// is the impersonation guard the issue calls for: erun_current_user_id() —
-// not a client-asserted field — decides who a review's author is.
 func TestReviewAuthorDefaultsToTheAuthenticatedCallerAndIgnoresACallerSuppliedOne(t *testing.T) {
 	db, tenantID := reviewsDatabase(t)
 	author := seedReviewsUser(t, db, tenantID, "author")
@@ -125,9 +108,6 @@ func TestReviewAuthorDefaultsToTheAuthenticatedCallerAndIgnoresACallerSuppliedOn
 	}
 }
 
-// TestReviewReviewersCanBeAddedListedAndRemoved proves point 2 of the issue:
-// a review can be directed at more than one person, and removing one leaves
-// the others.
 func TestReviewReviewersCanBeAddedListedAndRemoved(t *testing.T) {
 	db, tenantID := reviewsDatabase(t)
 	author := seedReviewsUser(t, db, tenantID, "author")
@@ -172,9 +152,6 @@ func TestReviewReviewersCanBeAddedListedAndRemoved(t *testing.T) {
 	}
 }
 
-// TestReviewReviewerFromAnotherTenantIsRefusedByTheFK is the validation the
-// issue names explicitly: a reviewer must belong to the same tenant as the
-// review.
 func TestReviewReviewerFromAnotherTenantIsRefusedByTheFK(t *testing.T) {
 	db, tenantID := reviewsDatabase(t)
 	author := seedReviewsUser(t, db, tenantID, "author")
@@ -200,8 +177,6 @@ func TestReviewReviewerFromAnotherTenantIsRefusedByTheFK(t *testing.T) {
 	}
 }
 
-// TestReviewDiscoveryFiltersAnswerMyReviewsAndReviewsWaitingOnMe is the
-// discovery gap the issue opens with: today only targetBranch is filterable.
 func TestReviewDiscoveryFiltersAnswerMyReviewsAndReviewsWaitingOnMe(t *testing.T) {
 	db, tenantID := reviewsDatabase(t)
 	me := seedReviewsUser(t, db, tenantID, "me")
@@ -222,21 +197,18 @@ func TestReviewDiscoveryFiltersAnswerMyReviewsAndReviewsWaitingOnMe(t *testing.T
 	_, err = reviewers.Create(ctxSomeoneElse, model.ReviewReviewer{ReviewID: theirs.ReviewID, UserID: me})
 	mustNoErr(t, err, "assign me as a reviewer")
 
-	// "my reviews": authored by me, open.
 	myReviews, err := reviews.List(ctxMe, ReviewFilter{AuthorUserID: me, Status: model.ReviewStatusOpen})
 	mustNoErr(t, err, "list my reviews")
 	if len(myReviews) != 1 || myReviews[0].ReviewID != mine.ReviewID {
 		t.Fatalf("authorUserId+status filter returned %+v, want exactly %s", myReviews, mine.ReviewID)
 	}
 
-	// "reviews waiting on me": I am a reviewer.
 	waitingOnMe, err := reviews.List(ctxMe, ReviewFilter{ReviewerUserID: me})
 	mustNoErr(t, err, "list reviews waiting on me")
 	if len(waitingOnMe) != 1 || waitingOnMe[0].ReviewID != theirs.ReviewID {
 		t.Fatalf("reviewerUserId filter returned %+v, want exactly %s", waitingOnMe, theirs.ReviewID)
 	}
 
-	// sourceBranch composes with the existing targetBranch filter.
 	bySourceBranch, err := reviews.List(ctxMe, ReviewFilter{TargetBranch: "main", SourceBranch: "feature/mine"})
 	mustNoErr(t, err, "list by source+target branch")
 	if len(bySourceBranch) != 1 || bySourceBranch[0].ReviewID != mine.ReviewID {
@@ -244,9 +216,6 @@ func TestReviewDiscoveryFiltersAnswerMyReviewsAndReviewsWaitingOnMe(t *testing.T
 	}
 }
 
-// TestOnlyOneLiveReviewPerSourceAndTargetBranch proves point 4: the second
-// review is refused while the first is live, and accepted once the first is
-// MERGED or CLOSED, because branch history must stay unbounded.
 func TestOnlyOneLiveReviewPerSourceAndTargetBranch(t *testing.T) {
 	db, tenantID := reviewsDatabase(t)
 	author := seedReviewsUser(t, db, tenantID, "author")
@@ -267,7 +236,6 @@ func TestOnlyOneLiveReviewPerSourceAndTargetBranch(t *testing.T) {
 		t.Fatalf("second review error = %v, want ErrConflict", err)
 	}
 
-	// Closing the first frees the branch pair up for a fresh proposal.
 	first.Status = model.ReviewStatusClosed
 	closed, err := reviews.Update(ctx, first)
 	mustNoErr(t, err, "close first review")
@@ -279,8 +247,6 @@ func TestOnlyOneLiveReviewPerSourceAndTargetBranch(t *testing.T) {
 	})
 	mustNoErr(t, err, "create review after the first closed")
 
-	// A second live review is refused again; merging (rather than closing)
-	// the live one frees the pair the same way.
 	if _, err := reviews.Create(ctx, model.Review{
 		Name: "fourth proposal", TargetBranch: "main", SourceBranch: "feature/duplicate", Status: model.ReviewStatusOpen,
 	}); !errors.Is(err, ErrConflict) {
@@ -302,9 +268,6 @@ func TestOnlyOneLiveReviewPerSourceAndTargetBranch(t *testing.T) {
 	}
 }
 
-// TestReviewTenantIsolation proves a caller from one tenant cannot see or
-// touch another tenant's reviews, the same RLS boundary every tenant-owned
-// table must hold.
 func TestReviewTenantIsolation(t *testing.T) {
 	db, tenantA := reviewsDatabase(t)
 	authorA := seedReviewsUser(t, db, tenantA, "tenant-a-author")
@@ -339,8 +302,6 @@ func TestReviewTenantIsolation(t *testing.T) {
 	}
 }
 
-// openReview is a small helper for the builds.kind tests below: they only
-// need a review to attach a build to, not any particular review workflow.
 func openReview(t *testing.T, reviews *ReviewRepository, ctx context.Context, name, sourceBranch string) model.Review {
 	t.Helper()
 	review, err := reviews.Create(ctx, model.Review{
@@ -350,201 +311,6 @@ func openReview(t *testing.T, reviews *ReviewRepository, ctx context.Context, na
 	return review
 }
 
-// TestBuildKindContractRequiresAVersionAndKeepsLegacyGateRowsValid is the
-// database half of the builds.kind contract: every build written today is
-// RECORDED and must carry a version, with failure_detail an optional reason on
-// any failed build; the retired GATE kind stays insertable exactly as its
-// historical rows were (review-linked, no version, a failure detail when
-// failed), because MERGED reviews' last_merged_build_id still points at those
-// rows and the CHECKs keep them valid.
-func TestBuildKindContractRequiresAVersionAndKeepsLegacyGateRowsValid(t *testing.T) {
-	db, tenantID := reviewsDatabase(t)
-	author := seedReviewsUser(t, db, tenantID, "author")
-	ctx := reviewsContext(tenantID, author)
-	reviews := NewReviewRepository(NewTxManager(db, DialectPostgres))
-	builds := NewBuildRepository(NewTxManager(db, DialectPostgres))
-
-	review := openReview(t, reviews, ctx, "build kind contract review", "feature/build-kind-contract")
-
-	if _, err := builds.Create(ctx, model.Build{
-		ReviewID: review.ReviewID, Kind: model.BuildKindRecorded, Successful: true, CommitID: "merge-sha",
-	}); err == nil {
-		t.Fatal("a RECORDED build with no version was accepted, want the CHECK constraint to require one")
-	}
-
-	recorded, err := builds.Create(ctx, model.Build{
-		ReviewID: review.ReviewID, Kind: model.BuildKindRecorded, Successful: true, CommitID: "merge-sha", Version: "1.0.0",
-	})
-	mustNoErr(t, err, "create a RECORDED build with a version")
-	if recorded.Version != "1.0.0" {
-		t.Fatalf("version = %q, want 1.0.0", recorded.Version)
-	}
-
-	failed, err := builds.Create(ctx, model.Build{
-		ReviewID: review.ReviewID, Kind: model.BuildKindRecorded, Successful: false, CommitID: "merge-sha-bad", Version: "1.0.1",
-		FailureDetail: "erun build failed: go vet found 3 issues",
-	})
-	mustNoErr(t, err, "create a failed RECORDED build with a failure detail")
-	if failed.FailureDetail == "" {
-		t.Fatal("failureDetail was not persisted for a failed RECORDED build")
-	}
-	_, err = builds.Create(ctx, model.Build{
-		ReviewID: review.ReviewID, Kind: model.BuildKindRecorded, Successful: false, CommitID: "merge-sha-bad", Version: "1.0.2",
-	})
-	mustNoErr(t, err, "create a failed RECORDED build with no failure detail")
-
-	legacy, err := builds.Create(ctx, model.Build{
-		ReviewID: review.ReviewID, Kind: model.BuildKindGate, Successful: true, CommitID: "legacy-merge-sha",
-	})
-	mustNoErr(t, err, "insert a historical-shape GATE row with no version")
-	read, err := builds.Get(ctx, tenantID, legacy.BuildID)
-	mustNoErr(t, err, "read the historical GATE row back")
-	if read.Kind != model.BuildKindGate || read.Version != "" {
-		t.Fatalf("historical GATE row read back as kind %q version %q, want GATE with no version", read.Kind, read.Version)
-	}
-	if _, err := builds.Create(ctx, model.Build{
-		ReviewID: review.ReviewID, Kind: model.BuildKindGate, Successful: true, CommitID: "legacy-merge-sha", Version: "1.0.0",
-	}); err == nil {
-		t.Fatal("a GATE row with a version was accepted, want the CHECK constraint to keep the historical shape")
-	}
-}
-
-// TestBuildListPageFiltersByCommit: GET /v1/builds' commit filter narrows the
-// tenant-wide history to the builds of one commit, alongside the successful
-// filter, which is how a caller finds the successful build recorded for a
-// commit that landed.
-func TestBuildListPageFiltersByCommit(t *testing.T) {
-	db, tenantID := reviewsDatabase(t)
-	author := seedReviewsUser(t, db, tenantID, "author")
-	ctx := reviewsContext(tenantID, author)
-	reviews := NewReviewRepository(NewTxManager(db, DialectPostgres))
-	builds := NewBuildRepository(NewTxManager(db, DialectPostgres))
-	review := openReview(t, reviews, ctx, "commit filter review", "feature/commit-filter")
-
-	landed, err := builds.Create(ctx, model.Build{
-		ReviewID: review.ReviewID, Kind: model.BuildKindRecorded, Successful: true, CommitID: "landed-sha", Version: "1.0.0",
-	})
-	mustNoErr(t, err, "create the landed commit's successful build")
-	_, err = builds.Create(ctx, model.Build{
-		ReviewID: review.ReviewID, Kind: model.BuildKindRecorded, Successful: false, CommitID: "landed-sha", Version: "1.0.1",
-	})
-	mustNoErr(t, err, "create the landed commit's failed build")
-	_, err = builds.Create(ctx, model.Build{
-		ReviewID: review.ReviewID, Kind: model.BuildKindRecorded, Successful: true, CommitID: "other-sha", Version: "1.0.2",
-	})
-	mustNoErr(t, err, "create another commit's build")
-
-	successful := true
-	page, err := builds.ListPage(ctx, BuildListFilter{CommitID: "landed-sha", Successful: &successful})
-	mustNoErr(t, err, "list the landed commit's successful builds")
-	if len(page.Builds) != 1 || page.Builds[0].BuildID != landed.BuildID {
-		t.Fatalf("ListPage(commit=landed-sha, successful) = %+v, want exactly build %s", page.Builds, landed.BuildID)
-	}
-
-	page, err = builds.ListPage(ctx, BuildListFilter{CommitID: "landed-sha"})
-	mustNoErr(t, err, "list every build of the landed commit")
-	if len(page.Builds) != 2 {
-		t.Fatalf("ListPage(commit=landed-sha) returned %d builds, want both of that commit's builds and not the other commit's", len(page.Builds))
-	}
-}
-
-// TestBuildProfileRoundTripsThroughCreateAndGet proves the bounded per-build
-// profile survives a real jsonb column round trip -- Get uses a hand-written
-// SELECT column list, unlike Bun's usual
-// Model(&x).Scan, so a column added to the table without a matching addition
-// to that SELECT would silently read back as the field's zero value rather
-// than failing loudly.
-func TestBuildProfileRoundTripsThroughCreateAndGet(t *testing.T) {
-	db, tenantID := reviewsDatabase(t)
-	author := seedReviewsUser(t, db, tenantID, "author")
-	ctx := reviewsContext(tenantID, author)
-	reviews := NewReviewRepository(NewTxManager(db, DialectPostgres))
-	builds := NewBuildRepository(NewTxManager(db, DialectPostgres))
-
-	review := openReview(t, reviews, ctx, "build profile review", "feature/build-profile")
-
-	profile := &eruncommon.BuildProfileSummary{
-		DurationSeconds: 42.5,
-		TotalStepCount:  2,
-		TopSteps: []eruncommon.BuildProfileStepSummary{
-			{Name: "erun-devops", DurationSeconds: 40},
-			{Name: "erun-devops > linux/amd64", DurationSeconds: 39},
-		},
-	}
-	created, err := builds.Create(ctx, model.Build{
-		ReviewID: review.ReviewID, Kind: model.BuildKindRecorded, Successful: true,
-		CommitID: "profile-sha", Version: "1.0.0", Profile: profile,
-	})
-	mustNoErr(t, err, "create a RECORDED build with a profile")
-	if created.Profile == nil {
-		t.Fatal("Create did not return the profile it was given")
-	}
-
-	fetched, err := builds.Get(ctx, created.TenantID, created.BuildID)
-	mustNoErr(t, err, "get the build back")
-	if fetched.Profile == nil {
-		t.Fatal("Get did not read back a profile")
-	}
-	if fetched.Profile.DurationSeconds != 42.5 || fetched.Profile.TotalStepCount != 2 {
-		t.Fatalf("profile totals did not round-trip: got %+v", fetched.Profile)
-	}
-	if len(fetched.Profile.TopSteps) != 2 || fetched.Profile.TopSteps[0].Name != "erun-devops" {
-		t.Fatalf("profile top steps did not round-trip: got %+v", fetched.Profile.TopSteps)
-	}
-
-	noProfile, err := builds.Create(ctx, model.Build{
-		ReviewID: review.ReviewID, Kind: model.BuildKindRecorded, Successful: true,
-		CommitID: "no-profile-sha", Version: "1.0.1",
-	})
-	mustNoErr(t, err, "create a RECORDED build with no profile")
-	if noProfile.Profile != nil {
-		t.Fatalf("expected a nil profile for a build that reported none, got %+v", noProfile.Profile)
-	}
-}
-
-// TestBuildTenantIsolation proves a caller from one tenant cannot see or fetch
-// another tenant's builds — the same RLS boundary every tenant-owned table must hold.
-func TestBuildTenantIsolation(t *testing.T) {
-	db, tenantA := reviewsDatabase(t)
-	authorA := seedReviewsUser(t, db, tenantA, "tenant-a-author")
-	ctxA := reviewsContext(tenantA, authorA)
-	reviews := NewReviewRepository(NewTxManager(db, DialectPostgres))
-	builds := NewBuildRepository(NewTxManager(db, DialectPostgres))
-
-	reviewA := openReview(t, reviews, ctxA, "tenant a build review", "feature/tenant-a-build")
-	buildA, err := builds.Create(ctxA, model.Build{
-		ReviewID: reviewA.ReviewID, Kind: model.BuildKindRecorded, Successful: true, CommitID: "merge-sha-tenant-a", Version: "1.0.0",
-	})
-	mustNoErr(t, err, "create tenant A's build")
-
-	tenantB := seedReviewsTenant(t, db, "reviews-e2e-tenant-b-builds")
-	t.Cleanup(func() { clearReviewsTenant(t, db, tenantB) })
-	authorB := seedReviewsUser(t, db, tenantB, "tenant-b-author")
-	ctxB := reviewsContext(tenantB, authorB)
-
-	reviewB := openReview(t, reviews, ctxB, "tenant b build review", "feature/tenant-b-build")
-	_, err = builds.Create(ctxB, model.Build{
-		ReviewID: reviewB.ReviewID, Kind: model.BuildKindRecorded, Successful: true, CommitID: "commit-b", Version: "1.0.0",
-	})
-	mustNoErr(t, err, "create tenant B's build")
-
-	listedByB, err := builds.List(ctxB, BuildFilter{})
-	mustNoErr(t, err, "list builds as tenant B")
-	for _, build := range listedByB {
-		if build.BuildID == buildA.BuildID {
-			t.Fatalf("tenant B's build list included tenant A's build %s", buildA.BuildID)
-		}
-	}
-
-	if _, err := builds.Get(ctxB, tenantB, buildA.BuildID); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("tenant B fetching tenant A's build by ID: err = %v, want ErrNotFound", err)
-	}
-}
-
-// TestReviewListScopesToTheOperationsCallersOwnTenant pins the failure
-// scenario directly: an OPERATIONS caller's List must not include a stranger
-// tenant's reviews even though erun_operations' RLS policy makes them visible
-// too.
 func TestReviewListScopesToTheOperationsCallersOwnTenant(t *testing.T) {
 	db, strangerTenantID := reviewsDatabase(t)
 	strangerAuthor := seedReviewsUser(t, db, strangerTenantID, "stranger-author")
@@ -565,9 +331,6 @@ func TestReviewListScopesToTheOperationsCallersOwnTenant(t *testing.T) {
 	}
 }
 
-// TestReviewListMergeQueueScopesToTheOperationsCallersOwnTenant pins the same
-// failure scenario for the merge queue: an OPERATIONS caller's
-// ListMergeQueue must not include a stranger tenant's queued review.
 func TestReviewListMergeQueueScopesToTheOperationsCallersOwnTenant(t *testing.T) {
 	db, strangerTenantID := reviewsDatabase(t)
 	strangerAuthor := seedReviewsUser(t, db, strangerTenantID, "stranger-author")
@@ -613,43 +376,6 @@ func TestReviewListMergeQueueScopesToTheOperationsCallersOwnTenant(t *testing.T)
 	}
 }
 
-// TestBuildListScopesToTheOperationsCallersOwnTenant pins the failure
-// scenario for builds: an OPERATIONS caller's List must not include a
-// stranger tenant's builds even though erun_operations' RLS policy makes
-// them visible too.
-func TestBuildListScopesToTheOperationsCallersOwnTenant(t *testing.T) {
-	db, strangerTenantID := reviewsDatabase(t)
-	strangerAuthor := seedReviewsUser(t, db, strangerTenantID, "stranger-author")
-	strangerCtx := reviewsContext(strangerTenantID, strangerAuthor)
-	reviews := NewReviewRepository(NewTxManager(db, DialectPostgres))
-	builds := NewBuildRepository(NewTxManager(db, DialectPostgres))
-	strangerReview := openReview(t, reviews, strangerCtx, "stranger build review", "feature/stranger-build")
-	_, err := builds.Create(strangerCtx, model.Build{
-		ReviewID: strangerReview.ReviewID, Kind: model.BuildKindRecorded, Successful: true, CommitID: "merge-sha-stranger", Version: "1.0.0",
-	})
-	mustNoErr(t, err, "create stranger build")
-
-	opsTenantID := seedReviewsTenantOfType(t, db, "reviews-e2e-ops-build", "OPERATIONS")
-	t.Cleanup(func() { clearReviewsTenant(t, db, opsTenantID) })
-	opsAuthor := seedReviewsUser(t, db, opsTenantID, "ops-author")
-	opsCtx := reviewsContextOfType(opsTenantID, opsAuthor, "OPERATIONS")
-	opsReview := openReview(t, reviews, opsCtx, "ops build review", "feature/ops-build")
-	opsBuild, err := builds.Create(opsCtx, model.Build{
-		ReviewID: opsReview.ReviewID, Kind: model.BuildKindRecorded, Successful: true, CommitID: "merge-sha-ops", Version: "1.0.0",
-	})
-	mustNoErr(t, err, "create ops build")
-
-	listed, err := builds.List(opsCtx, BuildFilter{})
-	mustNoErr(t, err, "list builds as operations caller")
-	if len(listed) != 1 || listed[0].BuildID != opsBuild.BuildID {
-		t.Fatalf("List = %+v, want exactly the operations caller's own build %s, not the stranger's as well", listed, opsBuild.BuildID)
-	}
-}
-
-// TestReviewReviewerListScopesToTheOperationsCallersOwnTenant pins the
-// failure scenario for review reviewers: an OPERATIONS caller's List must
-// not include a stranger tenant's reviewer assignments even though
-// erun_operations' RLS policy makes them visible too.
 func TestReviewReviewerListScopesToTheOperationsCallersOwnTenant(t *testing.T) {
 	db, strangerTenantID := reviewsDatabase(t)
 	strangerAuthor := seedReviewsUser(t, db, strangerTenantID, "stranger-author")
@@ -677,11 +403,6 @@ func TestReviewReviewerListScopesToTheOperationsCallersOwnTenant(t *testing.T) {
 	}
 }
 
-// TestReviewRepositoryScopesNameUniquenessToTheRepository is the reported
-// failure against real Postgres: two repositories a tenant serves have
-// branches with the same names and, in a rebased-again workflow, the same
-// squash-merge message, so a name reserved tenant-wide made the second
-// repository's review unopenable for a reason that had nothing to do with it.
 func TestReviewRepositoryScopesNameUniquenessToTheRepository(t *testing.T) {
 	db, tenantID := reviewsDatabase(t)
 	author := seedReviewsUser(t, db, tenantID, "author")
@@ -712,23 +433,7 @@ func TestReviewRepositoryScopesNameUniquenessToTheRepository(t *testing.T) {
 	}
 }
 
-// TestReviewClosedReviewReleasesItsName is the reported failure against real
-// Postgres: a review's name is the squash-merge message it will land under, so
-// names are unique per repository only among reviews that can still reach
-// MERGED or did reach it. A CLOSED review never landed, so its name was never
-// used as a merge message and must reserve nothing — re-reviewing a rebased
-// branch under the subject its own commit already carries is an ordinary
-// workflow, and refusing it forced a reworded message for no reason a reader
-// could see.
-//
-// Repository, source branch, and target branch are all held constant across the
-// two creates on purpose: that is the reported reproduction (`erun review
-// close`, then `erun review create` for the same branch with the same name), and
-// the one-live-review-per-branch index has to release the pair for exactly the
-// same reason the name index has to release the name. The first create is kept
-// as an in-test control — it proves the name really was taken while the review
-// was live, so the create after the close is exercising the release rather than
-// a name that was never reserved.
+// The first create is a control proving the name was reserved while live.
 func TestReviewClosedReviewReleasesItsName(t *testing.T) {
 	db, tenantID := reviewsDatabase(t)
 	author := seedReviewsUser(t, db, tenantID, "author")
@@ -774,8 +479,7 @@ func TestReviewClosedReviewReleasesItsName(t *testing.T) {
 		t.Fatalf("reopened review status = %q, want %q", reopened.Status, model.ReviewStatusOpen)
 	}
 
-	// The closed review is still there, still CLOSED: releasing the name is not
-	// a delete, and the history a reader finds under it must survive.
+	// Releasing the name is not a delete.
 	stored, err := reviews.Get(ctx, abandoned.ReviewID)
 	mustNoErr(t, err, "read the closed review back")
 	if stored.Status != model.ReviewStatusClosed || stored.Name != message {
@@ -783,9 +487,6 @@ func TestReviewClosedReviewReleasesItsName(t *testing.T) {
 	}
 }
 
-// TestReviewMergeQueueIsPerRepository is the queue half of the same failure:
-// a target branch is not what names a queue, so a repository's own queued
-// reviews are only ever found by naming its identity too.
 func TestReviewMergeQueueIsPerRepository(t *testing.T) {
 	db, tenantID := reviewsDatabase(t)
 	author := seedReviewsUser(t, db, tenantID, "author")

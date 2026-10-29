@@ -9,7 +9,8 @@ This applies the `terraform-erun-cluster-edge` Terraform module to the cluster
 so per-env services (`mcp.<tenant>-<env>.services.<base-domain>`) and the console
 can be served over public HTTPS. The module installs Traefik + cert-manager and a
 **namespaced DNS-01 `Issuer`** (in the env namespace) that issues a wildcard cert
-for the services zone. It's idempotent — re-running reconciles.
+for the services zone. The edge's Terraform state lives in the cluster, so
+re-running reconciles the edge that is there instead of creating it again.
 
 ## Prerequisites — check before applying
 
@@ -18,17 +19,30 @@ for the services zone. It's idempotent — re-running reconciles.
    ```sh
    [ -n "${CLOUDFLARE_API_TOKEN:-}" ] || { echo "No CLOUDFLARE_API_TOKEN — attach a Cloudflare alias: erun cloud init cloudflare, then erun cloud set <tenant>/<env> --alias <name>@cloudflare, then redeploy."; exit 1; }
    ```
-2. **`terraform` and `kubectl` are available**, and `kubectl` targets the cluster
-   you mean to expose (in a deployed env this is the in-cluster service account):
+2. **`terraform`, `kubectl`, `helm` and `jq` are available** — the flow reads its
+   plan with `jq` and finds an existing edge with `helm` — and `kubectl` targets
+   the cluster you mean to expose (in a deployed env this is the in-cluster
+   service account):
    ```sh
-   command -v terraform >/dev/null && command -v kubectl >/dev/null || { echo "terraform + kubectl required"; exit 1; }
+   for tool in terraform kubectl helm jq; do
+     command -v "$tool" >/dev/null || { echo "$tool is required"; exit 1; }
+   done
    kubectl cluster-info >/dev/null || { echo "kubectl is not pointed at a reachable cluster"; exit 1; }
    ```
+   The module's Traefik chart needs **Kubernetes 1.30 or later**; on an older
+   cluster the apply is refused (`chart requires kubeVersion: >=1.30.0-0`), so
+   check before applying and upgrade the cluster (k3s) first if it is older:
+   ```sh
+   minor=$(kubectl get --raw /version | sed -n 's/.*"minor": *"\([0-9]*\).*/\1/p')
+   [ "${minor:-0}" -ge 30 ] || { echo "Kubernetes 1.${minor} is older than the 1.30 the edge's Traefik chart needs; upgrade the cluster first."; exit 1; }
+   ```
    In a deployed env the apply runs as the pod's ServiceAccount, which needs
-   cluster-scoped rights (create namespaces + CRDs). Confirm this env is a
+   cluster-scoped rights (create namespaces + CRDs) and writes the edge's state
+   to `kube-system` (a Secret, locked by a Lease). Confirm this env is a
    **platform account** — its SA bound to `cluster-admin`:
    ```sh
    kubectl auth can-i create namespaces >/dev/null && kubectl auth can-i create customresourcedefinitions >/dev/null \
+     && kubectl auth can-i create secrets -n kube-system >/dev/null && kubectl auth can-i create leases.coordination.k8s.io -n kube-system >/dev/null \
      || { echo "SA lacks cluster-scoped rights. Make this env a platform account: erun init --platform-account (or set platformaccount: true), then redeploy from an admin-capable context so the chart binds the SA to cluster-admin."; exit 1; }
    ```
 3. **The services zone and ACME email** — from the platform config
@@ -40,9 +54,29 @@ for the services zone. It's idempotent — re-running reconciles.
 The module is **referenced from erun's GitHub** by Terraform's native module
 addressing — not baked into the image, not cloned — pinned to the erun version
 this env runs so the edge matches the deployed platform (the same way `deploy`
-references the published Helm chart from OCI). Write a tiny root that declares
-the providers and calls the module; `terraform init` fetches it. The Cloudflare
-token rides in `TF_VAR_cloudflare_api_token`, never on the command line.
+references the published Helm chart from OCI). `terraform init -from-module`
+fetches it into a scratch directory as the root, so every module input on this
+page is a root variable set with `-var`; one file beside it configures the
+providers and where the state lives. The Cloudflare token rides in
+`TF_VAR_cloudflare_api_token`, never on the command line.
+
+**The state lives in the cluster, not in the directory.** The edge is one per
+cluster, so its Terraform state is the Secret `tfstate-default-erun-cluster-edge`
+in `kube-system`, locked by the Lease `lock-tfstate-default-erun-cluster-edge`
+beside it: a run started while another holds the lock is refused with the
+holder's details instead of racing it. A later run from a fresh directory plans
+against that state, which is what lets a re-run reconcile the edge rather than
+create it again. The state carries what the module writes into Secrets (the
+Cloudflare token, the TSIG key), so it is as sensitive as `kube-system`'s own.
+
+**The blocks run in one shell session.** The setup block below changes into the
+scratch root, exports what Terraform reads, and sets the edge's inputs as the
+shell's positional parameters (`set -- -var ...`); a mode block further down
+replaces those inputs; the plan-and-apply block uses all of it. Run setup, then
+the mode block if any, then plan-and-apply in the same shell — as one command, or
+saved together as one file and run with `sh` — never as separate commands: a
+fresh shell has none of that state, and the plan-and-apply block stops on its
+first line rather than plan without it.
 
 ```sh
 # Pin to the running erun version; off-pod, fall back to main.
@@ -50,43 +84,179 @@ version=$(erun version --no-registry 2>/dev/null | head -n1 | awk '{print $2}')
 ref="v${version:-main}"; [ "$ref" = "vmain" ] && ref="main"
 
 workdir=$(mktemp -d); cd "$workdir"
-cat > main.tf <<EOF
+terraform init -input=false -backend=false \
+  -from-module="git::https://github.com/sophium/erun.git//erun-devops/terraform-erun/modules/terraform-erun-cluster-edge?ref=${ref}"
+cat > erun-edge.tf <<'EOF'
 terraform {
-  required_providers {
-    helm       = { source = "hashicorp/helm", version = "~> 2.17" }
-    kubernetes = { source = "hashicorp/kubernetes", version = "~> 2.30" }
+  backend "kubernetes" {
+    secret_suffix = "erun-cluster-edge"
+    namespace     = "kube-system"
   }
 }
-# In a pod these use the in-cluster service account; on a laptop, KUBECONFIG.
 provider "kubernetes" {}
 provider "helm" {
   kubernetes {}
 }
-
-variable "cloudflare_api_token" {
-  type      = string
-  sensitive = true
-}
-variable "services_zone" { type = string }
-variable "acme_email"    { type = string }
-
-module "edge" {
-  source = "git::https://github.com/sophium/erun.git//erun-devops/terraform-erun/modules/terraform-erun-cluster-edge?ref=${ref}"
-
-  cloudflare_api_token = var.cloudflare_api_token
-  services_zone        = var.services_zone
-  acme_email           = var.acme_email
-}
 EOF
+
+# Terraform's providers and its kubernetes backend read neither KUBECONFIG nor
+# ~/.kube/config. Hand them the kubeconfig kubectl uses (in a pod, the one its
+# boot writes for the service account), so the edge, its state and every check
+# here address one cluster.
+unset KUBE_CONFIG_PATH KUBE_IN_CLUSTER_CONFIG
+if [ -n "${KUBECONFIG:-}" ]; then export KUBE_CONFIG_PATHS="$KUBECONFIG"
+elif [ -f "$HOME/.kube/config" ]; then export KUBE_CONFIG_PATHS="$HOME/.kube/config"
+fi
 
 export TF_VAR_cloudflare_api_token="$CLOUDFLARE_API_TOKEN"
 terraform init -input=false
-terraform apply -input=false -auto-approve \
-  -var "services_zone=<services-zone>" \
-  -var "acme_email=<acme-email>"
+
+# The edge's inputs. Pass the same set on every run: the state remembers the
+# edge, and a run that leaves a flag out plans to change it back.
+set -- -var "services_zone=<services-zone>" -var "acme_email=<acme-email>"
 ```
 
-While validating against a fresh zone, add
+Then plan and apply. On a cluster with no edge yet that is all it does. The edge
+already exists when its kept state holds the issuer release or — for an edge
+applied before its state was kept — when that release is deployed under the
+names this run gives it or the module's defaults (`erun-cloudflare-issuer` in
+`cert-manager`). On an existing edge these steps run between the plan and the
+apply:
+
+- **Never adopt an edge a tenant tree owns.** An edge applied with `erun terraform
+  apply` from a `terraform-<tenant>/<env>` tree is owned by that tree's local
+  state, `~/.erun/terraform/<tenant>/<env>/terraform.tfstate` on that environment's
+  home volume, and two states must never own one edge. Before adopting, the flow
+  reads every such state on this home volume and stops if one holds the issuer
+  release (`Not adopting: <state> already holds <release>. Maintain this edge with
+  erun terraform apply from that tenant tree.`). Another environment's home volume
+  cannot be seen from here, so adoption also waits for the operator: the flow
+  lists what it would import (`Adopting this edge imports:`) and stops (`Not
+  adopting yet: ...`). Set `EDGE_ADOPT=confirmed` and re-run only once the operator
+  confirms this skill applied the edge and no tenant tree did.
+- **Adopt once, and only what this skill could have created.** Until this skill
+  kept state every run started from none, so an edge it applied then has no state
+  to match: planned from nothing it creates everything again and fails
+  (`namespaces "cert-manager" already exists`, `cannot re-use a name that is
+  still in use`). Adoption runs only while the kept state lacks the issuer
+  release. It imports only what that stateless skill could have created — its
+  root passed the module nothing but `cloudflare_api_token`, `services_zone` and
+  `acme_email` — so only these objects, under these names, each one the plan
+  would create and the cluster holds: the `cert-manager` namespace, the
+  `cert-manager` and `traefik` releases, the `erun-cloudflare-cloudflare-token`
+  Secret, and the `erun-cloudflare-issuer` release. The issuer release is imported
+  last, so an adoption that was interrupted resumes on the next run and a finished
+  one never runs again; then the plan is made again. Nothing else is ever
+  imported: an object under other names, or one only a non-default input declares
+  (`coredns-custom`, say), is left to the gate, so an operator's own object of the
+  same name is never adopted.
+- **Reconcile in place only.** No run's plan may destroy anything, and on an
+  existing edge it may add nothing. A create there is an object adoption did not
+  import, or a feature being turned on; a delete or a replacement — possible only
+  once the state holds the edge, so checked on every run — is a flag the edge was
+  applied with missing from the inputs, or a change of what the edge is. Either
+  stops the run: show the operator the plan (`terraform show edge.tfplan`) and
+  apply it only on their say-so. The two server-side-apply patches
+  (`kubernetes_config_map_v1_data`, `kubernetes_annotations`) are the exception
+  for a create: they cannot be imported, and creating one patches the object that
+  is already there.
+- **Upgrade Traefik's CRDs first.** Helm installs a chart's CRDs only where they
+  are absent and never upgrades them, so a plan that moves the Traefik chart (an
+  edge first applied on chart 33.x moving to 42.x, say) would leave the cluster on
+  the old CRDs. The module's own `Middleware` and `IngressRoute` objects need no
+  newer field, so the apply would still succeed; Traefik's own upgrade procedure
+  still applies the new chart's CRDs before the upgrade, so this does the same,
+  for the chart version the plan resolved (`-var traefik_chart_version=...`
+  included). Without `helm_release.traefik` in the plan — `install_ingress_controller=false`
+  — it is skipped: the CRDs belong to the controller already there.
+
+**Every check fails closed.** Each `terraform`, `jq`, `helm` and `kubectl` call
+the flow's decisions rest on stops the run when it fails, so a broken tool, an
+unreadable state or an unreachable cluster never reads as "no edge" and skips
+the gate.
+
+```sh
+# Needs the setup block directory, exports and inputs: run it in that same shell.
+[ -f erun-edge.tf ] && [ "$#" -gt 0 ] || { echo "Run this in the shell that ran the setup block, with the edge inputs set (set -- -var ...)." >&2; exit 1; }
+
+terraform plan -input=false -out=edge.tfplan "$@" || exit 1
+terraform show -json edge.tfplan > edge.json || exit 1
+
+# The edge exists when its kept state holds the issuer release or, applied before
+# its state was kept, when that release is deployed under the names of this run or the defaults.
+held=$(terraform state list) || exit 1
+edge= deployed=
+if printf '%s\n' "$held" | grep -qx 'helm_release.issuer'; then
+  edge=kept
+else
+  release=$(jq -r '.resource_changes[] | select(.address == "helm_release.issuer") | .change.after | "\(.namespace)/\(.name)"' edge.json) || exit 1
+  for id in "$release" cert-manager/erun-cloudflare-issuer; do
+    found=$(helm list -q -n "${id%%/*}" --filter "^${id#*/}\$") || exit 1
+    [ -n "$deployed" ] || [ -z "$found" ] || deployed=$id
+  done
+  edge=$deployed
+fi
+
+if [ -n "$deployed" ]; then
+  # A tenant tree state (erun terraform apply) that holds this release owns the edge.
+  for st in "$HOME"/.erun/terraform/*/*/terraform.tfstate; do
+    [ -e "$st" ] || continue
+    owned=$(jq --arg id "$deployed" 'any(.resources[]? | select(.mode == "managed" and .type == "helm_release")
+      | .instances[]?.attributes; "\(.namespace)/\(.name)" == $id)' "$st") || exit 1
+    [ "$owned" = false ] || { echo "Not adopting: $st already holds $deployed. Maintain this edge with erun terraform apply from that tenant tree." >&2; exit 1; }
+  done
+
+  # Adopt once, and only what the stateless skill could have created (its root passed
+  # cloudflare_api_token, services_zone and acme_email alone), the issuer release last.
+  jq -r '{"kubernetes_namespace.cert_manager": "cert-manager",
+      "helm_release.cert_manager[0]": "cert-manager/cert-manager",
+      "helm_release.traefik[0]": "traefik/traefik",
+      "kubernetes_secret.cloudflare_api_token[0]": "cert-manager/erun-cloudflare-cloudflare-token",
+      "helm_release.issuer": "cert-manager/erun-cloudflare-issuer"} as $stateless
+    | [.resource_changes[] | select(.change.actions == ["create"]) | .change.after as $a
+      | (if .type == "kubernetes_namespace" then $a.metadata[0].name
+         elif .type == "kubernetes_secret" then "\($a.metadata[0].namespace)/\($a.metadata[0].name)"
+         else "\($a.namespace)/\($a.name)" end) as $id
+      | select($stateless[.address] == $id) | [.address, .type, $id]]
+    | sort_by(.[0] == "helm_release.issuer") | .[] | @tsv' edge.json > adopt.tsv || exit 1
+  : > import.tsv
+  while IFS="$(printf '\t')" read -r address type id; do
+    case $type in
+      helm_release)         found=$(helm list -q -n "${id%%/*}" --filter "^${id#*/}\$") || exit 1 ;;
+      kubernetes_namespace) found=$(kubectl get namespace "$id" --ignore-not-found -o name) || exit 1 ;;
+      kubernetes_secret)    found=$(kubectl get secret "${id#*/}" -n "${id%%/*}" --ignore-not-found -o name) || exit 1 ;;
+    esac
+    [ -z "$found" ] || printf '%s\t%s\n' "$address" "$id" >> import.tsv
+  done < adopt.tsv
+  if [ -s import.tsv ]; then
+    echo "Adopting this edge imports:" >&2; cat import.tsv >&2
+    [ "${EDGE_ADOPT:-}" = confirmed ] || { echo "Not adopting yet: once the operator confirms this skill applied the edge and no tenant tree did, re-run with EDGE_ADOPT=confirmed." >&2; exit 1; }
+    while IFS="$(printf '\t')" read -r address id; do
+      terraform import -input=false "$@" "$address" "$id" </dev/null || exit 1
+    done < import.tsv
+    terraform plan -input=false -out=edge.tfplan "$@" || exit 1
+    terraform show -json edge.tfplan > edge.json || exit 1
+  fi
+fi
+
+# Reconcile in place only: no run destroys, and on an existing edge none creates
+# but the two server-side-apply patches.
+unsafe=$(jq -r --arg edge "$edge" '.resource_changes[] | select((.change.actions | index("delete")) or ($edge != ""
+    and (.change.actions | index("create")) and (.type | IN("kubernetes_config_map_v1_data", "kubernetes_annotations") | not)))
+  | .address' edge.json) || exit 1
+[ -z "$unsafe" ] || { echo "Not applying: on an existing edge this plan creates or destroys: $unsafe" >&2; exit 1; }
+
+# Traefik CRDs for the chart this plan installs, on an existing edge.
+chart=$(jq -r '.resource_changes[] | select(.address == "helm_release.traefik[0]") | .change.after.version // empty' edge.json) || exit 1
+if [ -n "$edge" ] && [ -n "$chart" ]; then
+  helm show crds traefik --repo https://traefik.github.io/charts --version "$chart" > traefik-crds.yaml || exit 1
+  kubectl apply --server-side --force-conflicts -f traefik-crds.yaml || exit 1
+fi
+terraform apply -input=false edge.tfplan
+```
+
+Each switch below is one more `-var` in that input set. While validating against
+a fresh zone, add
 `-var acme_server=https://acme-staging-v02.api.letsencrypt.org/directory` to avoid
 Let's Encrypt production rate limits, then re-apply without it for real certs. On a
 cluster that already runs cert-manager, add `-var install_cert_manager=false`. On a
@@ -216,15 +386,18 @@ NS="<tenant>-powerdns"; TNS="<platform-namespace>"   # e.g. frs-powerdns / frs-p
 TSIG=$(kubectl -n "$TNS" get secret "$NS-tsig" -o jsonpath='{.data.tsig-secret}' | base64 -d)
 KEYNAME=$(kubectl -n "$TNS" get secret "$NS-tsig" -o jsonpath='{.data.key-name}' | base64 -d)
 export TF_VAR_rfc2136_tsig_secret="$TSIG"
-terraform apply -input=false -auto-approve \
-  -var "services_zone=<services-zone>" -var "acme_email=<acme-email>" \
+set -- -var "services_zone=<services-zone>" -var "acme_email=<acme-email>" \
   -var dns01_provider=powerdns-rfc2136 \
   -var "powerdns_nameserver=$NS.$TNS.svc.cluster.local:53" \
   -var "rfc2136_tsig_key_name=$KEYNAME" \
   -var per_env_certificate_enabled=true -var "env_label=<tenant>-<env>"
 ```
 
-`cloudflare_api_token` is not needed in this mode.
+Then run the plan-and-apply block with that input set, in the same shell, exactly
+as **Apply** does.
+`cloudflare_api_token` is not needed in this mode. On an edge already running the
+Cloudflare solver this switch creates one Secret and destroys another, so the
+plan stops for the operator's say-so, as a change of what the edge is.
 
 **Brokered DNS-01 (multi-tenant clusters).** RFC2136 above hands the cluster one
 zone-wide TSIG key — safe only on the single-tenant platform cluster. On a cluster
@@ -245,8 +418,7 @@ left unset it defaults to `true` exactly when `dns01_provider = "powerdns-broker
 to decouple the two — the shape a multi-tenant platform on RFC2136 needs:
 
 ```sh
-terraform apply -input=false -auto-approve \
-  -var "services_zone=<services-zone>" -var "acme_email=<acme-email>" \
+set -- -var "services_zone=<services-zone>" -var "acme_email=<acme-email>" \
   -var dns01_provider=powerdns-rfc2136 \
   -var "powerdns_nameserver=$NS.$TNS.svc.cluster.local:53" \
   -var "rfc2136_tsig_key_name=$KEYNAME" \
@@ -271,7 +443,8 @@ cleaned up.
 
 To route the platform's own wildcard through the broker too, apply in full broker
 mode instead. Per env (tenant), mint the env's DNS-01 token from the backend and
-land it as the Secret the Issuer's webhook solver reads, then apply:
+land it as the Secret the Issuer's webhook solver reads, then run the
+plan-and-apply block, in the same shell, with this input set:
 
 ```sh
 # Mint the per-env DNS-01 token (caller must hold a token for <tenant>/<env>).
@@ -280,8 +453,7 @@ TOKEN=$(curl -fsS -X POST -H "Authorization: Bearer $ERUN_API_TOKEN" \
 kubectl -n "<tenant>-<env>" create secret generic "<tenant>-<env>-dns01-token" \
   --from-literal=token="$TOKEN" --dry-run=client -o yaml | kubectl apply -f -
 
-terraform apply -input=false -auto-approve \
-  -var "services_zone=<services-zone>" -var "acme_email=<acme-email>" \
+set -- -var "services_zone=<services-zone>" -var "acme_email=<acme-email>" \
   -var dns01_provider=powerdns-broker \
   -var "broker_url=https://api.<platform-tenant>-<platform-env>.services.<services-zone>/v1/dns01" \
   -var "dns01_token_secret_name=<tenant>-<env>-dns01-token" \
@@ -317,10 +489,15 @@ not that the entrypoint serves it or that a redirect answers before an
 application does.
 
 ```sh
-# http answers a permanent redirect, and https carries HSTS.
-curl -sSI "http://<base-domain>" | head -1     # HTTP/1.1 301 Moved Permanently
+# http answers a permanent redirect to the same host on https's own port, and
+# https carries HSTS.
+curl -sSI "http://<base-domain>" | grep -i -E '^(HTTP|location)'   # 301, Location: https://<base-domain>/
 curl -sSI "https://<base-domain>" | grep -i strict-transport-security
 ```
+
+A `Location` that names a port (`https://<base-domain>:8443/`) is the redirect
+pointing at Traefik's in-pod listen port instead of the published 443: every
+plaintext visitor is sent somewhere nothing answers.
 
 When `install_coredns_forward` is set, confirm the cluster can actually resolve the
 base domain before trusting issuance to it — this is exactly the check that catches
@@ -362,28 +539,49 @@ service and exposing another adds only an Ingress.
 
 ## Maintenance, repair & upgrade
 
-This is an idempotent **apply** skill, not a scaffolder: it writes no durable local
-files to drift — the only artifact is cluster state, and every run reconciles it. So
-re-running *is* the maintenance path, not an error.
+This is an **apply** skill, not a scaffolder: it writes no repository files to
+drift. Besides the edge itself its one durable artifact is the edge's state, kept
+in the cluster (see **Apply**), and every run plans against it. So re-running the
+**Apply** flow *is* the maintenance path, not an error.
 
-- **Detect.** If the edge is already applied (`kubectl get issuer -n <issuer-namespace> erun-cloudflare`
-  succeeds — the env namespace, e.g. frs-prod), do not stop — enter maintenance mode and reconcile in place.
-- **Upgrade.** Re-pin the module to the env's erun version, then re-apply. Recompute
-  `ref` from the running `erun version` (the pin moves with `erun upgrade`, or an explicit
-  target), set the module `source = "…terraform-erun-cluster-edge?ref=v<version>"` to that
-  one version, then re-run the **Apply** flow above: `terraform init` fetches the new ref
-  and `terraform apply` rolls it out. One erun version across the pin; bump it after
-  `erun upgrade`.
-- **Repair.** The apply already reconciles cert-manager, Traefik, and the namespaced
-  DNS-01 `Issuer`, so healing drift is the same re-apply — no separate repair path,
-  no new scaffold artifacts. Preview with `terraform plan` first and apply only the version
-  pin + reconciliation; never let a re-apply clobber operator-owned cluster content.
-- **Clean up.** Nothing local to prune (each run uses a throwaway `mktemp -d`), and
-  re-apply reconciles rather than accumulates — so cleanup isn't part of the normal
-  path. Tearing the edge down (removing cert-manager, Traefik, the `Issuer`)
-  is `erun terraform destroy` — a deliberate, high-blast-radius operator action that
-  drops TLS for the whole services zone; point the operator at it, never run it as a
-  side effect of maintenance.
+- **Detect.** The edge exists when its kept state holds the issuer release or,
+  for one applied before its state was kept, when that release is deployed
+  (`helm list -n cert-manager --filter '^erun-cloudflare-issuer$'` for the
+  module's default names); the **Apply** flow checks exactly that and then adopts
+  and reconciles in place, so do not stop. An edge applied with `erun terraform
+  apply` from a tenant's `terraform-<tenant>/<env>` tree keeps its state there,
+  at `~/.erun/terraform/<tenant>/<env>/terraform.tfstate` on that environment's
+  home volume: maintain it with `erun terraform apply`, never with this skill.
+  The **Apply** flow refuses to adopt an edge such a state on this home volume
+  holds, and adopts any other only on the operator's confirmation, so two states
+  never own one release.
+- **Adopt once.** An edge this skill applied before it kept state has none. The
+  first re-run the operator confirms imports the objects that skill created, the
+  issuer release last, and from then on plans against the kept state and never
+  imports again; if that run is interrupted, the next one imports what is still
+  missing.
+- **Upgrade.** Re-pin the module to the env's erun version, then re-run the
+  **Apply** flow: recompute `ref` from the running `erun version` (the pin moves with
+  `erun upgrade`, or an explicit target) so `terraform init -from-module` fetches
+  that one version, and the plan rolls it out, after Traefik's CRDs for the chart
+  it resolves. One erun version across the pin; bump it after `erun upgrade`.
+- **Repair.** Drift in what the edge's objects carry is the same re-run: the plan
+  updates them in place — no separate repair path, no new scaffold artifacts. Pass
+  the flags the edge was applied with; never let a re-run clobber operator-owned
+  cluster content, which is why a plan that creates or destroys on an existing edge
+  stops for the operator.
+- **Locked state.** A run refused with `the state is already locked by another
+  terraform client` names the holder; wait for it to finish. Release the Lease
+  (`terraform force-unlock <ID>`, from a root written the same way) only once that
+  run is confirmed gone.
+- **Clean up.** Remove the scratch directory when the run ends (`rm -rf
+  "$workdir"`): its saved plan carries the Cloudflare token. Re-running reconciles
+  rather than accumulates, so nothing else is left behind. Tearing the edge down
+  (removing cert-manager, Traefik, the `Issuer`) is `terraform destroy` with the
+  edge's inputs, from a root written the same way so it reads the kept state — a
+  deliberate, high-blast-radius operator action that drops TLS for the whole
+  services zone; point the operator at it, never run it as a side effect of
+  maintenance.
 
 ## If issuance stalls
 

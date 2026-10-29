@@ -38,9 +38,6 @@ func (f *fakeTenantEnvironmentLister) List(context.Context) ([]model.Environment
 	return f.environments, nil
 }
 
-// TestReconcileBootstrapNameRefusesWithNoDeclaredTenant locks the "empty
-// ERUN_TENANT disables the action" behavior: with nothing declared to
-// reconcile against, the workflow must not guess a target name.
 func TestReconcileBootstrapNameRefusesWithNoDeclaredTenant(t *testing.T) {
 	updater := &fakeTenantNameUpdater{}
 	svc := NewTenantService(updater, &fakeTenantEnvironmentLister{}, "")
@@ -53,8 +50,6 @@ func TestReconcileBootstrapNameRefusesWithNoDeclaredTenant(t *testing.T) {
 	}
 }
 
-// TestReconcileBootstrapNameNoopWhenAlreadyMatches proves an already-correct
-// tenant name is a no-op success, not a refusal.
 func TestReconcileBootstrapNameNoopWhenAlreadyMatches(t *testing.T) {
 	updater := &fakeTenantNameUpdater{}
 	svc := NewTenantService(updater, &fakeTenantEnvironmentLister{}, "frs")
@@ -71,8 +66,6 @@ func TestReconcileBootstrapNameNoopWhenAlreadyMatches(t *testing.T) {
 	}
 }
 
-// TestReconcileBootstrapNameAppliesWhenNoEnvironments locks the apply path:
-// zero environments is exactly the precondition that authorises the rename.
 func TestReconcileBootstrapNameAppliesWhenNoEnvironments(t *testing.T) {
 	updater := &fakeTenantNameUpdater{result: model.Tenant{TenantID: "t1", Name: "frs"}}
 	svc := NewTenantService(updater, &fakeTenantEnvironmentLister{}, "frs")
@@ -89,9 +82,6 @@ func TestReconcileBootstrapNameAppliesWhenNoEnvironments(t *testing.T) {
 	}
 }
 
-// TestReconcileBootstrapNameRefusesWhenTenantHasEnvironments locks the
-// refusal path (erun#1480's central safety property): any existing environment
-// refuses the rename outright, and no UpdateName call is even attempted.
 func TestReconcileBootstrapNameRefusesWhenTenantHasEnvironments(t *testing.T) {
 	updater := &fakeTenantNameUpdater{}
 	environments := &fakeTenantEnvironmentLister{environments: []model.Environment{{EnvironmentID: "e1"}}}
@@ -106,9 +96,6 @@ func TestReconcileBootstrapNameRefusesWhenTenantHasEnvironments(t *testing.T) {
 	}
 }
 
-// TestReconcileBootstrapNameReportsConflict names a repository-level unique
-// violation as ErrBootstrapNameConflict, so the route can tell "another
-// tenant already holds this name" apart from an ordinary persistence error.
 func TestReconcileBootstrapNameReportsConflict(t *testing.T) {
 	updater := &fakeTenantNameUpdater{err: repository.ErrConflict}
 	svc := NewTenantService(updater, &fakeTenantEnvironmentLister{}, "frs")

@@ -11,9 +11,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 )
 
-// InvalidJobInputError refuses a job write whose field does not satisfy the
-// jobs table's own contract, named up front instead of surfacing as a
-// generic 400 once the database's CHECK constraint fires.
+// InvalidJobInputError names a field violating the jobs table's contract before the CHECK constraint fires.
 type InvalidJobInputError struct {
 	Field  string
 	Reason string
@@ -25,11 +23,7 @@ func (e *InvalidJobInputError) Error() string {
 
 func (e *InvalidJobInputError) Unwrap() error { return repository.ErrInvalidInput }
 
-// JobScopeHeldError refuses a claim on a scope another open job already
-// holds. It is the coordination primitive's whole payload: the refusal names
-// who holds the scope, what they are doing in prose, and when they started,
-// so a refused actor can decide for itself whether to wait, ask, or pick up
-// something else — rather than being told only "conflict".
+// JobScopeHeldError refuses a claim on a held scope, naming the holder, its summary and start time.
 type JobScopeHeldError struct {
 	Scope  string
 	Holder model.Job
@@ -43,9 +37,7 @@ func (e *JobScopeHeldError) Error() string {
 
 func (e *JobScopeHeldError) Unwrap() error { return repository.ErrConflict }
 
-// JobAlreadyFinishedError refuses a write against a job that already
-// finished: an outcome is immutable once reached, the same discipline that
-// keeps a review's recorded builds append-only.
+// JobAlreadyFinishedError refuses a write against a finished job; outcomes are immutable.
 type JobAlreadyFinishedError struct {
 	JobID  string
 	Status model.JobStatus
@@ -59,8 +51,7 @@ func (e *JobAlreadyFinishedError) Unwrap() error { return repository.ErrConflict
 
 type JobRepository interface {
 	Create(ctx context.Context, job model.Job) (model.Job, error)
-	// Get and Update take the owning tenant explicitly; see
-	// repository.JobRepository.Get for why an id alone is not a scope.
+	// Get and Update take the owning tenant explicitly: an id alone is not a scope.
 	Get(ctx context.Context, tenantID, jobID string) (model.Job, error)
 	FindOpenByScope(ctx context.Context, scope string) (model.Job, error)
 	Update(ctx context.Context, tenantID string, job model.Job) (model.Job, error)
@@ -75,9 +66,7 @@ func NewJobService(jobs JobRepository) *JobService {
 	return &JobService{jobs: jobs}
 }
 
-// validJobTypes is the closed job_type vocabulary. An unknown value is
-// refused rather than stored, so a dashboard grouping by type has a finite
-// set to render and never grows a free-text bucket.
+// validJobTypes is closed so a dashboard grouping by type never grows a free-text bucket.
 var validJobTypes = map[model.JobType]bool{
 	model.JobTypeFix:         true,
 	model.JobTypeReview:      true,
@@ -96,9 +85,6 @@ var validActorKinds = map[model.ActorKind]bool{
 	model.ActorKindHuman:        true,
 }
 
-// terminalJobStatuses are the states a job can end in; PLANNED and RUNNING
-// are the open ones -- PLANNED only ever by a claim that asks for it, RUNNING
-// by a claim that does not.
 var terminalJobStatuses = map[model.JobStatus]bool{
 	model.JobStatusSucceeded:  true,
 	model.JobStatusFailed:     true,
@@ -106,10 +92,6 @@ var terminalJobStatuses = map[model.JobStatus]bool{
 	model.JobStatusSuperseded: true,
 }
 
-// jobStatusTransitions is the closed set of moves Update may make from an
-// open job. A plan may open (RUNNING, the whole point of the status) or close
-// like any other; a running job may only close, since nothing reopens work
-// whose outcome is already recorded.
 var jobStatusTransitions = map[model.JobStatus]map[model.JobStatus]bool{
 	model.JobStatusPlanned: {
 		model.JobStatusRunning:    true,
@@ -126,29 +108,16 @@ var jobStatusTransitions = map[model.JobStatus]map[model.JobStatus]bool{
 	},
 }
 
-// jobStatusTransitionReason names the moves Update accepts, for the refusal
-// that names only the field otherwise.
 const jobStatusTransitionReason = "must move a PLANNED job to RUNNING or close it, and a RUNNING job to SUCCEEDED, FAILED, ABANDONED, or SUPERSEDED"
 
-// jobCommandWords are the shell commands a summary must never be only. A row
-// reading "git -C /home/erun/git/erun rebase --onto main~1" describes nothing
-// a reader can act on: it is the work's mechanics, not its intent, and the
-// pod's own job record already keeps the command line as technical detail.
+// jobCommandWords are shell commands a summary must not consist of alone.
 var jobCommandWords = map[string]bool{
 	"erun": true, "git": true, "make": true, "sh": true, "bash": true,
 	"docker": true, "kubectl": true, "go": true, "npm": true, "yarn": true,
 }
 
-// jobProseWords are the English function words a description of work
-// naturally uses and a bare command line does not. Their presence is what
-// separates "erun build is failing on main" — prose that merely opens with a
-// command's name — from "erun build --release", which is the command itself.
-//
-// This is a heuristic, deliberately: the rule being enforced is "describe
-// the work, do not paste the command", and no parser can decide that for
-// certain. It is tuned to refuse a pasted command line and to accept a
-// description that happens to start with a command's name, since wrongly
-// refusing a real description would block a legitimate claim.
+// jobProseWords separate prose that starts with a command name from a pasted command line. The heuristic
+// favours accepting: wrongly refusing a real description would block a legitimate claim.
 var jobProseWords = map[string]bool{
 	"a": true, "an": true, "and": true, "as": true, "at": true, "because": true,
 	"before": true, "but": true, "by": true, "for": true, "from": true, "in": true,
@@ -157,24 +126,9 @@ var jobProseWords = map[string]bool{
 	"this": true, "to": true, "until": true, "when": true, "while": true, "with": true,
 }
 
-// Claim records a job starting. With a scope set it is a claim on that
-// scope: if an open job already holds it in this tenant, the claim is
-// refused with the holder named — see JobScopeHeldError — so a second actor
-// asking for the same work is told who has it and what they are doing
-// instead of silently duplicating it.
-//
-// This is deliberately advisory coordination over server-side state, not a
-// distributed lock. Two claims landing at the same instant can both be
-// recorded, and that is the accepted trade: making the scope exclusive in
-// the database would wedge a scope permanently the moment an actor
-// disappeared without closing its job, which is the orphaned-running-record
-// failure this design exists to avoid. The queue makes the overlap visible
-// rather than pretending it cannot happen.
-//
-// A claim that names no status is RUNNING, which is what every caller before
-// PLANNED existed meant. A claim that asks for PLANNED records work that has
-// not started: it holds the same scope, and it is deliberately outside the
-// abandonment sweep's reach (see SweepAbandoned).
+// Claim records a job starting, refusing it if an open job holds the same scope. This is advisory, not a
+// lock: an exclusive DB constraint would wedge a scope forever when an actor vanishes. PLANNED claims hold
+// the scope but are exempt from SweepAbandoned.
 func (s *JobService) Claim(ctx context.Context, job model.Job) (model.Job, error) {
 	if job.Status == "" {
 		job.Status = model.JobStatusRunning
@@ -195,9 +149,6 @@ func (s *JobService) Claim(ctx context.Context, job model.Job) (model.Job, error
 	if job.StartedAt.IsZero() {
 		job.StartedAt = now
 	}
-	// A caller recording work that has already finished may claim straight
-	// into a terminal status; the ended_at that status requires is stamped
-	// here so the caller never has to pair the two itself.
 	if terminalJobStatuses[job.Status] && job.EndedAt == nil {
 		ended := now
 		job.EndedAt = &ended
@@ -205,10 +156,7 @@ func (s *JobService) Claim(ctx context.Context, job model.Job) (model.Job, error
 	return s.jobs.Create(ctx, job)
 }
 
-// Update moves an existing job forward: a status change, a refreshed
-// summary, or the local job id it mirrors. A finished job accepts none of
-// these — see JobAlreadyFinishedError — since its outcome is the record that
-// coordination and reporting both read.
+// Update moves an open job forward; a finished job accepts no change.
 func (s *JobService) Update(ctx context.Context, tenantID, jobID string, status model.JobStatus, summary, localJobID string) (model.Job, error) {
 	existing, err := s.jobs.Get(ctx, tenantID, jobID)
 	if err != nil {
@@ -224,8 +172,6 @@ func (s *JobService) Update(ctx context.Context, tenantID, jobID string, status 
 			return model.Job{}, &InvalidJobInputError{Field: "status", Reason: jobStatusTransitionReason}
 		}
 		updated.Status = status
-		// The ended_at the database's own CHECK pairs with the status: a
-		// closed job carries the time it closed, an open one carries none.
 		if terminalJobStatuses[status] {
 			ended := time.Now().UTC()
 			updated.EndedAt = &ended
@@ -239,40 +185,17 @@ func (s *JobService) Update(ctx context.Context, tenantID, jobID string, status 
 	if strings.TrimSpace(localJobID) != "" {
 		updated.LocalJobID = strings.TrimSpace(localJobID)
 	}
-	// The refreshed summary is validated exactly as a fresh claim's is: a
-	// progress refresh is as capable of pasting a command line in as a claim
-	// is, and the contract belongs to the column, not to the write that first
-	// populated it.
 	if err := validateJobSummary(updated.Summary); err != nil {
 		return model.Job{}, err
 	}
 	return s.jobs.Update(ctx, tenantID, updated)
 }
 
-// DefaultJobAbandonTTL is how long a RUNNING job may go without an update
-// before a sweep treats its actor as gone. It is generous on purpose: an
-// agent working a real issue updates its job only at meaningful boundaries
-// (see the refresh path in Update), so a short TTL would abandon jobs that
-// are plainly still being worked.
+// DefaultJobAbandonTTL is generous because agents update jobs only at meaningful boundaries.
 const DefaultJobAbandonTTL = 30 * time.Minute
 
-// SweepAbandoned closes every RUNNING job nobody has updated within ttl, so
-// an actor that disappears without closing its job cannot wedge a scope
-// forever — the failure a permanently orphaned running record produces on
-// the local side, where nothing ever clears it.
-//
-// This is an explicit sweep rather than implicit reaping: abandonment is a
-// recorded transition performed by a caller that means to perform it, never
-// something a read infers about a row it happens to look at. A claim never
-// steals a scope on the grounds that its holder looks stale; only this does,
-// and it leaves the row saying what happened.
-//
-// PLANNED is exempt, and the exemption belongs to the repository's predicate
-// rather than to a filter here — see JobRepository.AbandonStale. ABANDONED
-// is what the sweep does to a job whose actor stopped updating it, and a
-// parked plan has no actor yet to stop: sweeping one would turn the pipeline
-// view's first rung into "dropped" within the TTL, on a schedule, with
-// nothing an operator did to cause it.
+// SweepAbandoned closes RUNNING jobs not updated within ttl. It is the only path that takes a stale scope,
+// and it records the transition. PLANNED is exempt in JobRepository.AbandonStale: a parked plan has no actor.
 func (s *JobService) SweepAbandoned(ctx context.Context, ttl time.Duration) ([]model.Job, error) {
 	if ttl <= 0 {
 		ttl = DefaultJobAbandonTTL
@@ -280,9 +203,6 @@ func (s *JobService) SweepAbandoned(ctx context.Context, ttl time.Duration) ([]m
 	return s.jobs.AbandonStale(ctx, time.Now().UTC().Add(-ttl))
 }
 
-// validateJobWrite mirrors the jobs table's own CHECK constraints and its
-// closed vocabularies so a violation is named up front rather than surfaced
-// as a generic 400 from the database.
 func validateJobWrite(job model.Job) error {
 	if !validJobTypes[job.JobType] {
 		return &InvalidJobInputError{Field: "jobType", Reason: "must be one of fix, review, gate, release, deploy, investigate, plan, triage, maintenance"}
@@ -299,8 +219,6 @@ func validateJobWrite(job model.Job) error {
 	return validateJobSummary(job.Summary)
 }
 
-// validateJobSummary enforces the summary contract: non-empty, and a
-// description of the work rather than the command that performs it.
 func validateJobSummary(summary string) error {
 	trimmed := strings.TrimSpace(summary)
 	if trimmed == "" {
@@ -315,9 +233,6 @@ func validateJobSummary(summary string) error {
 	return nil
 }
 
-// isOnlyAShellCommand reports whether summary is a shell invocation with no
-// prose around it. See jobProseWords for why this is a heuristic rather than
-// a parse.
 func isOnlyAShellCommand(summary string) bool {
 	fields := strings.Fields(strings.ToLower(summary))
 	if len(fields) == 0 || !jobCommandWords[fields[0]] {

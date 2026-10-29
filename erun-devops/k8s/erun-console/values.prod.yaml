@@ -1,6 +1,3 @@
-# Production overlay. Like erun-zitadel's, the values that matter (the
-# external domain, the cert-manager issuer) come from the platform
-# environment's config at deploy time, not from this file — a chart default
-# is never one instance's own hostname or issuer name.
+# The external domain and issuer come from the platform config at deploy time.
 console:
   ingressClass: traefik

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -9,16 +10,8 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// UnresolvableIssuerMappingError refuses identity configuration no token can
-// ever satisfy. Resolution reads (issuer, org claim); a mapping whose org
-// value contradicts its issuer's org-scoping mode is matched by nothing, so a
-// tenant registered that way exists, lists, and accepts enrollments while
-// remaining permanently unreachable. Writing it and discovering that only
-// when someone fails to sign in is the silence this refusal replaces.
-//
-// Reason reuses model.TenantReachability's vocabulary deliberately: the code
-// an operator sees when a switch target turns out to be unreachable is the
-// same code they see when the platform refuses to create one.
+// UnresolvableIssuerMappingError refuses an issuer mapping no token can ever
+// resolve through. Reason reuses model.TenantReachability's vocabulary.
 type UnresolvableIssuerMappingError struct {
 	Issuer        string
 	Reason        model.TenantReachability
@@ -41,26 +34,17 @@ func (e *UnresolvableIssuerMappingError) Error() string {
 		e.Issuer, e.OrgFieldValue)
 }
 
-// sqlIssuerMappingIsResolvable is the predicate deciding whether an
-// (issuers i, tenant_issuers ti) pair is one some token could actually resolve
-// through: the issuer's org-scoping mode and the mapping's org value must
-// agree. An org-scoped issuer whose mapping carries no org value is dead
-// (resolution matches the org by equality, and an empty org claim is rejected
-// before it gets that far), and so is an org value under a single-tenant
-// issuer (resolution matches NULL there). An empty string counts as absent on
-// both sides for the same reason: neither resolution branch can ever match one.
+// sqlIssuerMappingIsResolvable requires the issuer's org-scoping mode and the
+// mapping's org value to agree; empty counts as absent on both sides.
 const sqlIssuerMappingIsResolvable = `((i.org_field_key IS NULL OR i.org_field_key = '') = (ti.org_field_value IS NULL OR ti.org_field_value = ''))`
 
-// issuerMappingIsResolvable is the Go-side half of the same rule, for writes
-// that hold the two values directly rather than reading them back as rows.
+// issuerMappingIsResolvable is the Go-side twin of sqlIssuerMappingIsResolvable.
 func issuerMappingIsResolvable(orgFieldKey, orgFieldValue string) bool {
 	return (strings.TrimSpace(orgFieldKey) == "") == (strings.TrimSpace(orgFieldValue) == "")
 }
 
-// assertResolvableIssuerMapping refuses an (issuer, org value) pair that
-// contradicts the issuer's registered org-scoping mode. orgFieldKey is the
-// issuer's effective mode as the registry actually holds it — never the value
-// a caller asked for, which an already-registered issuer ignores.
+// assertResolvableIssuerMapping refuses a mismatched pair. orgFieldKey must be
+// the registry's effective mode, not the value the caller requested.
 func assertResolvableIssuerMapping(issuer, orgFieldKey, orgFieldValue string) error {
 	if issuerMappingIsResolvable(orgFieldKey, orgFieldValue) {
 		return nil
@@ -73,10 +57,8 @@ func assertResolvableIssuerMapping(issuer, orgFieldKey, orgFieldValue string) er
 	}
 }
 
-// assertTenantIssuerMappingResolvable refuses linking an external identity
-// into a tenant the issuer cannot resolve to. Enrollment is what makes a token
-// usable, so a membership row under a dead mapping is a user who can never
-// sign in — created successfully, failing only later and somewhere else.
+// assertTenantIssuerMappingResolvable refuses enrolling a user under a mapping
+// that can never resolve, since that user could never sign in.
 func assertTenantIssuerMappingResolvable(ctx context.Context, tx bun.Tx, tenantID, issuer string) error {
 	var mapping struct {
 		OrgFieldKey   string `bun:"org_field_key"`
@@ -90,7 +72,7 @@ func assertTenantIssuerMappingResolvable(ctx context.Context, tx bun.Tx, tenantI
 		 WHERE ti.tenant_id = ? AND ti.issuer = ?
 	`, tenantID, issuer).Scan(ctx, &mapping)
 	if err != nil {
-		if normalizeNoRows(err) == ErrNotFound {
+		if errors.Is(normalizeNoRows(err), ErrNotFound) {
 			return &UnresolvableIssuerMappingError{
 				Issuer: strings.TrimSpace(issuer),
 				Reason: model.TenantReachabilityIssuerNotMapped,

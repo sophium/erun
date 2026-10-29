@@ -47,9 +47,6 @@ afterEach(() => {
 });
 
 describe('TenantSwitcher', () => {
-  // The negative case that matters most: a caller who maps to only their one
-  // tenant must never see a control that implies a choice they don't have —
-  // not even fleetingly while the reachable-tenants request is in flight.
   it('renders the current tenant as a plain label, never a control, when only one tenant is reachable', async () => {
     mockReachable([{ tenantId: 'tenant-a', name: 'Acme', type: 'COMPANY' }]);
     renderSwitcher();
@@ -58,7 +55,6 @@ describe('TenantSwitcher', () => {
     expect(screen.getByText('Tenant · COMPANY')).toBeInTheDocument();
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
 
-    // Still no control after the (single-tenant) response resolves.
     await Promise.resolve();
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
   });
@@ -109,11 +105,6 @@ describe('TenantSwitcher', () => {
     expect(beginLogin).toHaveBeenCalledWith(OIDC, 'select_account');
     expect(consumeTenantSwitchIntent()).toEqual({ tenantId: 'tenant-b', name: 'Beta' });
   });
-  // The live production case: one identity holding a membership in a tenant
-  // whose org mapping it can never present. Offering it burned a full OIDC
-  // round trip and landed the caller back where they started, so it must not
-  // be an option — and it must not silently vanish either, since the operator
-  // reading this is the one who has to repair the mapping.
   it('never offers a membership the platform reports as unreachable, and names why', async () => {
     mockReachable([
       { tenantId: 'tenant-a', name: 'Acme', type: 'COMPANY', reachability: 'RESOLVABLE' },
@@ -124,8 +115,6 @@ describe('TenantSwitcher', () => {
     expect(await screen.findByText('Not reachable with this account')).toBeInTheDocument();
     expect(screen.getByText('Validation')).toBeInTheDocument();
     expect(screen.getByText(/different organization/)).toBeInTheDocument();
-    // The only membership left is the caller's own tenant, so there is no
-    // choice to offer and therefore no control.
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
   });
 
@@ -154,8 +143,6 @@ describe('TenantSwitcher', () => {
     expect(screen.queryByRole('option', { name: 'Probeco' })).not.toBeInTheDocument();
   });
 
-  // A verdict this console does not know must read as "unreachable, reason
-  // unknown" rather than be quietly treated as reachable.
   it('refuses an unrecognized verdict instead of treating it as reachable', async () => {
     mockReachable([
       { tenantId: 'tenant-a', name: 'Acme', type: 'COMPANY', reachability: 'RESOLVABLE' },

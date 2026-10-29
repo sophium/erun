@@ -65,12 +65,8 @@ export const submitManageDelete =
       ]
         .filter(Boolean)
         .join(' ');
-      // A delete that left a live namespace or cloud context running is a
-      // failure, even though the environment record itself is gone — it must
-      // render as an error with the failure clause visible and a Copy
-      // action, not the plain success pill (which used to append the
-      // warning as an afterthought after the copy buffer had already been
-      // cleared, so there was nothing to copy).
+      // A live namespace or cloud context left behind is a failure, even though the
+      // record is gone.
       if (warnings) {
         dispatch(
           showTerminalFailure(deletedLabel, warnings, `${deletedLabel} ${warnings}`, '', null),

@@ -15,16 +15,9 @@ import { InlineAlert, PermissionNotice } from './InlineAlert';
 import { type TenantDashboardData } from './TenantDashboardMessage';
 import { PlanList } from './TenantDashboardPanels.Registration';
 
-// TenantDashboardPanels.RegistrationForms.tsx holds the Registration tab's
-// hosted-environment form — split out of
-// TenantDashboardPanels.RegistrationEnvironments.tsx to keep that file under
-// eslint's 500-line cap. One field set backs both actions: Preview resolves
-// the ordered plan for exactly the fields Register would submit, and
-// Register follows it — never a separate, drifted field set, so the plan an
-// operator sees can never diverge from what submit does. envAdopt switches
-// the form to record an environment that already exists: it hides the
-// cloud-context and runtime-version fields (the platform forbids both for
-// an adopt request) and requires a kubernetes context instead.
+// Preview and Register share one field set so the previewed plan is what submit
+// does. envAdopt hides cloud-context and runtime-version, which the platform
+// forbids on adopt, and requires a kubernetes context.
 
 function EnvironmentAdoptToggle({
   draft,
@@ -205,10 +198,7 @@ function EnvironmentFormActions({ draft }: { draft: RegistrationState }): React.
   );
 }
 
-// EnvironmentSection is the Registration tab's one hosted-environment form:
-// Preview (outline, never a write) always precedes Register (rule #3), and
-// both submit the same fields, so registering is never one click past a
-// preview that described something else.
+// EnvironmentSection renders the hosted-environment form; Preview always precedes Register.
 export function EnvironmentSection({
   data,
   draft,
@@ -217,9 +207,7 @@ export function EnvironmentSection({
   draft: RegistrationState;
 }): React.ReactElement {
   const dispatch = useAppDispatch();
-  // The one notice for the register capability on this tab: LocalEnvironmentsSection
-  // sits above this and hides for the same flag, so posting the missing access
-  // here names it once instead of twice.
+  // LocalEnvironmentsSection hides on the same flag, so the notice appears once, here.
   if (data?.canRegisterEnvironment !== true) {
     return (
       <PermissionNotice>

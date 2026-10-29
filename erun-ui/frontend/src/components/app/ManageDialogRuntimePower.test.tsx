@@ -9,13 +9,6 @@ import type { UIRuntimeRunState } from '@/uiRuntimeTypes';
 
 import { RuntimePowerField } from './ManageDialogRuntimePower';
 
-// The Runtime tab's Stop control is where a reported bug lived: it offered Stop
-// unconditionally, so pressing it on an already-stopped runtime produced a
-// correct no-op the operator could only read as a broken button. These cases
-// pin the state the report described — already stopped — alongside the states
-// around it, because the failure this suite exists to prevent is the fix
-// covering the neighbours and missing the reported one.
-
 const { query } = vi.hoisted(() => ({ query: vi.fn() }));
 
 vi.mock('@/app/api/environmentApi', () => ({
@@ -27,10 +20,7 @@ vi.mock('@/app/hooks', () => ({
   useAppSelector: (): unknown => undefined,
 }));
 
-// The component reaches the stop workflow for its button and the stop
-// formatter for its help text. Both are stubbed: the render under test is the
-// control's own, and loading the thunks would pull the whole stored app in
-// with it.
+// Stubbed so the thunks do not pull in the whole store.
 vi.mock('@/app/manageEnvironmentThunks', () => ({ submitManageStop: (): unknown => vi.fn() }));
 
 vi.mock('@/app/notificationThunks', () => ({ showTerminalError: (): unknown => vi.fn() }));
@@ -63,10 +53,8 @@ const stopped: UIRuntimeRunState = {
 
 test('an already-stopped runtime says so where the button is, and Stop is not offered', () => {
   const markup = renderWith(stopped);
-  // The state is on screen before the click, not discovered by pressing.
   assert.match(markup, /Runtime stopped/);
   assert.match(markup, /Nothing to stop — the runtime already wants no pods\./);
-  // And the control that would have been a no-op is disabled.
   assert.match(markup, /id="environment-config-stop"[^>]*disabled=""/);
 });
 
@@ -86,18 +74,12 @@ test('a running runtime offers Stop and reports what it is running', () => {
   assert.doesNotMatch(markup, /id="environment-config-stop"[^>]*disabled=""/);
 });
 
-// An environment that wants a pod and has none is unhealthy, not stopped. It
-// must keep offering Stop (a stop is a legitimate response) without claiming
-// the runtime is ready.
 test('a runtime wanting a pod it has not got is still offered Stop', () => {
   const markup = renderWith({ ...stopped, desiredReplicas: 1, readyReplicas: 0, stopped: false });
   assert.match(markup, /Runtime running — 0 of 1 ready/);
   assert.doesNotMatch(markup, /id="environment-config-stop"[^>]*disabled=""/);
 });
 
-// A failed read must not disable the action: nothing observed says there is
-// nothing to stop, and blocking the only control would leave the operator with
-// no move at all.
 test('an unreadable run state states what could not be read and leaves Stop usable', () => {
   const markup = renderWith({
     tenant: 'petios',
@@ -110,18 +92,13 @@ test('an unreadable run state states what could not be read and leaves Stop usab
       "Cannot read this environment's runtime run state: exit status 1: kubectl stub: no cluster in the Playwright harness",
   });
   assert.match(markup, new RegExp(RUNTIME_RUN_STATE_UNREAD));
-  // The Go read's own headline, which leads with what could not be read; the
-  // apostrophe is HTML-escaped in the markup, hence the split match.
+  // The apostrophe is HTML-escaped, hence the partial match.
   assert.match(markup, /Cannot read this environment/);
   assert.match(markup, /runtime run state: exit status 1: kubectl stub/);
   assert.doesNotMatch(markup, /Runtime not deployed/);
   assert.doesNotMatch(markup, /id="environment-config-stop"[^>]*disabled=""/);
 });
 
-// The stop's scope: it scales the runtime Deployment and nothing else, so the
-// help has to say what it will not touch. Naming the components the environment
-// deploys is the version of that which the operator can check against the pods
-// still standing afterwards.
 test('the help names the platform components a stop leaves running', () => {
   const markup = renderWith({
     ...stopped,
@@ -140,9 +117,6 @@ test('a runtime-only environment states the scope without inventing components',
   assert.doesNotMatch(markup, /keep holding their capacity: /);
 });
 
-// summarizeRuntimeRunState's own contract, kept beside the render: `checking`
-// is neither of the two real states, and an unknown state is never reported as
-// "nothing to stop".
 test('an unread state is checking, not stopped', () => {
   const checking = summarizeRuntimeRunState(undefined, true);
   assert.equal(checking.checking, true);

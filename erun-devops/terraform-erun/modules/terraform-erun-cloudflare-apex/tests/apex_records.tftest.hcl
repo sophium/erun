@@ -1,8 +1,3 @@
-# The platform's apex and www hostnames used to resolve to nothing because no
-# committed artifact declared their DNS records — an operator who wanted them
-# had to add them by hand. Runs entirely against a mocked Cloudflare provider:
-# no real account or zone is touched.
-
 mock_provider "cloudflare" {
   mock_data "cloudflare_zone" {
     defaults = {
@@ -17,11 +12,6 @@ variables {
   ip_address            = "203.0.113.10"
 }
 
-# The no-op baseline this module starts from: before this module is called at
-# all, a plan against these inputs has nothing to create. Once it is called
-# (as every run below does), the apex record moves from absent to a concrete
-# create action — the "no-op to concrete resource action" this issue asks the
-# fix to prove.
 run "apex_record_is_a_concrete_create_action" {
   command = plan
 
@@ -46,8 +36,6 @@ run "apex_record_is_a_concrete_create_action" {
   }
 }
 
-# manage_www defaults to true: the www record is a concrete action too, with no
-# extra input beyond what the apex record already needs.
 run "www_record_defaults_on" {
   command = plan
 
@@ -62,9 +50,6 @@ run "www_record_defaults_on" {
   }
 }
 
-# An operator whose apex already serves something else (a marketing site) must
-# be able to keep the apex record's console redirect off... at least for www,
-# without losing the ability to manage other apex records via this module.
 run "www_record_can_be_disabled" {
   command = plan
 
@@ -78,7 +63,6 @@ run "www_record_can_be_disabled" {
   }
 }
 
-# An explicit parent_zone_id skips the zone lookup entirely.
 run "explicit_zone_id_skips_the_lookup" {
   command = plan
 

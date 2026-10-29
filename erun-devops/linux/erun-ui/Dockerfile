@@ -1,34 +1,14 @@
-# The `erun-desktop` Debian package: the erun-app desktop binary with its menu
-# entry and icon. A package component ships a .deb, never an image:
-#
-#   docker build -f erun-devops/linux/erun-ui/Dockerfile --target dist \
-#     --platform linux/amd64 --build-arg ERUN_VERSION=<version> \
-#     --output type=local,dest=<dir> .
-#
-# leaves erun-desktop_<version>_<arch>.deb in <dir>. `build` generates the
-# Wails bindings and builds the bundle and the Linux binary, `test` runs the
-# module's own checks on top of it (frontend typecheck, lint, format:check and
-# unit tests, the Go lint, go test, the Windows cross-compile, the Playwright
-# package's checks and suite), and `package`, built FROM test, stamps the
-# version, compiles for the target and packs the .deb, so no package exists
-# unless the tests passed and a version change reruns only `package`.
-#
-# Pinned to BUILDPLATFORM so the suite runs natively once per build. erun-app
-# links webkit through CGO, so a foreign target is cross-compiled against that
-# architecture's libraries (Debian multiarch). The package's Depends come from
-# dpkg-shlibdeps, so they name exactly the libraries the binary links, as this
-# Debian release names them (Debian 13, Ubuntu 24.04 and later).
+# Ships a .deb, not an image. `package` builds FROM `test`, so no package
+# exists unless the tests passed. erun-app links webkit through CGO, so a
+# foreign target is cross-compiled against Debian multiarch libraries.
 
-# Same version erun-ui/playwright pins, so install-deps installs the Chromium
-# runtime libraries that browser revision needs.
+# Must match erun-ui/playwright's pin so install-deps matches its Chromium.
 ARG PLAYWRIGHT_VERSION=1.63.0
 
-# Pinned node/yarn toolchain copied into the build stage; no RUN of its own.
-FROM --platform=$BUILDPLATFORM node:22.14-bookworm AS node
+FROM --platform=$BUILDPLATFORM node:22.23.4-bookworm AS node
 
-FROM --platform=$BUILDPLATFORM golang:1.26.0 AS build
+FROM --platform=$BUILDPLATFORM golang:1.26.10 AS build
 
-# Wails' Linux backend (gtk3, webkit2gtk-4.1, libsoup-3.0) for the CGO build.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     rm -f /etc/apt/apt.conf.d/docker-clean && \
@@ -41,8 +21,7 @@ RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
     ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx && \
     npm install -g yarn@1.22.22
 
-# The Chromium libraries only the Playwright suite needs, installed here below
-# the source copies so they stay cached.
+# Below the source copies so the layer stays cached.
 ARG PLAYWRIGHT_VERSION
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
@@ -51,8 +30,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 WORKDIR /src
 
 COPY package.json yarn.lock /src/
-# The root Yarn workspace lists erun-console; its manifest keeps the frozen
-# lockfile consistent without bringing its source in.
+# The root workspace lists erun-console; its manifest keeps the frozen lockfile valid.
 COPY erun-console/package.json /src/erun-console/package.json
 COPY erun-kit /src/erun-kit
 COPY erun-common /src/erun-common
@@ -60,9 +38,7 @@ COPY erun-ui /src/erun-ui
 
 ENV YARN_CACHE_FOLDER=/usr/local/share/.cache/yarn
 
-# The Wails bindings (the generator is a go.mod tool and compiles the package,
-# whose production assets embed frontend/dist), the bundle, and the Linux
-# binary at bin/erun-app the tests run.
+# The bindings generator compiles the package, whose assets embed frontend/dist.
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/usr/local/share/.cache/yarn \
@@ -74,8 +50,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 FROM build AS test
 
-# buildstamp_test.go reads the package-manager formulae; the orchestrator tests
-# resolve the skills and agents trees.
+# Read by buildstamp_test.go and the orchestrator tests.
 COPY erun-skills /src/erun-skills
 COPY Formula /src/Formula
 COPY bucket /src/bucket
@@ -89,20 +64,21 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/root/.cache/golangci-lint \
-    cd erun-ui && GOLANGCI_LINT_CACHE=/root/.cache/golangci-lint go tool golangci-lint run ./...
+    cd erun-ui && go mod tidy -diff && GOLANGCI_LINT_CACHE=/root/.cache/golangci-lint go tool golangci-lint run ./... && go run github.com/fe3dback/go-arch-lint@v1.19.0 check --project-path . && \
+    GOBIN=/tmp/lint go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.2.2 && \
+    cd playwright/fixtures/winstub && GOWORK=off GOOS=windows /tmp/lint/golangci-lint run ./...
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     cd erun-ui && go test -race -count=1 ./...
 
-# The Windows build compiles and links; it is not shipped from here.
+# Verifies the Windows build links; it is not shipped from here.
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     cd erun-ui && GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
     go build -tags "desktop,production" -ldflags "-H windowsgui" -o /tmp/erun-app-windows-amd64.exe . && \
     rm /tmp/erun-app-windows-amd64.exe
 
-# The Playwright package's own checks, then the suite against bin/erun-app.
 RUN --mount=type=cache,target=/root/.cache/ms-playwright \
     --mount=type=cache,target=/usr/local/share/.cache/yarn \
     cd erun-ui/playwright && \
@@ -111,14 +87,10 @@ RUN --mount=type=cache,target=/root/.cache/ms-playwright \
     yarn playwright install chromium && \
     yarn test
 
-# Stamps the version, compiles erun-app for the target architecture and packs
-# the .deb with erun-common's debpkg. An empty ERUN_VERSION (a bare build)
-# takes erun-devops/VERSION.
+# An empty ERUN_VERSION falls back to erun-devops/VERSION.
 FROM test AS package
 
-# A foreign target needs its own C toolchain and the gtk/webkit libraries of
-# that architecture to link against; debpkg installs them (without their
-# documentation) only when TARGETARCH is not the build platform's.
+# Installs the foreign target's C toolchain and libraries; a no-op for a native target.
 ARG TARGETARCH
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
@@ -149,7 +121,6 @@ RUN --mount=type=cache,target=/go/pkg/mod \
         --file /src/LICENSE:/usr/share/doc/erun-desktop/copyright \
         --out /deb
 
-# Only the .deb, so a local output export writes the package and nothing else.
 FROM scratch AS dist
 
 COPY --from=package /deb/ /

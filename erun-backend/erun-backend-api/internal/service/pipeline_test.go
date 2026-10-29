@@ -4,17 +4,13 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
-	eruncommon "github.com/sophium/erun/erun-common"
+	modelpkg "github.com/sophium/erun/erun-common/base/model"
 )
 
-// pipelineJob is one job as the union sees it: a status, and whatever issue
-// the claiming actor stated.
 func pipelineJob(status model.JobStatus, issueRef string) model.Job {
 	return model.Job{JobID: "job-" + string(status), Status: status, IssueRef: issueRef, Summary: "work"}
 }
 
-// pipelineReview is one review as the union sees it: a status, the repository
-// it recorded, and the branch whose name may carry its issue.
 func pipelineReview(status model.ReviewStatus, repository, sourceBranch, declaredIssueRef string) model.Review {
 	return model.Review{
 		ReviewID:         "review-" + string(status),
@@ -26,8 +22,6 @@ func pipelineReview(status model.ReviewStatus, repository, sourceBranch, declare
 	}
 }
 
-// groupFor returns the one group keyed on issueKey, failing when the union put
-// the work somewhere else.
 func groupFor(t *testing.T, issues []PipelineIssue, issueKey string) PipelineIssue {
 	t.Helper()
 	for _, issue := range issues {
@@ -39,16 +33,8 @@ func groupFor(t *testing.T, issues []PipelineIssue, issueKey string) PipelineIss
 	return PipelineIssue{}
 }
 
-// TestGroupPipelineUnionsAJobAndAReviewOnTheCanonicalKey is the join the whole
-// view rests on, and the one no surface could make before it: a planned job
-// recorded against an issue and a review proposing work for it are one entry,
-// even though one of them was never a review and the other has no issue
-// column of its own.
-//
-// Neither side carries the key in the same spelling. The job states
-// owner/repo#number; the review's link is the bare number its branch names,
-// joined to the repository the review recorded. The two agreeing here is what
-// makes a single view of both possible at all.
+// Neither side spells the key the same way: the job states owner/repo#number,
+// the review's branch number is joined to its recorded repository.
 func TestGroupPipelineUnionsAJobAndAReviewOnTheCanonicalKey(t *testing.T) {
 	issues := GroupPipeline(
 		[]model.Job{pipelineJob(model.JobStatusPlanned, "sophium/erun#2683")},
@@ -73,10 +59,6 @@ func TestGroupPipelineUnionsAJobAndAReviewOnTheCanonicalKey(t *testing.T) {
 	}
 }
 
-// TestGroupPipelineLabelsEveryRung is the vocabulary check: each status the
-// two ladders use is named as the rung it stands on, so a client renders
-// "ready to merge" from a label rather than from a status it has to
-// re-interpret.
 func TestGroupPipelineLabelsEveryRung(t *testing.T) {
 	jobRungs := map[model.JobStatus]string{
 		model.JobStatusPlanned: rungPlanned,
@@ -109,10 +91,6 @@ func TestGroupPipelineLabelsEveryRung(t *testing.T) {
 	}
 }
 
-// TestGroupPipelineKeepsAnOutcomeOutOfTheLadder: "FAILED" and "ABANDONED" are
-// not steps on the way to merged, and a view that renamed them as one would
-// hide the exact thing an operator acts on. They are reported as themselves
-// and sorted behind every real rung.
 func TestGroupPipelineKeepsAnOutcomeOutOfTheLadder(t *testing.T) {
 	issues := GroupPipeline(
 		[]model.Job{pipelineJob(model.JobStatusRunning, "sophium/erun#1"), pipelineJob(model.JobStatusAbandoned, "sophium/erun#1")},
@@ -135,10 +113,6 @@ func TestGroupPipelineKeepsAnOutcomeOutOfTheLadder(t *testing.T) {
 	}
 }
 
-// TestGroupPipelineRendersABranchDerivedLinkAsInferred is the provenance rule
-// at the union: a review whose only link is its branch name arrives marked
-// inferred, because a view that presented it as declared would claim the
-// author had stated something they never did.
 func TestGroupPipelineRendersABranchDerivedLinkAsInferred(t *testing.T) {
 	issues := GroupPipeline(nil, []model.Review{
 		pipelineReview(model.ReviewStatusOpen, "https://github.com/sophium/erun", "bug/2212-issue-ref-from-branch", ""),
@@ -150,18 +124,15 @@ func TestGroupPipelineRendersABranchDerivedLinkAsInferred(t *testing.T) {
 	if item.IssueRef != "2212" {
 		t.Errorf("issueRef = %q, want the branch's own number", item.IssueRef)
 	}
-	if item.IssueRefSource != eruncommon.IssueReferenceInferred {
-		t.Errorf("issueRefSource = %q, want %q", item.IssueRefSource, eruncommon.IssueReferenceInferred)
+	if item.IssueRefSource != modelpkg.IssueReferenceInferred {
+		t.Errorf("issueRefSource = %q, want %q", item.IssueRefSource, modelpkg.IssueReferenceInferred)
 	}
 	if item.IssueKey != "sophium/erun#2212" {
 		t.Errorf("issueKey = %q, want the branch's number joined to the review's repository", item.IssueKey)
 	}
 }
 
-// TestGroupPipelineRendersADeclaredLinkAsDeclared: the other half of the same
-// rule. A review that recorded its issue carries that reference verbatim and
-// is marked declared, even when its branch names a different number -- the
-// author's statement wins, and the provenance says so.
+// A declared reference wins over the branch number.
 func TestGroupPipelineRendersADeclaredLinkAsDeclared(t *testing.T) {
 	issues := GroupPipeline(nil, []model.Review{
 		pipelineReview(model.ReviewStatusReady, "https://github.com/sophium/erun", "bug/2212-issue-ref-from-branch", "sophium/erun#2683"),
@@ -170,15 +141,11 @@ func TestGroupPipelineRendersADeclaredLinkAsDeclared(t *testing.T) {
 	if item.IssueRef != "sophium/erun#2683" {
 		t.Errorf("issueRef = %q, want the declared reference", item.IssueRef)
 	}
-	if item.IssueRefSource != eruncommon.IssueReferenceDeclared {
-		t.Errorf("issueRefSource = %q, want %q", item.IssueRefSource, eruncommon.IssueReferenceDeclared)
+	if item.IssueRefSource != modelpkg.IssueReferenceDeclared {
+		t.Errorf("issueRefSource = %q, want %q", item.IssueRefSource, modelpkg.IssueReferenceDeclared)
 	}
 }
 
-// TestGroupPipelineShowsUnlinkedWorkWithoutAnIssue: work that names no issue
-// is still work, and a view that dropped it would be lying about the tenant's
-// state by omission. It is grouped under no key rather than guessed at, and
-// that group is last so the issues an operator was looking for come first.
 func TestGroupPipelineShowsUnlinkedWorkWithoutAnIssue(t *testing.T) {
 	issues := GroupPipeline(
 		[]model.Job{
@@ -207,10 +174,6 @@ func TestGroupPipelineShowsUnlinkedWorkWithoutAnIssue(t *testing.T) {
 	}
 }
 
-// TestGroupPipelineRefusesToGuessAKeyFromAnUnreadableRepository: a review
-// whose repository identity carries no owner/repo pair has no canonical key,
-// and a bare number with nothing to join it to must not become one. The work
-// is shown, unkeyed, rather than filed under an issue nobody named.
 func TestGroupPipelineRefusesToGuessAKeyFromAnUnreadableRepository(t *testing.T) {
 	issues := GroupPipeline(nil, []model.Review{
 		pipelineReview(model.ReviewStatusOpen, "file:///tmp/erun", "bug/2212-issue-ref-from-branch", ""),
@@ -221,16 +184,12 @@ func TestGroupPipelineRefusesToGuessAKeyFromAnUnreadableRepository(t *testing.T)
 	if issues[0].IssueKey != "" {
 		t.Fatalf("issueKey = %q, want none: a file remote names no owner/repo", issues[0].IssueKey)
 	}
-	// The link itself is still reported, marked inferred -- it is the key
-	// that is unavailable, not the fact that the branch named a number.
+	// Only the key is unavailable; the link is still reported as inferred.
 	if issues[0].Items[0].IssueRef != "2212" {
 		t.Errorf("issueRef = %q, want the branch's number kept", issues[0].Items[0].IssueRef)
 	}
 }
 
-// TestGroupPipelineOfNothingIsAnEmptyList: a quiet tenant is the ordinary
-// case, and the answer must be a definite empty slice rather than a nil a
-// caller has to guard.
 func TestGroupPipelineOfNothingIsAnEmptyList(t *testing.T) {
 	issues := GroupPipeline(nil, nil)
 	if issues == nil {

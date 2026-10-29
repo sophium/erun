@@ -57,12 +57,7 @@ func submitInviteRequestHTTPRequest(body string, bearer string) *http.Request {
 	return req
 }
 
-// TestSubmitInviteRequestRecordsVerifiedIdentityNotBody locks the issue's
-// load-bearing invariant: the issuer/subject a request records come from the
-// verified bearer token, never anything the caller's body claims. The body
-// here deliberately cannot even carry issuer/subject fields
-// (submitInviteRequestBody has none), so this proves the recorded identity
-// is exactly the token's own claims by construction, not by omission.
+// submitInviteRequestBody has no issuer/subject fields, so identity comes only from the token.
 func TestSubmitInviteRequestRecordsVerifiedIdentityNotBody(t *testing.T) {
 	submitter := &stubInviteRequestSubmitter{submitted: model.InviteRequest{InviteRequestID: "req-1", Status: model.InviteRequestStatusPending}}
 	verifier := stubInviteRequestTokenVerifier{claims: security.Claims{Issuer: "https://issuer.example.com", Subject: "verified-subject"}}
@@ -84,10 +79,6 @@ func TestSubmitInviteRequestRecordsVerifiedIdentityNotBody(t *testing.T) {
 	}
 }
 
-// TestSubmitInviteRequestRejectsInvalidBearerToken proves an unverifiable
-// caller never reaches Submit at all — the endpoint verifies a real bearer
-// token, it does not skip verification entirely just because it tolerates
-// "not enrolled anywhere".
 func TestSubmitInviteRequestRejectsInvalidBearerToken(t *testing.T) {
 	submitter := &stubInviteRequestSubmitter{}
 	verifier := stubInviteRequestTokenVerifier{err: context.DeadlineExceeded}
@@ -143,10 +134,6 @@ func (s *stubInviteRequestApprover) Decline(_ context.Context, _ model.InviteReq
 	return s.decided, s.decideErr
 }
 
-// TestDeclineInviteRequestRequiresReason locks the issue's "a decline with no
-// reason is a dead end" rule at the API boundary: an empty reason is
-// refused before the service (and the schema's own CHECK constraint behind
-// it) is ever reached.
 func TestDeclineInviteRequestRequiresReason(t *testing.T) {
 	store := &stubInviteRequestStore{got: model.InviteRequest{
 		InviteRequestID: "req-1",
@@ -182,10 +169,6 @@ func TestDeclineInviteRequestRequiresReason(t *testing.T) {
 	}
 }
 
-// TestApproveCreateTenantRequiresOperationsTenant locks the issue's
-// authority split: approving a CREATE_TENANT request needs an operations
-// tenant even though the same route serves JOIN_TENANT approvals for an
-// ordinary tenant admin.
 func TestApproveCreateTenantRequiresOperationsTenant(t *testing.T) {
 	store := &stubInviteRequestStore{got: model.InviteRequest{
 		InviteRequestID: "req-1",
@@ -221,11 +204,8 @@ func TestApproveCreateTenantRequiresOperationsTenant(t *testing.T) {
 	}
 }
 
-// fakeApproveCreateTenantRepositories wires the real service.InviteRequestService
-// used below, rather than the stubInviteRequestApprover the tests above use,
-// so this test exercises the actual erun#1722 fix end to end through the
-// HTTP route: routes.approve -> service.ApproveCreateTenant -> the tenant
-// repository's own name-conflict resolution.
+// The fakeApproveCreateTenant* types back the real service so the name-conflict
+// path runs end to end.
 type fakeApproveCreateTenantTenants struct {
 	createErr    error
 	byNameTenant model.Tenant
@@ -265,11 +245,6 @@ func (f *fakeApproveCreateTenantDecisions) MarkDeclined(_ context.Context, id st
 	return model.InviteRequest{}, errors.New("not exercised by this test")
 }
 
-// TestApproveCreateTenantWhenTenantAlreadyExistsRespondsOKNotStuckPending
-// drives the real fix end to end through the HTTP layer: approving a
-// CREATE_TENANT request whose tenant name now belongs to a tenant this call
-// did not create must not 500, and must land the request on APPROVED — a
-// state the operator can see resolved — rather than leaving it PENDING.
 func TestApproveCreateTenantWhenTenantAlreadyExistsRespondsOKNotStuckPending(t *testing.T) {
 	store := &stubInviteRequestStore{got: model.InviteRequest{
 		InviteRequestID: "req-1",

@@ -1,23 +1,16 @@
 import type { OrchestratorInfo } from './slices/orchestratorsSlice';
 
-// One orchestrator in alsoReopen. Each one reattaches to its own background
-// agent, which keeps its conversation, so an id is all a reopen needs.
+// A reopen reattaches to the orchestrator's background agent, so an id suffices.
 export interface OrchestratorReopenRef {
   orchestratorId: string;
 }
 
-// What the backend answers when boot asks which orchestrators to reopen:
-// orchestratorId is the one that OWNS THE TERMINAL PANE — the pane is single,
-// so exactly one orchestrator gets it — and alsoReopen lists every other
-// orchestrator that was open too, restored alongside it.
+// orchestratorId owns the single terminal pane; alsoReopen lists the rest.
 export interface OrchestratorReopenTarget {
   orchestratorId?: string;
   alsoReopen?: OrchestratorReopenRef[];
 }
 
-// OrchestratorRestoreOutcome is what a launch actually restores: the
-// orchestrator that ends up owning the pane (or null if there is nothing valid
-// to reopen), and every other orchestrator that comes back beside it.
 export interface OrchestratorRestoreOutcome {
   primary: string | null;
   alsoReopen: string[];
@@ -25,20 +18,8 @@ export interface OrchestratorRestoreOutcome {
 
 const trimmed = (value: string | undefined): string => value?.trim() ?? '';
 
-// planOrchestratorRestore decides what a launch actually restores, given the
-// target and the definitions that exist right now. A candidate naming an
-// orchestrator that has since been deleted restores nothing for that
-// candidate, and neither does a transient (Investigate) session, which has no
-// definition to reopen — both are dropped rather than starting a session for
-// an id that cannot come back.
-//
-// If the backend's chosen pane owner cannot be honored this way (deleted
-// between shutdown and this launch), the next most-recently-opened surviving
-// orchestrator takes the pane instead — the same recency rule the backend used
-// to pick a pane owner, just re-applied to the ones still around — rather than
-// silently dropping to the default environment selection while other
-// orchestrators still start up in the background. Only when nothing in the
-// whole set survives does boot fall through to that default.
+// planOrchestratorRestore drops deleted and transient orchestrators; if the pane
+// owner is gone, the most recently opened survivor takes the pane.
 export function planOrchestratorRestore(
   target: OrchestratorReopenTarget | null | undefined,
   orchestrators: readonly OrchestratorInfo[],

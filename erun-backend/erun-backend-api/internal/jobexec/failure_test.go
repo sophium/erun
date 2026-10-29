@@ -9,10 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// chartNotFoundLog is what the deploy Job actually leaves behind when the version
-// it was asked for has no published runtime chart: erun's trace of the ladder it
-// walked, then the error naming every coordinate probed and the ways out. This is
-// the text the environment must end up recording.
+// chartNotFoundLog is what a deploy Job logs when no runtime chart is published.
 const chartNotFoundLog = `deploy: resolving erun-devops for acme/prod at 1.2.3
 deploy: runtime chart acme-devops 1.2.3 not found in ghcr.io/acme (the tenant's own umbrella)
 deploy: runtime chart erun-devops 1.2.3 not found in ghcr.io/acme (the shared platform chart)
@@ -31,8 +28,6 @@ func TestFailureFromLogCarriesTheActionableError(t *testing.T) {
 	}
 }
 
-// TestFailureFromLogKeepsTheEnd: erun prints its failure last, so a long run must
-// give up its leading trace rather than its error.
 func TestFailureFromLogKeepsTheEnd(t *testing.T) {
 	noise := strings.Repeat("deploy: a trace line that says nothing about the failure\n", failureDetailLines*3)
 	detail := failureFromLog(noise + chartNotFoundLog)
@@ -44,8 +39,6 @@ func TestFailureFromLogKeepsTheEnd(t *testing.T) {
 	}
 }
 
-// TestFailureFromLogIsBounded: the reason is read over the API, so one noisy run
-// must not write an unbounded blob onto the resource it is recorded against.
 func TestFailureFromLogIsBounded(t *testing.T) {
 	long := strings.Repeat("x", maxFailureDetailLength*2) + "\nthe failure"
 	detail := failureFromLog(long)
@@ -63,9 +56,6 @@ func TestFailureFromLogIgnoresEmptyOutput(t *testing.T) {
 	}
 }
 
-// TestPodFailureDetailNamesAnUnpullableImage: a Job whose runtime image the
-// cluster cannot pull never logs a line, so its pod status is the only account of
-// the failure.
 func TestPodFailureDetailNamesAnUnpullableImage(t *testing.T) {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "erun-deploy-acme-prod-1-2-3-abcde"},
@@ -100,9 +90,6 @@ func TestPodFailureDetailReportsANonZeroExit(t *testing.T) {
 	}
 }
 
-// TestPodFailureDetailSaysNothingAboutAHealthyPod keeps the fallback ordering
-// honest: a pod that ran fine has no status to report, so the log stays the
-// source of the reason.
 func TestPodFailureDetailSaysNothingAboutAHealthyPod(t *testing.T) {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "erun-deploy-acme-prod-1-2-3-abcde"},
@@ -138,8 +125,6 @@ func TestJobFailureDetailReportsTheTerminalCondition(t *testing.T) {
 	}
 }
 
-// TestJobFailureDetailNamesTheKind: the recorded reason has to say which kind of
-// run failed, because a release and a deploy land on different resources.
 func TestJobFailureDetailNamesTheKind(t *testing.T) {
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{Name: "erun-release-acme-main-1"},

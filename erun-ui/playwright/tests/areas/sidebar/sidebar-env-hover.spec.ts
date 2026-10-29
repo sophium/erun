@@ -1,18 +1,14 @@
 import { test, expect } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
-// The hover card replaces the plain tenant/env tooltip. Seeded envs aren't git
-// worktrees, so "Working on" resolves to an availability reason, never a branch;
-// the populated branch+issue path is covered by the Go-side working-issue tests.
+// Seeded envs aren't git worktrees, so "Working on" shows an availability reason; the branch path
+// is covered by Go tests.
 test.describe('sidebar env hover card', () => {
   test('hovering an env row opens a card with version, working issue, and activity', async ({
     app,
   }) => {
-    // Hover and every read live inside one retryable block: SEED_ENV_ALPHA is
-    // the default-landing env, whose boot-time auto-open (still settling
-    // after reboot() returns control) and the periodic activity/usage sweep
-    // can both re-render the row and drop the card while the pointer still
-    // rests on it (erun-ui/playwright/AGENTS.md's hover-card bullet).
+    // The default-landing env's auto-open and the activity sweep can drop the card, so hover and
+    // reads retry together.
     let workingOn = '';
     await app.sidebar.readEnvHoverCard(SEED_TENANT, SEED_ENV_ALPHA, async (card) => {
       await expect(card).toBeVisible({ timeout: 1_000 });
@@ -23,34 +19,26 @@ test.describe('sidebar env hover card', () => {
       });
       await expect(card.getByText('Activity', { exact: true })).toBeVisible({ timeout: 1_000 });
 
-      // dd(1) is the Erun version row, always present once the seeded env has
-      // a runtime version; Working on is dd(2).
+      // dd(1) is Erun version; Working on is dd(2).
       workingOn = (await card.locator('dd').nth(2).textContent({ timeout: 1_000 })) ?? '';
       expect(workingOn.trim()).not.toBe('');
     });
 
-    // Whatever it resolves to, it is never the implementation
-    // excuse the card used to print for remote envs.
     expect(workingOn).not.toContain('worktree lives in the pod');
   });
 
-  // A never-opened env has no pod, so Activity must say "Not open" (never
-  // "Idle") and Working-on must offer a next step, not the pod excuse. A
-  // per-test seeded env is guaranteed never-opened: fresh on disk, no tabs.
+  // A never-opened env has no pod: Activity says "Not open" and Working on offers a next step.
   test('a not-open env shows "Not open", never "Idle" or the pod excuse', async ({
     app,
     seededEnv,
   }) => {
     const { tenant, environment } = seededEnv;
 
-    // Hover and every read live inside one retryable block; see the
-    // preceding test for why.
     let workingOn = '';
     await app.sidebar.readEnvHoverCard(tenant, environment, async (card) => {
       await expect(card).toBeVisible({ timeout: 1_000 });
 
-      // dd(1) is the Erun version row, always present once the seeded env has
-      // a runtime version; Activity is dd(3), Working on is dd(2).
+      // Activity is dd(3), Working on is dd(2).
       const activity = card.locator('dd').nth(3);
       await expect(activity).toHaveText('Not open', { timeout: 1_000 });
 
@@ -60,9 +48,7 @@ test.describe('sidebar env hover card', () => {
     expect(workingOn).not.toContain('worktree lives in the pod');
   });
 
-  // An open env whose real state is stopped must say "Stopped", never "Idle".
-  // A stopped cloud context can't be staged headless, so the spec injects the
-  // env-status event; the emission decisions are owned by env_status_test.go.
+  // A stopped cloud context can't be staged headless, so this injects env-status.
   test('an open env flagged stopped shows "Stopped" in the Activity row', async ({
     app,
     page,
@@ -75,13 +61,9 @@ test.describe('sidebar env hover card', () => {
     await expect(dot).toBeVisible();
 
     const card = app.sidebar.envHoverCard(tenant, environment);
-    // dd(1) is the Erun version row, always present once the seeded env has a
-    // runtime version; Activity is dd(3).
+    // Activity is dd(3).
     const activity = card.locator('dd').nth(3);
-    // hoverAndRead re-opens the card on each retry: an async row re-render (the
-    // busy→idle transition, or the injected status changing the dot glyph) drops
-    // the pointer and closes the card mid-assert, so a single hover is not stable.
-    // Re-parking the pointer guarantees a fresh mouseenter each time.
+    // A row re-render closes the card, so re-hover on each retry.
     const activitySettlesTo = async (matcher: RegExp | string): Promise<void> => {
       await expect(async () => {
         await page.mouse.move(0, 0);
@@ -91,31 +73,22 @@ test.describe('sidebar env hover card', () => {
       }).toPass();
     };
 
-    // Wait for the open to FULLY settle before injecting. The busy label outranks
-    // the stopped state by design, and the open/AI spawn actions emit a clearing
-    // env-status as they succeed; injecting before that lands would be overwritten
-    // (the production contract, not a flake). "Idle" is the settled, non-busy
-    // terminal state, after which no further open-settle emission overrides us.
+    // Busy outranks stopped and the open emits a clearing env-status, so inject only after Activity
+    // settles to Idle.
     await activitySettlesTo('Idle');
 
     await emitEnvStatusEvent(page, tenant, environment, 'stopped');
     await activitySettlesTo('Stopped');
     await expect(dot).toHaveAttribute('data-env-state', 'stopped');
 
-    // Reset the injected status and close the env so it doesn't leak into later specs (shared backend).
+    // Shared backend: reset the injected status and close the env.
     await emitEnvStatusEvent(page, tenant, environment, '');
     await expect(dot).toHaveAttribute('data-env-state', 'running');
-    // closeEnvironment already asserts the row went quiet and stayed quiet.
     await app.sidebar.closeEnvironment(tenant, environment);
   });
 
-  // The activity poller (env-activity) and the sticky-condition setter
-  // (env-status) run on separate cycles, so a fresh "the environment is busy"
-  // observation can land while env-status still says stopped from before —
-  // the row's spinner is honest about it, but the card fell back to a bare
-  // "Stopped — start it from the titlebar" because the indicator's dot gives
-  // the sticky stopped condition priority over busy. The row and the card must
-  // never say different things about the same spinner.
+  // env-activity and env-status run on separate cycles; the card must not say a bare "Stopped"
+  // while the row spins.
   test('a fresh busy observation never lets the card say a bare Stopped', async ({
     app,
     page,
@@ -128,8 +101,7 @@ test.describe('sidebar env hover card', () => {
     await expect(dot).toBeVisible();
 
     const card = app.sidebar.envHoverCard(tenant, environment);
-    // dd(1) is the Erun version row, always present once the seeded env has a
-    // runtime version; Activity is dd(3).
+    // Activity is dd(3).
     const activity = card.locator('dd').nth(3);
     const activitySettlesTo = async (matcher: RegExp | string): Promise<void> => {
       await expect(async () => {
@@ -144,12 +116,7 @@ test.describe('sidebar env hover card', () => {
     await emitEnvStatusEvent(page, tenant, environment, 'stopped');
     await activitySettlesTo('Stopped');
 
-    // The backend's own sweep runs on a timer against this inert (never
-    // deployed) env and will legitimately overwrite the injected busy
-    // observation with "unreachable" — re-drive it until the assertion holds,
-    // bounded by the calling test's own deadline rather than a second cap the
-    // step picked for itself. A bare toPass is what gives it that; see
-    // activitySettlesTo above, which already relies on the same property.
+    // The backend sweep can overwrite the injected busy state, so re-drive until it holds.
     await expect(async () => {
       await emitEnvActivityEvent(page, {
         tenant,
@@ -166,7 +133,7 @@ test.describe('sidebar env hover card', () => {
       await expect(activity).not.toContainText('Stopped');
     }).toPass();
 
-    // Reset the injected state so it doesn't leak into later specs (shared backend).
+    // Shared backend: reset the injected state.
     await emitEnvActivityEvent(page, {
       tenant,
       environment,
@@ -178,10 +145,6 @@ test.describe('sidebar env hover card', () => {
     await app.sidebar.closeEnvironment(tenant, environment);
   });
 
-  // "No cloud node — this cluster is not power-managed by erun" explained an
-  // absence the operator cannot act on, and it was the longest row on the card.
-  // A newly-seeded env has no power-managed node behind it, so the row is
-  // omitted outright rather than rendering that sentence.
   test('an environment with no cloud node omits the row entirely', async ({ app, seededEnv }) => {
     const { tenant, environment } = seededEnv;
 
@@ -206,7 +169,7 @@ interface EnvActivityEvent {
   detail?: string;
 }
 
-// Mirrors the env-activity event erun-ui/environment_activity.go emits per tick.
+// Mirrors the env-activity event erun-ui/internal/runtimeview/env_activity.go emits per tick.
 async function emitEnvActivityEvent(
   page: import('@playwright/test').Page,
   event: EnvActivityEvent,
@@ -221,8 +184,7 @@ async function emitEnvActivityEvent(
   }, event);
 }
 
-// Injecting env-status is a faithful stand-in: the Go side emits the same event
-// from tryReconnect's refusal paths and the open/respawn clears.
+// The Go side emits the same event from tryReconnect's refusal paths and the open/respawn clears.
 async function emitEnvStatusEvent(
   page: import('@playwright/test').Page,
   tenant: string,

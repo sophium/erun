@@ -1,0 +1,24 @@
+# orchestration splits by composition: orchestration/build runs the build and
+# push, orchestration/release and orchestration/deploy wrap it, and the root
+# orchestration package keeps only the entry points that pick between them.
+orchestration orchestration/build_empty_plan_test.go
+orchestration orchestration/build_test_stage_test.go
+orchestration/build orchestration/build.go
+orchestration/build orchestration/build_test.go
+orchestration/build orchestration/build_*.go
+orchestration/build orchestration/docker_build_scope*.go
+orchestration/build orchestration/output*.go
+orchestration/build orchestration/release_disk_headroom*.go
+orchestration/release orchestration/release_*.go
+orchestration/release orchestration/publish*.go
+orchestration/deploy orchestration/deploy*.go
+orchestration orchestration/build_run.go:RunBuildExecution
+orchestration orchestration/build_run.go:RunBuildExecutionAndDeploy
+orchestration orchestration/build_run.go:RunReleaseExecution
+orchestration orchestration/build_run.go:runBuildExecution
+orchestration orchestration/build_run.go:runResolvedBuildExecution
+orchestration orchestration/build_run.go:BuildExecutionReleaseSpec
+orchestration orchestration/build_run.go:releaseExecutionVersion
+orchestration orchestration/build_run.go:reportBuildExecutionOutcome
+orchestration orchestration/build_run.go:buildExecutionProjectRootAndEnvironment
+orchestration/deploy orchestration/build_run.go:deployedVersionForSpecs

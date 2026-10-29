@@ -4,24 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
 )
 
-// fakeZitadel is a stand-in Management API holding just enough state to
-// distinguish "the identity is not there" from "it already is": the project
-// list and the applications created in it. It records every call so a test can
-// assert what provisioning did *not* do on a second pass, which is the half
-// idempotence actually rests on.
+// fakeZitadel records every call so a test can assert what a second pass did not do.
 type fakeZitadel struct {
-	mu sync.Mutex
-	// projects is every project the org holds, by name.
+	mu       sync.Mutex
 	projects map[string]string
-	// apps is every application, by (projectID, name).
-	apps map[string]fakeApp
-	// calls records "METHOD path" for every request served.
-	calls []string
+	apps     map[string]fakeApp
+	calls    []string
+	// rowCap > 0 caps an unfiltered search the way Zitadel v4.19.5+ caps an
+	// unpaged v1 list at its MaxQueryLimit.
+	rowCap int
 }
 
 type fakeApp struct {
@@ -41,11 +38,7 @@ func (f *fakeZitadel) recorded() []string {
 	return append([]string(nil), f.calls...)
 }
 
-// countExact counts calls whose "METHOD path" is exactly call. Exact rather
-// than prefix-matched because the collection endpoints are prefixes of their
-// own create endpoints: a search for "POST /management/v1/projects" would
-// otherwise also count the "_search" beside it, and the assertion that a
-// second pass creates nothing would pass for the wrong reason.
+// Exact, not prefix: "POST /management/v1/projects" would also match its "_search".
 func (f *fakeZitadel) countExact(call string) int {
 	count := 0
 	for _, recorded := range f.recorded() {
@@ -81,9 +74,6 @@ func (f *fakeZitadel) handler() http.HandlerFunc {
 	}
 }
 
-// fakeRoute is one endpoint of the stand-in API. Keyed off a matcher rather
-// than a switch so the handler stays a loop: the matchers are the whole of the
-// routing, and each is small enough to read at a glance.
 type fakeRoute struct {
 	matches func(*http.Request) bool
 	serve   func(http.ResponseWriter, *http.Request)
@@ -91,7 +81,7 @@ type fakeRoute struct {
 
 func (f *fakeZitadel) routes() []fakeRoute {
 	return []fakeRoute{
-		{postTo("/management/v1/projects/_search"), func(w http.ResponseWriter, _ *http.Request) { f.searchProjects(w) }},
+		{postTo("/management/v1/projects/_search"), f.searchProjects},
 		{postTo("/management/v1/projects"), f.createProject},
 		{postSuffixed("/apps/_search"), f.searchApps},
 		{postSuffixed("/apps/api"), f.createAPIApp},
@@ -127,12 +117,43 @@ func getContaining(substring string) func(*http.Request) bool {
 	}
 }
 
-func (f *fakeZitadel) searchProjects(w http.ResponseWriter) {
+func (f *fakeZitadel) searchProjects(w http.ResponseWriter, r *http.Request) {
 	result := make([]map[string]string, 0, len(f.projects))
 	for name, id := range f.projects {
 		result = append(result, map[string]string{"id": id, "name": name})
 	}
-	writeFakeJSON(w, map[string]any{"result": result})
+	writeFakeJSON(w, map[string]any{"result": f.narrow(r, result)})
+}
+
+// narrow applies a request's exact-name query, then the row cap to an unfiltered
+// one, over a name-ordered result so a capped page is deterministic.
+func (f *fakeZitadel) narrow(r *http.Request, result []map[string]string) []map[string]string {
+	var body struct {
+		Queries []struct {
+			NameQuery *struct {
+				Name   string `json:"name"`
+				Method string `json:"method"`
+			} `json:"nameQuery"`
+		} `json:"queries"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	sort.Slice(result, func(i, j int) bool { return result[i]["name"] < result[j]["name"] })
+	for _, query := range body.Queries {
+		if query.NameQuery == nil || query.NameQuery.Method != "TEXT_QUERY_METHOD_EQUALS" {
+			continue
+		}
+		filtered := make([]map[string]string, 0, 1)
+		for _, item := range result {
+			if item["name"] == query.NameQuery.Name {
+				filtered = append(filtered, item)
+			}
+		}
+		return filtered
+	}
+	if f.rowCap > 0 && len(result) > f.rowCap {
+		return result[:f.rowCap]
+	}
+	return result
 }
 
 func (f *fakeZitadel) createProject(w http.ResponseWriter, r *http.Request) {
@@ -153,7 +174,7 @@ func (f *fakeZitadel) searchApps(w http.ResponseWriter, r *http.Request) {
 			result = append(result, map[string]string{"id": app.id, "name": strings.TrimPrefix(key, projectID+"\x00")})
 		}
 	}
-	writeFakeJSON(w, map[string]any{"result": result})
+	writeFakeJSON(w, map[string]any{"result": f.narrow(r, result)})
 }
 
 func (f *fakeZitadel) createAPIApp(w http.ResponseWriter, r *http.Request) {
@@ -224,8 +245,6 @@ func (f *fakeZitadel) deleteApp(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotFound)
 }
 
-// holdsApp reports whether an application of this name is still in the
-// project — the credential half of what a revocation has to leave behind.
 func (f *fakeZitadel) holdsApp(projectID string, name string) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -234,17 +253,17 @@ func (f *fakeZitadel) holdsApp(projectID string, name string) bool {
 }
 
 func writeFakeJSON(w http.ResponseWriter, body any) {
-	_ = json.NewEncoder(w).Encode(body)
+	if err := json.NewEncoder(w).Encode(body); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func projectIDFromPath(path string) string {
 	rest := strings.TrimPrefix(path, "/management/v1/projects/")
-	return rest[:strings.Index(rest, "/")]
+	projectID, _, _ := strings.Cut(rest, "/")
+	return projectID
 }
 
-// TestEnsureMachineIdentityCreatesTheIdentityAndReturnsItsCredential is the
-// ordinary first call: no project and no application exist yet, so both are
-// created and the client-credentials pair comes back.
 func TestEnsureMachineIdentityCreatesTheIdentityAndReturnsItsCredential(t *testing.T) {
 	fake := newFakeZitadel()
 	client, _ := newTestClient(t, fake.handler())
@@ -267,9 +286,6 @@ func TestEnsureMachineIdentityCreatesTheIdentityAndReturnsItsCredential(t *testi
 	}
 }
 
-// TestEnsureMachineIdentityIsIdempotentForOneLoginName is the property
-// provisioning an environment twice rests on: the second call finds the
-// application the first one created and creates nothing.
 func TestEnsureMachineIdentityIsIdempotentForOneLoginName(t *testing.T) {
 	fake := newFakeZitadel()
 	client, _ := newTestClient(t, fake.handler())
@@ -294,11 +310,6 @@ func TestEnsureMachineIdentityIsIdempotentForOneLoginName(t *testing.T) {
 	}
 }
 
-// TestEnsureMachineIdentityConvergesAnOpaqueAccessTokenType covers the one
-// property that silently makes an identity useless: a token that is not a JWT
-// cannot carry the org claim an org-scoped issuer resolves the tenant from, so
-// an application found on the opaque default is corrected rather than returned
-// as it stands.
 func TestEnsureMachineIdentityConvergesAnOpaqueAccessTokenType(t *testing.T) {
 	fake := newFakeZitadel()
 	fake.projects[machineIdentityProjectName] = "project-1"
@@ -325,9 +336,6 @@ func TestEnsureMachineIdentityConvergesAnOpaqueAccessTokenType(t *testing.T) {
 	}
 }
 
-// TestEnsureMachineIdentityLeavesAJWTApplicationAlone is the other half: an
-// identity already provisioned correctly is read back without being rewritten,
-// so a re-provision is a pure read.
 func TestEnsureMachineIdentityLeavesAJWTApplicationAlone(t *testing.T) {
 	fake := newFakeZitadel()
 	fake.projects[machineIdentityProjectName] = "project-1"
@@ -347,9 +355,7 @@ func TestEnsureMachineIdentityLeavesAJWTApplicationAlone(t *testing.T) {
 	}
 }
 
-// TestEnsureMachineIdentityRefusesAnApplicationWithoutCredentials guards the
-// silent failure a mismatched binding would otherwise produce: enrolling an
-// identity under an empty subject is an identity no token can ever resolve.
+// An empty subject is an identity no token can resolve.
 func TestEnsureMachineIdentityRefusesAnApplicationWithoutCredentials(t *testing.T) {
 	fake := newFakeZitadel()
 	fake.projects[machineIdentityProjectName] = "project-1"
@@ -364,9 +370,6 @@ func TestEnsureMachineIdentityRefusesAnApplicationWithoutCredentials(t *testing.
 	}
 }
 
-// TestEnsureMachineIdentityRefusesAnEmptyLoginName: the login name is the
-// idempotency key, so provisioning without one could never be idempotent and
-// must not reach the provider at all.
 func TestEnsureMachineIdentityRefusesAnEmptyLoginName(t *testing.T) {
 	fake := newFakeZitadel()
 	client, _ := newTestClient(t, fake.handler())
@@ -379,9 +382,6 @@ func TestEnsureMachineIdentityRefusesAnEmptyLoginName(t *testing.T) {
 	}
 }
 
-// TestDeleteMachineIdentityRemovesTheApplicationsCredential is the whole point
-// of the call: the application is gone, so the client secret it carried can no
-// longer mint a token, and the call reports that it removed one.
 func TestDeleteMachineIdentityRemovesTheApplicationsCredential(t *testing.T) {
 	fake := newFakeZitadel()
 	client, _ := newTestClient(t, fake.handler())
@@ -402,10 +402,6 @@ func TestDeleteMachineIdentityRemovesTheApplicationsCredential(t *testing.T) {
 	}
 }
 
-// TestDeleteMachineIdentityIsIdempotent: revocation runs inside a workflow that
-// retries a failed attempt from the top, so a second call must report that
-// there was nothing left rather than erroring on the absence it was asked to
-// produce.
 func TestDeleteMachineIdentityIsIdempotent(t *testing.T) {
 	fake := newFakeZitadel()
 	client, _ := newTestClient(t, fake.handler())
@@ -426,11 +422,6 @@ func TestDeleteMachineIdentityIsIdempotent(t *testing.T) {
 	}
 }
 
-// TestDeleteMachineIdentityDoesNotCreateTheProjectItWasLookingFor: revocation
-// asks where the machine-identity project is, and the answer "nowhere" must
-// stay that answer. A delete that conjures the container it was trying to empty
-// is worse than one that finds nothing — it leaves the platform with a project
-// that only ever existed because something was revoked.
 func TestDeleteMachineIdentityDoesNotCreateTheProjectItWasLookingFor(t *testing.T) {
 	fake := newFakeZitadel()
 	client, _ := newTestClient(t, fake.handler())
@@ -447,5 +438,30 @@ func TestDeleteMachineIdentityDoesNotCreateTheProjectItWasLookingFor(t *testing.
 	}
 	if _, ok := fake.projects[machineIdentityProjectName]; ok {
 		t.Fatal("revocation created the machine-identity project")
+	}
+}
+
+// Zitadel v4.19.5+ returns at most its MaxQueryLimit rows for an unfiltered v1
+// search; an identity created after that many siblings must still be found.
+func TestMachineIdentityIsFoundPastTheServerRowCap(t *testing.T) {
+	fake := newFakeZitadel()
+	fake.rowCap = 1
+	client, _ := newTestClient(t, fake.handler())
+	ctx := context.Background()
+	for _, loginName := range []string{"erun-env-0001", "erun-env-0002", "erun-env-0002"} {
+		if _, err := client.EnsureMachineIdentity(ctx, EnsureMachineIdentityParams{OrgID: "org-1", LoginName: loginName}); err != nil {
+			t.Fatalf("EnsureMachineIdentity(%s): %v", loginName, err)
+		}
+	}
+	if creates := fake.countContains("/apps/api"); creates != 2 {
+		t.Fatalf("expected one application create per identity, got %d: re-provisioning past the row cap created a second application, calls %v", creates, fake.recorded())
+	}
+
+	removed, err := client.DeleteMachineIdentity(ctx, DeleteMachineIdentityParams{OrgID: "org-1", LoginName: "erun-env-0002"})
+	if err != nil {
+		t.Fatalf("DeleteMachineIdentity: %v", err)
+	}
+	if !removed || fake.holdsApp("project-"+machineIdentityProjectName, "erun-env-0002") {
+		t.Fatalf("removed=%v: an identity past the row cap was not revoked, so its client secret can still mint tokens", removed)
 	}
 }

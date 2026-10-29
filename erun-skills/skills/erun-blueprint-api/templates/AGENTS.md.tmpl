@@ -16,6 +16,7 @@ blueprint via the `erun-blueprint-api` skill. It expects an
 - `internal/repository/` — SQL via Bun. CRUD only (`Create`/`Get`/`List`/`Update`).
 - `internal/service/` — workflows. **Create files here only when a workflow has real logic beyond calling one repository method.**
 - `internal/routes/` — HTTP adaptation; one file per entity.
+- `internal/security/` — the request-scoped security context the auth middleware sets and every layer reads.
 - `server.go` — composition boundary; constructs repos, optional services, routes, middleware.
 
 Import direction: `routes` → (`services` or `repositories`) → `model`.
@@ -50,7 +51,7 @@ RLS policies on tenant-owned tables enforce isolation from there.
 2. Add `internal/repository/<entity>.go` — `Create`/`Get`/`List`/`Update`.
 3. Add `internal/routes/<entity>.go` — `Register<Entity>Routes`.
 4. Wire it in `server.go` `NewHandler` (construct repo, call register).
-5. `go build ./...` and `go test ./...`.
+5. `gofmt -w .`, `go build ./...`, `go vet ./...` and `go test ./...`.
 
 Reuse `model` structs as the entity language across layers; do not
 introduce DTOs.
@@ -70,12 +71,28 @@ the canonical route template. Routes do not hand-write routine audit.
 
 ```sh
 go mod tidy
+gofmt -w .
 go build ./...
+go vet ./...
 go test ./...
 ```
 
-For end-to-end checks, exercise against a local PostgreSQL with the
-matching `erun-backend-db`-shaped schema:
+Keep every `go.mod` pin at or above the release the erun-blueprint-api
+template pins; it is the floor past known advisories.
+
+The scaffold ships `IdentityRepository.Resolve`,
+`PermissionAuthorizer.IsAllowed` and `AuditEventRepository.WriteAPIEvent`
+(`internal/repository/`) as TODO stubs that fail until implemented: the
+first refuses every token (401, logged as `identity resolution failed`),
+the second denies every protected route (403), and the third writes no
+audit row and returns an error the middleware logs as `audit write failed`
+while still serving the request. The commands above pass against the
+stubs. Implementing them needs the `roles`, `role_permissions`,
+`user_roles` and `audit_events` tables in the database.
+
+For end-to-end checks, after implementing those three methods, exercise
+against a local PostgreSQL with the matching `erun-backend-db`-shaped
+schema:
 
 - `GET /healthz` → 204
 - `GET /v1/whoami` (no token) → 401

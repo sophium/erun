@@ -1,0 +1,193 @@
+package podruntime
+
+import (
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
+)
+
+// Go trims its build cache only by age, which has no ceiling; the home volume's size is not a
+// node-local quota. Evicting Go's own entries by last-use mtime bounds it and keeps it warm.
+// trim.txt is left alone so Go's own age trim still runs.
+
+// DefaultGoBuildCacheMaxBytes is the cap when the chart renders none.
+const DefaultGoBuildCacheMaxBytes int64 = 16 << 30
+
+// A pass that frees nothing ends the trim, so goBuildCacheTrimPasses is slack, not a retry loop.
+const goBuildCacheTrimPasses = 4
+
+// GoBuildCacheTrimResult is one trim's outcome.
+type GoBuildCacheTrimResult struct {
+	Dir         string `json:"dir"`
+	MaxBytes    int64  `json:"maxBytes"`
+	BeforeBytes int64  `json:"beforeBytes"`
+	AfterBytes  int64  `json:"afterBytes"`
+	Evicted     int    `json:"evicted"`
+	Passes      int    `json:"passes"`
+	DryRun      bool   `json:"dryRun"`
+	Missing     bool   `json:"missing,omitempty"`
+}
+
+type goBuildCacheEntry struct {
+	path  string
+	size  int64
+	mtime time.Time
+}
+
+// TrimGoBuildCache brings the cache at dir under maxBytes without creating a missing one.
+func TrimGoBuildCache(ctx core.Context, dir string, maxBytes int64) (GoBuildCacheTrimResult, error) {
+	result := GoBuildCacheTrimResult{Dir: dir, MaxBytes: maxBytes, DryRun: ctx.DryRun}
+	if strings.TrimSpace(dir) == "" {
+		return result, errors.New("the go build cache directory is empty")
+	}
+	if maxBytes <= 0 {
+		return result, fmt.Errorf("the go build cache cap must be a positive number of bytes, got %d", maxBytes)
+	}
+	if !isDirectory(dir) {
+		result.Missing = true
+		return result, nil
+	}
+	before, err := goBuildCacheSize(dir)
+	if err != nil {
+		return result, err
+	}
+	result.BeforeBytes, result.AfterBytes = before, before
+	if before <= maxBytes {
+		return result, nil
+	}
+	if ctx.DryRun {
+		plan, err := goBuildCacheEvictionPlan(dir, before-maxBytes)
+		result.Evicted = len(plan)
+		if err == nil {
+			ctx.Info(fmt.Sprintf("erun: %d bytes of go build cache at %s are over the %d byte cap; %d least recently used entries would be evicted (--dry-run, nothing removed)", before, dir, maxBytes, len(plan)))
+		}
+		return result, err
+	}
+	if err := trimGoBuildCachePasses(dir, maxBytes, &result); err != nil {
+		return result, err
+	}
+	reportGoBuildCacheTrim(ctx, result)
+	return result, nil
+}
+
+func trimGoBuildCachePasses(dir string, maxBytes int64, result *GoBuildCacheTrimResult) error {
+	for result.Passes < goBuildCacheTrimPasses {
+		now, err := goBuildCacheSize(dir)
+		if err != nil {
+			return err
+		}
+		result.AfterBytes = now
+		if now <= maxBytes {
+			return nil
+		}
+		plan, err := goBuildCacheEvictionPlan(dir, now-maxBytes)
+		if err != nil {
+			return err
+		}
+		result.Passes++
+		if len(plan) == 0 {
+			return nil
+		}
+		for _, entry := range plan {
+			if err := os.RemoveAll(entry.path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return err
+			}
+		}
+		result.Evicted += len(plan)
+	}
+	after, err := goBuildCacheSize(dir)
+	result.AfterBytes = after
+	return err
+}
+
+func reportGoBuildCacheTrim(ctx core.Context, result GoBuildCacheTrimResult) {
+	ctx.Info(fmt.Sprintf("erun: trimmed the go build cache at %s from %d to %d bytes, evicting %d least recently used entries against a %d byte cap", result.Dir, result.BeforeBytes, result.AfterBytes, result.Evicted, result.MaxBytes))
+	if result.AfterBytes > result.MaxBytes {
+		ctx.Info(fmt.Sprintf("erun: the go build cache at %s is still %d bytes over its %d byte cap after %d passes; its remaining entries are not the ones this bound can free", result.Dir, result.AfterBytes, result.MaxBytes, result.Passes))
+	}
+}
+
+func goBuildCacheEvictionPlan(dir string, want int64) ([]goBuildCacheEntry, error) {
+	entries, err := goBuildCacheEntries(dir)
+	if err != nil {
+		return nil, err
+	}
+	sort.SliceStable(entries, func(i, j int) bool {
+		if entries[i].mtime.Equal(entries[j].mtime) {
+			return entries[i].path < entries[j].path
+		}
+		return entries[i].mtime.Before(entries[j].mtime)
+	})
+	var plan []goBuildCacheEntry
+	var total int64
+	for _, entry := range entries {
+		if total >= want {
+			break
+		}
+		plan = append(plan, entry)
+		total += entry.size
+	}
+	return plan, nil
+}
+
+// An executable entry is a directory, sized by what it holds.
+func goBuildCacheEntries(dir string) ([]goBuildCacheEntry, error) {
+	subdirs, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var entries []goBuildCacheEntry
+	for _, sub := range subdirs {
+		if !sub.IsDir() {
+			continue
+		}
+		names, err := os.ReadDir(filepath.Join(dir, sub.Name()))
+		if err != nil {
+			continue
+		}
+		for _, name := range names {
+			if !strings.HasSuffix(name.Name(), "-a") && !strings.HasSuffix(name.Name(), "-d") {
+				continue
+			}
+			path := filepath.Join(dir, sub.Name(), name.Name())
+			info, err := name.Info()
+			if err != nil {
+				continue
+			}
+			size, err := goBuildCacheSize(path)
+			if err != nil {
+				continue
+			}
+			entries = append(entries, goBuildCacheEntry{path: path, size: size, mtime: info.ModTime()})
+		}
+	}
+	return entries, nil
+}
+
+// Directory sizes are excluded: they vary by filesystem and eviction cannot free them.
+func goBuildCacheSize(path string) (int64, error) {
+	var total int64
+	err := filepath.WalkDir(path, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if info, err := d.Info(); err == nil {
+			total += info.Size()
+		}
+		return nil
+	})
+	return total, err
+}

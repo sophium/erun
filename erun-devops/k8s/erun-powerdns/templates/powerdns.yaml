@@ -93,8 +93,8 @@
 {{- end -}}
 {{- $imageOverrides := default dict .Values.imageOverrides -}}
 {{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
-{{- $powerdnsImage := default (printf "%s/erun-powerdns:4.9.3" $containerRegistry) (index $imageOverrides "erun-powerdns") -}}
-{{- $postgresImage := default (printf "%s/erun-backend-postgres:18.3" $containerRegistry) (index $imageOverrides "erun-backend-postgres") -}}
+{{- $powerdnsImage := default (printf "%s/erun-powerdns:4.9.18" $containerRegistry) (index $imageOverrides "erun-powerdns") -}}
+{{- $postgresImage := default (printf "%s/erun-backend-postgres:18.6" $containerRegistry) (index $imageOverrides "erun-backend-postgres") -}}
 {{- $platform := default dict .Values.platform -}}
 {{- $servicesZone := default "" $platform.servicesZone -}}
 {{- $nameservers := default (list) $platform.nameservers -}}
@@ -126,11 +126,8 @@ stringData:
   {{ $apiKeySecretKey }}: {{ $apiKey | quote }}
 {{- if $dnsUpdateEnabled }}
 ---
-# TSIG key for RFC2136 dynamic updates. Auto-generated + lookup-persisted like
-# the api-key. Consumed two ways on this cluster: imported into PowerDNS by the
-# zone-bootstrap init, and read back by the hosting-edge apply to wire
-# cert-manager's rfc2136 tsigSecretSecretRef. `algorithm`/`key-name` ride along
-# so the edge doesn't have to re-derive them.
+# TSIG key for RFC2136 updates; the hosting-edge apply reads this Secret back,
+# including `algorithm` and `key-name`, to wire cert-manager.
 apiVersion: v1
 kind: Secret
 metadata:
@@ -165,11 +162,8 @@ spec:
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
       initContainers:
-        # Generate the gpgsql backend config (with the postgres password and
-        # api-key from their Secrets) onto a per-pod volume, consumed by both
-        # pdns_server and pdnsutil via --config-dir. Keeps secrets out of argv,
-        # and avoids the image's default sqlite pdns.conf that is fatal under
-        # --launch=gpgsql.
+        # Keeps secrets out of argv and replaces the image's sqlite pdns.conf,
+        # which is fatal under --launch=gpgsql.
         - name: config-gen
           image: {{ $powerdnsImage }}
           env:
@@ -183,8 +177,7 @@ spec:
                 secretKeyRef:
                   name: {{ $apiKeySecretName }}
                   key: {{ $apiKeySecretKey }}
-            # The node's own interface IP, so local-address can bind it instead
-            # of 0.0.0.0 and coexist with a systemd-resolved loopback stub.
+            # Binding the node IP, not 0.0.0.0, coexists with systemd-resolved's stub.
             - name: HOST_IP
               valueFrom:
                 fieldRef:
@@ -218,8 +211,7 @@ spec:
           volumeMounts:
             - name: config
               mountPath: {{ $configDir }}
-        # Lift the gpgsql schema out of the pinned PowerDNS image so it always
-        # matches the server version, onto a shared volume the loader can read.
+        # Taken from the pinned image so the schema always matches the server.
         - name: schema-source
           image: {{ $powerdnsImage }}
           command:
@@ -229,9 +221,6 @@ spec:
           volumeMounts:
             - name: schema
               mountPath: /schema
-        # Create the powerdns database on the shared postgres and load the
-        # schema once. Both steps are guarded so re-deploys are idempotent.
-        # Reuses the postgres image for psql/createdb/pg_isready.
         - name: schema-load
           image: {{ $postgresImage }}
           env:
@@ -264,14 +253,8 @@ spec:
             - name: schema
               mountPath: /schema
         {{- if $servicesZone }}
-        # Bootstrap the authoritative services zone with its nameservers, from
-        # the per-instance platform config that deploy threads in as
-        # platform.* values. Creating the zone is once-only (skips when it
-        # already exists); the record policies below it (SOA MNAME, CAA, TSIG)
-        # reconcile on every bootstrap, because a zone created before a policy
-        # existed is never recreated -- create-time-only hygiene reaches future
-        # zones and leaves every existing one untouched. Per-env
-        # wildcard/_acme-challenge records are added later via pdnsutil.
+        # Zone creation is once-only; the record policies below reconcile on
+        # every bootstrap because an existing zone is never recreated.
         - name: zone-bootstrap
           image: {{ $powerdnsImage }}
           command:
@@ -280,59 +263,33 @@ spec:
             - |
               set -e
               if ! pdnsutil --config-dir={{ $configDir }} list-zone {{ $servicesZone | quote }} >/dev/null 2>&1; then
-                # `pdnsutil create-zone ZONE [nsname]` takes at most ONE
-                # nameserver; passing more prints a usage error, exits 0, and
-                # creates nothing — silently leaving the zone unbootstrapped. So
-                # create with the first NS (if any) and add the rest as NS records.
+                # create-zone takes one nameserver; more exits 0 having created nothing.
                 pdnsutil --config-dir={{ $configDir }} create-zone {{ $servicesZone | quote }}{{ with (first $nameservers) }} {{ . | quote }}{{ end }}
                 {{- range $ns := (rest $nameservers) }}
                 pdnsutil --config-dir={{ $configDir }} add-record {{ $servicesZone | quote }} @ NS {{ $ns | quote }}
                 {{- end }}
               fi
               {{- with (first $nameservers) }}
-              # Reconcile the SOA MNAME on EVERY bootstrap, not only at zone
-              # creation: create-zone leaves pdnsutil's placeholder primary NS
-              # behind, and a zone created before this reconcile existed is
-              # never recreated -- so a creation-only correction would reach
-              # future zones and leave every existing one advertising the
-              # placeholder in public DNS indefinitely. Rewrite only when the
-              # MNAME is not already the primary NS, so an already-correct SOA
-              # is left byte-identical. Reading the zone stays fatal on failure
-              # like every step here: a silent miss would leave the placeholder
-              # published, which is the defect this exists to fix.
+              # create-zone leaves a placeholder SOA MNAME; replace it only when it
+              # differs so a correct SOA stays byte-identical.
               soa=$(pdnsutil --config-dir={{ $configDir }} list-zone {{ $servicesZone | quote }} | awk '$4 == "SOA" { print; exit }')
-              # SOA RDATA is its trailing seven fields (mname, rname, then the
-              # serial, refresh, retry, expire and minimum), so the MNAME is
-              # NF-6 and the serial NF-4 whatever the leading name/TTL/class
-              # columns look like.
+              # SOA RDATA is the trailing seven fields: MNAME is NF-6, serial NF-4.
               mname=$(printf '%s\n' "$soa" | awk '{ print $(NF-6) }')
-              # pdnsutil prints the SOA MNAME relative to the zone's $ORIGIN, so
-              # an already-correct MNAME comes back WITHOUT the trailing dot a
-              # nameserver value is written with. Compare with a trailing dot
-              # stripped from both sides: a raw comparison never matches a real
-              # zone, so every bootstrap would rewrite the SOA and bump its
-              # serial while the stub-backed test still passed.
+              # pdnsutil omits the trailing dot, so compare with it stripped on both sides.
               want_mname={{ . | quote }}
               if [ -n "$soa" ] && [ "${mname%.}" != "${want_mname%.}" ]; then
                 serial=$(printf '%s\n' "$soa" | awk '{ print $(NF-4) }')
                 case "$serial" in '' | *[!0-9]*) serial=1 ;; esac
-                # The record content is changing, so move the serial forward: a
-                # serial that goes backwards is worse than no bump at all.
                 serial=$((serial + 1))
                 pdnsutil --config-dir={{ $configDir }} replace-rrset {{ $servicesZone | quote }} @ SOA 3600 {{ printf "%s. hostmaster.%s. $serial 10800 3600 604800 3600" . $servicesZone | quote }}
               fi
               {{- end }}
               {{- if $caaIssuer }}
-              # Authorize the platform's ACME CA on the services zone (idempotent).
-              # Apex issue+issuewild so a per-env empty-non-terminal CAA lookup
-              # resolves to a definitive answer, not an ambiguous NODATA that trips
-              # up multi-perspective validators.
+              # Apex issue+issuewild so per-env CAA lookups get a definitive answer,
+              # not a NODATA that trips multi-perspective validators.
               pdnsutil --config-dir={{ $configDir }} replace-rrset {{ $servicesZone | quote }} @ CAA 3600 {{ printf "0 issue \"%s\"" $caaIssuer | quote }} {{ printf "0 issuewild \"%s\"" $caaIssuer | quote }}
               {{- end }}
               {{- if $dnsUpdateEnabled }}
-              # Import the TSIG key and authorize it for dynamic updates on the
-              # services zone (idempotent) so cert-manager's rfc2136 DNS-01 solver
-              # can write _acme-challenge TXT records.
               pdnsutil --config-dir={{ $configDir }} import-tsig-key {{ $tsigKeyName | quote }} {{ $tsigAlgorithm | quote }} {{ $tsigSecret | quote }} 2>/dev/null || true
               pdnsutil --config-dir={{ $configDir }} set-meta {{ $servicesZone | quote }} TSIG-ALLOW-DNSUPDATE {{ $tsigKeyName | quote }}
               {{- end }}
@@ -345,11 +302,8 @@ spec:
           image: {{ $powerdnsImage }}
           imagePullPolicy: IfNotPresent
           securityContext:
-            # Bind privileged :53 under hostNetwork. k8s adds capabilities to the
-            # bounding set, not the ambient set, so a non-root process cannot use
-            # NET_BIND_SERVICE on k3s/containerd — run as root to bind :53. (A
-            # cleaner alternative is to setcap cap_net_bind_service on the wrapper
-            # image's pdns_server and keep non-root; that needs an image rebuild.)
+            # Root is required to bind :53: k8s adds NET_BIND_SERVICE to the
+            # bounding set, not the ambient set, so non-root cannot use it.
             runAsUser: 0
             capabilities:
               add: ["NET_BIND_SERVICE"]
@@ -365,9 +319,7 @@ spec:
               containerPort: 53
               hostPort: 53
               protocol: TCP
-          # Probe the authoritative DNS port (the served surface). The HTTP API
-          # is loopback-only, so kubelet (which probes the pod/node IP under
-          # hostNetwork) cannot reach it.
+          # The HTTP API is loopback-only, so kubelet probes the DNS port.
           readinessProbe:
             tcpSocket:
               port: dns-tcp
@@ -390,11 +342,8 @@ spec:
       restartPolicy: Always
 {{- if $dnsUpdateEnabled }}
 ---
-# In-cluster nameserver Service, so cert-manager's rfc2136 solver has a stable
-# endpoint to send DNS UPDATE to. The pod is hostNetwork, so the Service's
-# endpoint resolves to the node IP where PowerDNS binds :53; both protocols are
-# required. Not the public NAT'd authoritative IP (which may not accept inbound
-# in-cluster UPDATE) — this Service targets the pod/node directly.
+# Stable in-cluster target for cert-manager's DNS UPDATEs, bypassing the public
+# NAT'd IP, which may not accept them.
 apiVersion: v1
 kind: Service
 metadata:

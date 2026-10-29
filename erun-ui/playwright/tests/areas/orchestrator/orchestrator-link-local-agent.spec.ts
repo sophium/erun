@@ -1,52 +1,13 @@
 import { test, expect } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
-// An orchestrator can link either agent type. A remote-agent env is reviewed in a
-// workspace-sync mirror the operator may place anywhere; a local-agent env is
-// reviewed in its own worktree, which is already on this machine because its pod
-// hostPath-mounts it — so that path is derived from the environment and must not
-// be offered as an editable field with a folder picker.
-//
-// Every seeded harness env is local-agent, so this is also the first coverage the
-// env-selection list has had at all: before the capability landed the candidate
-// list was always empty here. What the harness cannot reach is the wiring behind
-// Create (no cluster, no sync) — that is covered by
-// TestCreateOrchestratorLinksLocalAgentWithoutSync and
-// TestListOrchestratorEnvCandidatesCoversBothAgentTypes in
-// erun-ui/orchestrator_test.go. This spec cancels rather than creating, so the
-// shared seeded config stays untouched for the other specs.
-//
-// Linking also kicks off a best-effort MCP port-forward for the linked
-// environment, so an operator never has to run `erun open` by hand before
-// an orchestrator's tools work — and launching one opens the forward of any
-// linked environment whose edge is not answering, before the MCP client config
-// naming that port is written, since the client connects once as it launches
-// and never asks again. The headless harness has no real cluster to forward
-// against (kubectl/erun are stubbed here, and the reachability probe is pinned
-// to "unreachable" for the whole suite so a seeded env can never read a real
-// local port), so that reachability contract — opened when healthy, left alone
-// when stopped, left alone when already answering, surfaced when it fails — is
-// covered by TestCreateOrchestratorLinkOpensTheForwardWithoutManualOpen,
-// TestUpdateOrchestratorLinkOpensTheForwardForANewlyAddedEnv,
-// TestLinkingAStoppedEnvironmentDoesNotForceStartIt, and
-// TestLinkingAnEnvironmentSurfacesAForwardOpenFailure in
-// erun-ui/orchestrator_link_forward_test.go, and by
-// TestSpawnOrchestratorOpensTheEdgeBeforeWritingMCPConfig,
-// TestSpawnOrchestratorCompletesWithAnUnreachableEdge,
-// TestWireOrchestratorMCPRetriesAnEdgeRepairThatFailed, and
-// TestWireOrchestratorMCPLeavesAnAnsweringEdgeAlone in
-// erun-ui/orchestrator_edge_ensure_test.go. What this spec locks down on that
-// contract is the invariant the harness can reach: the isolation seams above
-// leave the whole flow inert rather than half-wired, so nothing here forwards,
-// respawns, or blocks against a cluster that is not there.
+// A local-agent env's review directory is derived from the env, so it must not
+// be editable. Cancels rather than creates to keep the seeded config untouched.
 test.describe('orchestrator links a local-agent environment', () => {
   test('offers the env and shows its worktree as a derived path', async ({ app }) => {
     await app.sidebar.newOrchestratorButton().click();
     await app.orchestratorDialog.waitForOpen();
 
-    // The seeded local-agent env is offered, labelled by which kind of review
-    // directory it has (recognition over recall: the operator should not have to
-    // remember which env type syncs a mirror).
     const row = app.orchestratorDialog.envRow(SEED_TENANT, SEED_ENV_ALPHA);
     await expect(row).toBeVisible();
     await expect(row).toContainText('worktree on this machine');
@@ -54,15 +15,12 @@ test.describe('orchestrator links a local-agent environment', () => {
     await app.orchestratorDialog.toggleEnv(SEED_TENANT, SEED_ENV_ALPHA);
     await expect(app.orchestratorDialog.envCheckbox(SEED_TENANT, SEED_ENV_ALPHA)).toBeChecked();
 
-    // Derived, so it is shown and not editable: no textbox, no folder picker.
     await expect(app.orchestratorDialog.envDirectoryInput(SEED_TENANT, SEED_ENV_ALPHA)).toHaveCount(
       0,
     );
     await expect(
       app.orchestratorDialog.envChooseDirectoryButton(SEED_TENANT, SEED_ENV_ALPHA),
     ).toHaveCount(0);
-    // The path rendered is the env's repository path, which the harness seeds to
-    // its own repo dir.
     await expect(app.orchestratorDialog.envBlock(SEED_TENANT, SEED_ENV_ALPHA)).toContainText(
       'repo',
     );

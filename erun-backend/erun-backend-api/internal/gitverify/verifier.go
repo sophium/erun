@@ -1,8 +1,5 @@
-// Package gitverify confirms a reported merge actually landed on a tenant's
-// real git remote, rather than trusting whoever reports it. It is what lets
-// MERGED become a fact about the repository ("this commit is really there,
-// with the parent it claims") instead of a claim believed because of its
-// caller's identity — see AGENTS.md "Merge Queue".
+// Package gitverify confirms a reported merge actually landed on the tenant's
+// real git remote instead of trusting the reporter.
 package gitverify
 
 import (
@@ -20,48 +17,22 @@ import (
 	"github.com/go-git/go-git/v5/storage/memory"
 )
 
-// Verifier answers whether a commit is really reachable from a branch's tip
-// on a remote, and what that commit's own parent is.
+// Verifier checks commits against a branch on a remote.
 type Verifier interface {
-	// Contains fetches remoteURL and reports whether commit is on branch (its
-	// own tip counts), together with commit's parent commit hash (empty for a
-	// root commit). ok is false, with no error, when the fetch succeeds but
-	// commit is not reachable from branch's tip at all.
+	// Contains reports whether commit is reachable from branch's tip, with its parent hash.
 	Contains(ctx context.Context, remoteURL, branch, commit string) (ok bool, parent string, err error)
 
-	// IsAncestor fetches remoteURL and reports whether ancestor is descendant's
-	// own ancestor, or the same commit — never whether it is the *immediate*
-	// parent. This tolerates commits landing on branch between ancestor and
-	// descendant (a release push, for instance) without treating them as
-	// evidence the merge was built on the wrong base. isAncestor is false,
-	// with no error, when the fetch succeeds but ancestor is not reachable
-	// from descendant at all.
+	// IsAncestor reports whether ancestor is reachable from descendant, not
+	// whether it is the immediate parent, so commits landing in between are tolerated.
 	IsAncestor(ctx context.Context, remoteURL, branch, ancestor, descendant string) (isAncestor bool, err error)
 
-	// ContainsChanges fetches remoteURL and reports whether everything
-	// sourceBranch adds, relative to where it diverged from targetBranch, is
-	// already present in targetBranch's history — naming the commit on
-	// targetBranch that carries it. This is the question commit identity
-	// cannot answer once a branch lands by squash merge: the branch's own
-	// commits are deliberately not made ancestors of the target, so
-	// IsAncestor and a merge build both have nothing to point at, while the
-	// work itself is really there. A source tip that is already in the
-	// target's history — its own tip included — is answered by that ancestry
-	// before any change set is compared. contained is false, with no error,
-	// when the branches are unrelated, share no single merge base, or share
-	// no commit carrying the same change set.
+	// ContainsChanges reports whether sourceBranch's work is in targetBranch's
+	// history even when its commits are not, as after a squash merge.
 	ContainsChanges(ctx context.Context, remoteURL, targetBranch, sourceBranch string) (contained bool, commit string, err error)
 }
 
-// RemoteVerifier fetches the real remote with go-git, so the API needs no
-// `git` binary of its own. It needs no stored credential or configuration
-// per tenant either: remoteURL is supplied by the caller reporting the
-// merge, the same "origin" its own checkout already pushed to.
-//
-// It never authenticates, so a remote URL in a form that needs an identity to
-// read is rewritten by fetchableRemoteURL below into one this process can
-// read anonymously before the fetch — the caller naming its own repository's
-// remote must not depend on this runtime holding a key to it.
+// RemoteVerifier fetches anonymously with go-git; fetchableRemoteURL rewrites
+// remotes that would need credentials.
 type RemoteVerifier struct{}
 
 func NewRemoteVerifier() *RemoteVerifier { return &RemoteVerifier{} }
@@ -86,18 +57,13 @@ func (RemoteVerifier) Contains(ctx context.Context, remoteURL, branch, commit st
 		return false, "", err
 	}
 
-	targetCommit, err := repo.CommitObject(plumbing.NewHash(commit))
-	if err != nil {
-		// Not present anywhere in the fetched history: definitely not on the
-		// branch, not a lookup failure.
+	targetCommit, ok := fetchedCommit(repo, commit)
+	if !ok {
 		return false, "", nil
 	}
 	return commitReachesTip(targetCommit, tipCommit)
 }
 
-// normalizeAncestorArgs trims and validates IsAncestor's arguments, kept
-// separate so IsAncestor's own branching stays about the git question, not
-// input hygiene.
 func normalizeAncestorArgs(remoteURL, branch, ancestor, descendant string) (string, string, string, string, error) {
 	remoteURL = strings.TrimSpace(remoteURL)
 	branch = strings.TrimSpace(branch)
@@ -128,10 +94,8 @@ func (RemoteVerifier) IsAncestor(ctx context.Context, remoteURL, branch, ancesto
 	if err != nil {
 		return false, err
 	}
-	ancestorCommit, err := repo.CommitObject(plumbing.NewHash(ancestor))
-	if err != nil {
-		// Not present anywhere in the fetched history: definitely not an
-		// ancestor, not a lookup failure.
+	ancestorCommit, ok := fetchedCommit(repo, ancestor)
+	if !ok {
 		return false, nil
 	}
 	descendantCommit, err := repo.CommitObject(plumbing.NewHash(descendant))
@@ -141,12 +105,8 @@ func (RemoteVerifier) IsAncestor(ctx context.Context, remoteURL, branch, ancesto
 	return ancestorCommit.IsAncestor(descendantCommit)
 }
 
-// ContainsChanges answers whether sourceBranch's work is already in
-// targetBranch even though the branch's own commits are not — the shape a
-// squash merge leaves behind. A branch that landed by merge commit or
-// fast-forward — including one the target was fast-forwarded *onto*, where the
-// two tips are the same commit — is caught by the plain ancestor case first,
-// before any change set is compared.
+// ContainsChanges answers an ordinary or fast-forward landing by ancestry
+// before comparing change sets.
 func (RemoteVerifier) ContainsChanges(ctx context.Context, remoteURL, targetBranch, sourceBranch string) (bool, string, error) {
 	remoteURL, targetBranch, sourceBranch, err := normalizeChangeArgs(remoteURL, targetBranch, sourceBranch)
 	if err != nil {
@@ -168,9 +128,6 @@ func (RemoteVerifier) ContainsChanges(ctx context.Context, remoteURL, targetBran
 	return branchLandedInTarget(repo, targetBranch, sourceBranch, targetTip, sourceTip)
 }
 
-// normalizeChangeArgs trims and validates ContainsChanges' arguments, kept
-// separate so its own branching stays about the git question, not input
-// hygiene — the same split normalizeAncestorArgs makes for IsAncestor.
 func normalizeChangeArgs(remoteURL, targetBranch, sourceBranch string) (string, string, string, error) {
 	remoteURL = strings.TrimSpace(remoteURL)
 	targetBranch = strings.TrimSpace(targetBranch)
@@ -184,22 +141,9 @@ func normalizeChangeArgs(remoteURL, targetBranch, sourceBranch string) (string, 
 	return remoteURL, targetBranch, sourceBranch, nil
 }
 
-// branchLandedInTarget is the two ways a branch's work can be in the target
-// while its own commits are not the whole story: the ordinary landing, where
-// the source tip really is in the target's history, and the squash landing,
-// where only the work is.
-//
-// A source tip equal to the target tip belongs to the first. It is the shape
-// a fast-forward of the target onto the branch leaves behind, which is a
-// sanctioned way for a change to land without this platform's queue, and a
-// commit is its own ancestor (IsAncestor's own contract) — so the branch is
-// contained in the target by identity. It is also the one shape the refs
-// cannot tell apart from a branch that never committed anything, and the
-// change-set comparison cannot separate them either: both leave an empty
-// fingerprint, and a branch that genuinely adds nothing is already answered as
-// contained whenever it trails the target rather than sitting exactly on it.
-// Refusing the equal-tip case would therefore buy no protection against a
-// landing that did not happen while refusing the landing that did.
+// branchLandedInTarget checks ancestry first, then a squash landing. An equal
+// tip counts as contained: it is indistinguishable from a fast-forward landing,
+// and refusing it would only strand real landings.
 func branchLandedInTarget(repo *git.Repository, targetBranch, sourceBranch string, targetTip, sourceTip *object.Commit) (bool, string, error) {
 	alreadyLanded, err := sourceTip.IsAncestor(targetTip)
 	if err != nil {
@@ -220,11 +164,8 @@ func branchLandedInTarget(repo *git.Repository, targetBranch, sourceBranch strin
 	return true, landed, nil
 }
 
-// branchChangeFingerprint is what the branch adds relative to where it
-// diverged, together with that merge base. An empty fingerprint is no
-// evidence of landing: it means the branches share no single merge base, so
-// there is no "what this branch added" to compare against, or that the branch
-// adds nothing at all.
+// branchChangeFingerprint returns the branch's change set and merge base. An
+// empty fingerprint (no single merge base, or no changes) is no evidence of landing.
 func branchChangeFingerprint(targetBranch, sourceBranch string, targetTip, sourceTip *object.Commit) (string, *object.Commit, error) {
 	bases, err := sourceTip.MergeBase(targetTip)
 	if err != nil {
@@ -240,8 +181,6 @@ func branchChangeFingerprint(targetBranch, sourceBranch string, targetTip, sourc
 	return wanted, bases[0], nil
 }
 
-// findSquashedLanding walks the target's own history for a commit whose
-// change against its parent is exactly the branch's change set, and names it.
 func findSquashedLanding(repo *git.Repository, targetTip, base *object.Commit, wanted string) (string, error) {
 	iter, err := repo.Log(&git.LogOptions{From: targetTip.Hash})
 	if err != nil {
@@ -265,11 +204,8 @@ func findSquashedLanding(repo *git.Repository, targetTip, base *object.Commit, w
 	return landed, nil
 }
 
-// commitCarriesChange reports whether candidate's own change against its
-// parent is the wanted one. Commits at or before the merge base are shared
-// history rather than the branch's work, and a merge commit has no single
-// "its own change" to compare — a squash commit always has one parent, so
-// skipping them costs nothing and avoids matching on an ambiguous diff.
+// Commits at or before the merge base are shared history, and merge commits
+// have no single change to compare; a squash commit always has one parent.
 func commitCarriesChange(candidate, base *object.Commit, wanted string) (bool, error) {
 	if candidate.Hash == base.Hash || len(candidate.ParentHashes) != 1 {
 		return false, nil
@@ -292,29 +228,8 @@ func commitCarriesChange(candidate, base *object.Commit, wanted string) (bool, e
 	return fingerprint == wanted, nil
 }
 
-// changeFingerprint is a stable identity for the set of changes between two
-// commits' trees: every added, removed, and modified path with the lines the
-// change moved to or from. Two fingerprints matching means the same content
-// changed in the same way, whatever graph produced it — which is what lets a
-// squash commit be recognized as a branch's work when none of the branch's
-// commits are ancestors of the target. An empty fingerprint means the two
-// commits hold the same tree.
-//
-// The identity is the lines a change adds and removes, not the blobs it moved
-// between. A blob names a whole file, so it also carries every unrelated edit
-// that file received between the two sides' own baselines: when the target
-// edits a file the branch is also editing, between where the branch forked and
-// the squash's parent, that file's "before" blob differs on the two sides
-// while the change to it does not — and one change then reads as two
-// different ones. Where a hunk sits is not part of what it says, so line
-// content survives the file moving underneath it.
-//
-// Content is a weaker identity than a blob, the trade `git patch-id` also
-// makes: two unrelated edits that add and remove the same lines in the same
-// paths are indistinguishable here. What bounds it is that the whole change
-// set is compared at once — matching one means reproducing every path and
-// every line of the branch's work — and that a change whose sides are not both
-// readable text keeps the blob identity, where the blob really is the change.
+// changeFingerprint keys each path by the lines it adds and removes, not by
+// blob, so a target edit elsewhere in the file does not hide a squash landing.
 func changeFingerprint(from, to *object.Commit) (string, error) {
 	fromTree, err := from.Tree()
 	if err != nil {
@@ -343,19 +258,11 @@ func changeFingerprint(from, to *object.Commit) (string, error) {
 			change.From.Name, change.From.TreeEntry.Mode, removed,
 			change.To.Name, change.To.TreeEntry.Mode, added))
 	}
-	// Sorted, so the fingerprint identifies the change set and not the order
-	// the diff happened to emit it in. An empty change set joins to "", so an
-	// empty fingerprint keeps meaning the two commits hold the same tree.
+	// Sorted so diff order does not matter; an empty set means identical trees.
 	sort.Strings(lines)
 	return strings.Join(lines, "\n"), nil
 }
 
-// changeLineChange is one path's own contribution to a change, as two opaque
-// tokens: the lines the change removes and the lines it adds.
-//
-// A change whose sides are not both readable text has no lines to compare — a
-// binary blob, a gitlink, a change of mode alone. There the blob pair it moved
-// between is the whole story, so the identity stays exactly what it was.
 func changeLineChange(change *object.Change) (removed, added string, err error) {
 	fromFile, toFile, err := change.Files()
 	if err != nil {
@@ -379,9 +286,7 @@ func changeLineChange(change *object.Change) (removed, added string, err error) 
 	return lineIdentity(removedLines), lineIdentity(addedLines), nil
 }
 
-// textLines is a file's lines, or no lines at all for a side that has no file
-// (an added or deleted path). ok is false when the file is not readable text,
-// which is the binary case a line comparison has nothing to say about.
+// textLines returns ok=false for non-text files; a missing side has no lines.
 func textLines(file *object.File) (lines []string, ok bool, err error) {
 	if file == nil {
 		return nil, true, nil
@@ -400,27 +305,19 @@ func textLines(file *object.File) (lines []string, ok bool, err error) {
 	return strings.Split(content, "\n"), true, nil
 }
 
-// lineIdentity is a set of lines as one token. Sorted, so it is the lines that
-// changed and not the order the diff reported them in, and quoted, so a line's
-// own bytes cannot be read as the separators around it.
+// lineIdentity quotes each line so its bytes cannot be read as separators.
 func lineIdentity(lines []string) string {
 	sorted := append([]string(nil), lines...)
 	sort.Strings(sorted)
 	return fmt.Sprintf("%q", strings.Join(sorted, "\n"))
 }
 
-// maxAlignedLines caps the line-by-line alignment lineDelta does. Past it the
-// changed span is reported whole on both sides instead, which is stricter than
-// aligning it — it can refuse a landing that aligning would have accepted,
-// never accept one aligning would have refused — and a span that large is
-// being rewritten rather than edited.
+// maxAlignedLines caps alignment; past it the span is reported whole, which can
+// only refuse more, never accept more.
 const maxAlignedLines = 4_000_000
 
-// lineDelta reports which of from's lines to drops and which of to's lines
-// from lacks: a diff's removed and added lines, without the positions the diff
-// reported them at. The common head and tail are stripped first, which is
-// where the positions go — an insertion a later edit pushed down the file
-// still leaves exactly the lines it added.
+// lineDelta returns removed and added lines without positions, so an edit
+// shifted down the file still matches.
 func lineDelta(from, to []string) (removed, added []string) {
 	head := commonHeadLines(from, to)
 	from, to = from[head:], to[head:]
@@ -438,9 +335,6 @@ func lineDelta(from, to []string) (removed, added []string) {
 	return alignLines(from, to)
 }
 
-// alignLines is lineDelta's line-by-line case: the lines the two sides share,
-// longest run first, are kept and the rest is what the change removed and
-// what it added.
 func alignLines(from, to []string) (removed, added []string) {
 	width := len(to) + 1
 	shared := sharedLineCounts(from, to)
@@ -463,9 +357,7 @@ func alignLines(from, to []string) (removed, added []string) {
 	return removed, added
 }
 
-// sharedLineCounts is the longest common subsequence of every pair of suffixes
-// of from and to, at shared[i*width+j] for width len(to)+1 — the table
-// alignLines walks from the front to recover which lines those are.
+// sharedLineCounts is the suffix LCS table, indexed shared[i*(len(to)+1)+j].
 func sharedLineCounts(from, to []string) []int32 {
 	width := len(to) + 1
 	shared := make([]int32, (len(from)+1)*width)
@@ -484,7 +376,6 @@ func sharedLineCounts(from, to []string) []int32 {
 	return shared
 }
 
-// commonHeadLines is how many lines from and to open with in common.
 func commonHeadLines(from, to []string) int {
 	shared := 0
 	for shared < len(from) && shared < len(to) && from[shared] == to[shared] {
@@ -493,7 +384,6 @@ func commonHeadLines(from, to []string) int {
 	return shared
 }
 
-// commonTailLines is how many lines from and to close with in common.
 func commonTailLines(from, to []string) int {
 	shared := 0
 	for shared < len(from) && shared < len(to) &&
@@ -503,15 +393,10 @@ func commonTailLines(from, to []string) int {
 	return shared
 }
 
-// fetchBranch clones branch from remoteURL into a fresh in-memory repository,
-// so the API needs no persistent checkout of its own for the check.
 func fetchBranch(ctx context.Context, remoteURL, branch string) (*git.Repository, error) {
 	return fetchBranches(ctx, remoteURL, branch)
 }
 
-// fetchBranches clones each branch from remoteURL into one fresh in-memory
-// repository, so two branches' histories can be compared without a second
-// fetch of the same remote.
 func fetchBranches(ctx context.Context, remoteURL string, branches ...string) (*git.Repository, error) {
 	fetchURL, err := fetchableRemoteURL(remoteURL)
 	if err != nil {
@@ -536,20 +421,9 @@ func fetchBranches(ctx context.Context, remoteURL string, branches ...string) (*
 	return repo, nil
 }
 
-// fetchableRemoteURL rewrites a caller's remote URL into the form this process
-// can fetch on its own, and is what keeps `git remote get-url origin` — an
-// SSH remote on most checkouts — a usable --remote-url. The verifier only ever
-// reads the target remote and holds no key or agent, so an SSH remote is
-// answered over its host's credential-less HTTPS instead; a public repository
-// is readable that way without anyone's credentials. A URL that is already
-// readable anonymously (https, http, git, file, a local path) is returned
-// untouched, so a caller who named a private remote keeps the form they chose
-// and the fetch failure stays about their URL rather than one we substituted.
-//
-// An SSH remote on a port of its own has no HTTPS equivalent to carry it to,
-// so it is refused here, naming the form the platform needs, instead of being
-// sent to a fetch that would fail with an SSH-agent error this runtime cannot
-// act on.
+// fetchableRemoteURL rewrites SSH remotes to the host's anonymous HTTPS form
+// since the verifier holds no key; other URLs pass through. An SSH remote on a
+// custom port has no HTTPS equivalent and is refused.
 func fetchableRemoteURL(remoteURL string) (string, error) {
 	given := strings.TrimSpace(remoteURL)
 	if given == "" {
@@ -558,17 +432,12 @@ func fetchableRemoteURL(remoteURL string) (string, error) {
 	if rest, ok := strings.CutPrefix(given, "ssh://"); ok {
 		return sshRemoteAsHTTPS(remoteURL, rest)
 	}
-	// Any other scheme is either already credential-less (https, http, git,
-	// file) or not one of git's, and is left for the fetch to judge.
 	if strings.Contains(given, "://") {
 		return given, nil
 	}
 	return scpLikeRemoteAsHTTPS(given), nil
 }
 
-// sshRemoteAsHTTPS answers an ssh:// remote with the same host's HTTPS form,
-// refusing the one shape that has none to be carried to: a remote on a port of
-// its own.
 func sshRemoteAsHTTPS(remoteURL, rest string) (string, error) {
 	host, path, found := strings.Cut(trimUser(rest), "/")
 	if !found || host == "" || path == "" {
@@ -580,9 +449,7 @@ func sshRemoteAsHTTPS(remoteURL, rest string) (string, error) {
 	return "https://" + host + "/" + path, nil
 }
 
-// scpLikeRemoteAsHTTPS answers git@host:owner/repo.git with the same host's
-// HTTPS form. A local path with a colon in it (or a Windows drive) is not
-// scp-like — its host part carries a separator — and is returned unchanged.
+// A local path or Windows drive has a separator in its host part and is not scp-like.
 func scpLikeRemoteAsHTTPS(given string) string {
 	hostPart, path, found := strings.Cut(given, ":")
 	if !found || path == "" || strings.HasPrefix(path, `\`) {
@@ -595,8 +462,6 @@ func scpLikeRemoteAsHTTPS(given string) string {
 	return "https://" + host + "/" + strings.TrimPrefix(path, "/")
 }
 
-// trimUser drops the `user@` an SSH remote may carry; the platform reads
-// anonymously, so the identity it names is not one to fetch as.
 func trimUser(hostPart string) string {
 	if at := strings.LastIndex(hostPart, "@"); at >= 0 {
 		return hostPart[at+1:]
@@ -604,12 +469,8 @@ func trimUser(hostPart string) string {
 	return hostPart
 }
 
-// unreadableRemoteNote is appended to a verification fetch that failed. By the
-// time this fetch runs the caller's push has already landed, so the refusal
-// has to say what it is about — the platform's own read of the target remote —
-// rather than read as a verdict that the merge did not happen. Where the URL
-// was one we rewrote, it names both forms, because the caller is holding a
-// remote this platform could not read as given.
+// unreadableRemoteNote makes clear a failed fetch is not a verdict that the
+// merge did not land; the caller's push has already happened.
 func unreadableRemoteNote(remoteURL, fetchURL string) string {
 	if strings.TrimSpace(remoteURL) != fetchURL {
 		return fmt.Sprintf("the platform reads the target remote over HTTPS without credentials, so remote-url %q was fetched as %s; whether the merge landed was not judged by this failure",
@@ -618,7 +479,11 @@ func unreadableRemoteNote(remoteURL, fetchURL string) string {
 	return "the platform fetches the target remote without credentials; whether the merge landed was not judged by this failure"
 }
 
-// branchTip reads the commit at branch's just-fetched tip.
+func fetchedCommit(repo *git.Repository, commit string) (*object.Commit, bool) {
+	found, err := repo.CommitObject(plumbing.NewHash(commit))
+	return found, err == nil
+}
+
 func branchTip(repo *git.Repository, branch string) (*object.Commit, error) {
 	tipRef, err := repo.Reference(plumbing.NewRemoteReferenceName("origin", branch), true)
 	if err != nil {
@@ -631,8 +496,7 @@ func branchTip(repo *git.Repository, branch string) (*object.Commit, error) {
 	return tipCommit, nil
 }
 
-// commitReachesTip reports whether target is tip itself or one of its
-// ancestors, together with target's own parent commit hash.
+// commitReachesTip reports whether target is tip or an ancestor, with target's parent hash.
 func commitReachesTip(target, tip *object.Commit) (bool, string, error) {
 	parent := ""
 	if len(target.ParentHashes) > 0 {

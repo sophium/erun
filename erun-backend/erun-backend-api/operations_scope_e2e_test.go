@@ -20,13 +20,8 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
-// operationsScopeDatabase seeds one OPERATIONS tenant (the caller) and one
-// COMPANY tenant (a stranger) against a real migrated PostgreSQL, so
-// EnvironmentRepository/TenantQuotaRepository's tenant scoping is proven
-// against the actual erun_operations RLS policy (USING (true)) rather than a
-// fake that would just agree with itself about which rows it decided to
-// return. Runs against the package database internal/testpg provides: same
-// tables, same tenant_quotas dependency the environment quota gate reads.
+// operationsScopeDatabase seeds an OPERATIONS caller and a COMPANY stranger against
+// real PostgreSQL, where erun_operations RLS is USING (true).
 func operationsScopeDatabase(t *testing.T) (opsCtx, strangerCtx context.Context, opsTenantID, strangerTenantID string, db *sql.DB) {
 	t.Helper()
 	databaseURL := testpg.URL(t)
@@ -38,9 +33,7 @@ func operationsScopeDatabase(t *testing.T) (opsCtx, strangerCtx context.Context,
 	strangerTenantID = seedScopeTestTenant(t, db, "stranger-scope-e2e", model.TenantTypeCompany)
 	t.Cleanup(func() {
 		for _, tenantID := range []string{opsTenantID, strangerTenantID} {
-			// Children before parents: builds reference reviews, and the
-			// operate-path scope tests below seed all three, so leaving
-			// them out leaves rows the tenants delete cannot cascade past.
+			// Children before parents.
 			for _, table := range []string{"audit_events", "usage_events", "user_roles", "role_permissions", "roles", "builds", "reviews", "jobs", "environments", "contexts", "tenant_quotas", "users", "tenants"} {
 				if _, err := db.Exec(`DELETE FROM `+table+` WHERE tenant_id = $1`, tenantID); err != nil {
 					t.Logf("clearing %s for tenant %s: %v", table, tenantID, err)
@@ -65,10 +58,6 @@ func seedScopeTestTenant(t *testing.T, db *sql.DB, label string, tenantType mode
 	return tenantID
 }
 
-// TestEnvironmentCountScopesToTheOperationsCallersOwnTenant pins the failure
-// scenario directly: an OPERATIONS tenant's environment-count quota must
-// count only its own environments, never a stranger tenant's, even though
-// erun_operations' RLS policy makes the stranger's rows visible too.
 func TestEnvironmentCountScopesToTheOperationsCallersOwnTenant(t *testing.T) {
 	opsCtx, strangerCtx, _, _, db := operationsScopeDatabase(t)
 	environments := repository.NewEnvironmentRepository(repository.NewTxManager(db, repository.DialectPostgres))
@@ -93,18 +82,8 @@ func TestEnvironmentCountScopesToTheOperationsCallersOwnTenant(t *testing.T) {
 	}
 }
 
-// TestEnvironmentGetScopesToTheOperationsCallersOwnTenant pins the tenant
-// scoping every operate route depends on, and is the one read this file's
-// own "EnvironmentRepository's tenant scoping is proven against the actual
-// erun_operations RLS policy" contract never exercised. EnvironmentRepository.Get
-// is the first call POST /v1/environments/{id}/deploy, POST
-// /v1/environments/{id}/stop, DELETE /v1/environments/{id} and every
-// env-scoped sub-route make; unlike List/Count/CountByContext it was left
-// without the explicit tenant filter those carry, and erun_operations' RLS
-// policy is USING (true), so nothing downstream refused it either. An
-// OPERATIONS caller naming a stranger tenant's environment id therefore read
-// that row — and then deployed to, stopped, or deleted it — for an
-// environment its own tenant-scoped List does not even show it.
+// TestEnvironmentGetScopesToTheOperationsCallersOwnTenant: Get is the first call of every operate
+// route, and erun_operations RLS refuses nothing.
 func TestEnvironmentGetScopesToTheOperationsCallersOwnTenant(t *testing.T) {
 	opsCtx, strangerCtx, _, _, db := operationsScopeDatabase(t)
 	environments := repository.NewEnvironmentRepository(repository.NewTxManager(db, repository.DialectPostgres))
@@ -124,11 +103,6 @@ func TestEnvironmentGetScopesToTheOperationsCallersOwnTenant(t *testing.T) {
 	}
 }
 
-// TestEnvironmentGetRefusesAStrangerTenantsEnvironmentForACompanyCaller is
-// the company-tenant half of the same boundary, where RLS is the enforcement
-// rather than the explicit filter: a caller can name any environment id in a
-// request, so the refusal must come from the read, not from the caller
-// choosing a polite id.
 func TestEnvironmentGetRefusesAStrangerTenantsEnvironmentForACompanyCaller(t *testing.T) {
 	_, strangerCtx, _, _, db := operationsScopeDatabase(t)
 	environments := repository.NewEnvironmentRepository(repository.NewTxManager(db, repository.DialectPostgres))
@@ -152,13 +126,6 @@ func TestEnvironmentGetRefusesAStrangerTenantsEnvironmentForACompanyCaller(t *te
 	}
 }
 
-// TestGetEnvironmentHTTPRefusesAnEnvironmentOutsideTheCallersTenant drives
-// the same boundary through the real handler, auth middleware, and database
-// rather than the repository alone: GET /v1/environments/{environment_id} is
-// the read every operate route performs first, so what it answers for an id
-// naming another tenant's environment is what deploy/stop/delete are handed.
-// It must answer 404 — never the row — in both directions and for both tenant
-// types, since a caller can put any id in a URL.
 func TestGetEnvironmentHTTPRefusesAnEnvironmentOutsideTheCallersTenant(t *testing.T) {
 	opsCtx, strangerCtx, opsTenantID, strangerTenantID, db := operationsScopeDatabase(t)
 	environments := repository.NewEnvironmentRepository(repository.NewTxManager(db, repository.DialectPostgres))
@@ -172,8 +139,6 @@ func TestGetEnvironmentHTTPRefusesAnEnvironmentOutsideTheCallersTenant(t *testin
 	opsServer := startEnvironmentsAPIServer(t, db, opsTenantID, model.TenantTypeOperations, opsUserID)
 	strangerServer := startEnvironmentsAPIServer(t, db, strangerTenantID, model.TenantTypeCompany, strangerUserID)
 
-	// The caller's own environment still resolves: the refusals below are the
-	// boundary, not a read that stopped working.
 	code, body := e2eRequest(t, opsServer.URL, http.MethodGet, "/v1/environments/"+ownEnv.EnvironmentID, nil)
 	if code != http.StatusOK {
 		t.Fatalf("operations caller reading its own environment: HTTP %d: %s", code, body)
@@ -201,8 +166,6 @@ func TestGetEnvironmentHTTPRefusesAnEnvironmentOutsideTheCallersTenant(t *testin
 	}
 }
 
-// TestEnvironmentCountByTypeScopesToTheOperationsCallersOwnTenant pins the
-// same property for the resource-budget check's per-type count.
 func TestEnvironmentCountByTypeScopesToTheOperationsCallersOwnTenant(t *testing.T) {
 	opsCtx, strangerCtx, _, _, db := operationsScopeDatabase(t)
 	environments := repository.NewEnvironmentRepository(repository.NewTxManager(db, repository.DialectPostgres))
@@ -219,11 +182,6 @@ func TestEnvironmentCountByTypeScopesToTheOperationsCallersOwnTenant(t *testing.
 	}
 }
 
-// TestEnvironmentCountByContextScopesToTheOperationsCallersOwnTenant pins the
-// placement-capacity check: a stranger's environment placed on the
-// stranger's own context must not inflate the operations caller's count for
-// that context, and the operations caller's own context/environment must
-// still be counted.
 func TestEnvironmentCountByContextScopesToTheOperationsCallersOwnTenant(t *testing.T) {
 	opsCtx, strangerCtx, _, _, db := operationsScopeDatabase(t)
 	txs := repository.NewTxManager(db, repository.DialectPostgres)
@@ -253,9 +211,6 @@ func TestEnvironmentCountByContextScopesToTheOperationsCallersOwnTenant(t *testi
 	}
 }
 
-// TestTenantQuotaGetReturnsTheOperationsCallersOwnRow pins the other half of
-// the quota gate: reading the cap itself must not return an arbitrary
-// tenant's row (or the stranger's) just because erun_operations can see both.
 func TestTenantQuotaGetReturnsTheOperationsCallersOwnRow(t *testing.T) {
 	opsCtx, _, opsTenantID, strangerTenantID, db := operationsScopeDatabase(t)
 	quotas := repository.NewTenantQuotaRepository(repository.NewTxManager(db, repository.DialectPostgres))
@@ -272,9 +227,6 @@ func TestTenantQuotaGetReturnsTheOperationsCallersOwnRow(t *testing.T) {
 	}
 }
 
-// grantAllAccessRole gives the user a pattern-based role matching every
-// method and path, the same shape ReadAll/WriteAll grant, so the HTTP-level
-// test below exercises quota enforcement itself rather than authorization.
 func grantAllAccessRole(t *testing.T, db *sql.DB, tenantID, userID string) {
 	t.Helper()
 	var roleID string
@@ -291,11 +243,7 @@ func grantAllAccessRole(t *testing.T, db *sql.DB, tenantID, userID string) {
 	mustNoErr(t, err, "assign role")
 }
 
-// startEnvironmentsAPIServer builds a real handler fixed to one caller
-// identity (only the OIDC verifier and identity lookup are stubbed;
-// authorization, quota enforcement, and RLS are all the real ones), so two
-// servers pointed at the same database stand in for two different tenants
-// calling the platform.
+// Only the OIDC verifier and identity lookup are stubbed.
 func startEnvironmentsAPIServer(t *testing.T, db *sql.DB, tenantID string, tenantType model.TenantType, userID string) *httptest.Server {
 	t.Helper()
 	handler, err := NewHandler(HandlerOptions{
@@ -317,12 +265,6 @@ func startEnvironmentsAPIServer(t *testing.T, db *sql.DB, tenantID string, tenan
 	return server
 }
 
-// TestCreateEnvironmentQuotaScopesToTheOperationsCallersOwnTenant drives the
-// literal failure scenario over HTTP: an OPERATIONS tenant whose own quota
-// cap is 1 must be able to create its first environment regardless of how
-// many environments a stranger tenant holds, and must then be refused its
-// second exactly the way a correctly-scoped quota check refuses anyone once
-// their own cap is reached.
 func TestCreateEnvironmentQuotaScopesToTheOperationsCallersOwnTenant(t *testing.T) {
 	opsCtx, strangerCtx, opsTenantID, strangerTenantID, db := operationsScopeDatabase(t)
 	quotas := repository.NewTenantQuotaRepository(repository.NewTxManager(db, repository.DialectPostgres))
@@ -340,9 +282,7 @@ func TestCreateEnvironmentQuotaScopesToTheOperationsCallersOwnTenant(t *testing.
 	opsServer := startEnvironmentsAPIServer(t, db, opsTenantID, model.TenantTypeOperations, opsUserID)
 	strangerServer := startEnvironmentsAPIServer(t, db, strangerTenantID, model.TenantTypeCompany, strangerUserID)
 
-	// The stranger tenant holds more environments than the operations
-	// tenant's own cap. Type remote-agent skips cluster placement entirely,
-	// so this needs nothing beyond the database.
+	// remote-agent skips cluster placement, so this needs only the database.
 	for _, name := range []string{"stranger-env-1", "stranger-env-2"} {
 		code, body := e2eRequest(t, strangerServer.URL, http.MethodPost, "/v1/environments", map[string]any{"name": name, "type": "remote-agent"})
 		if code != http.StatusCreated {
@@ -361,10 +301,6 @@ func TestCreateEnvironmentQuotaScopesToTheOperationsCallersOwnTenant(t *testing.
 	}
 }
 
-// TestContextListScopesToTheOperationsCallersOwnTenant pins the same failure
-// scenario for cloud contexts: an OPERATIONS caller's list must not include a
-// stranger tenant's contexts even though erun_operations' RLS policy makes
-// them visible too.
 func TestContextListScopesToTheOperationsCallersOwnTenant(t *testing.T) {
 	opsCtx, strangerCtx, _, _, db := operationsScopeDatabase(t)
 	contexts := repository.NewContextRepository(repository.NewTxManager(db, repository.DialectPostgres))
@@ -381,10 +317,6 @@ func TestContextListScopesToTheOperationsCallersOwnTenant(t *testing.T) {
 	}
 }
 
-// TestUsageEventListScopesToTheOperationsCallersOwnTenant pins the same
-// failure scenario for metering events: an OPERATIONS caller's list must not
-// include a stranger tenant's usage events even though erun_operations' RLS
-// policy makes them visible too.
 func TestUsageEventListScopesToTheOperationsCallersOwnTenant(t *testing.T) {
 	opsCtx, strangerCtx, _, _, db := operationsScopeDatabase(t)
 	usageEvents := repository.NewUsageEventRepository(repository.NewTxManager(db, repository.DialectPostgres))
@@ -399,12 +331,8 @@ func TestUsageEventListScopesToTheOperationsCallersOwnTenant(t *testing.T) {
 	}
 }
 
-// TestRoleListScopesToTheOperationsCallersOwnTenant pins the worst-shaped
-// instance of this defect: RoleRepository.List already reads the security
-// context (to bootstrap the predefined TenantUser/TenantAdmin roles), which
-// makes it look scoped even though it used to apply that TenantID nowhere in
-// either SELECT. An OPERATIONS caller's list must contain only its own
-// tenant's roles.
+// TestRoleListScopesToTheOperationsCallersOwnTenant: RoleRepository.List reads the security context
+// only to bootstrap roles; its SELECTs must still filter by tenant.
 func TestRoleListScopesToTheOperationsCallersOwnTenant(t *testing.T) {
 	opsCtx, strangerCtx, opsTenantID, _, db := operationsScopeDatabase(t)
 	roles := repository.NewRoleRepository(repository.NewTxManager(db, repository.DialectPostgres))
@@ -437,9 +365,6 @@ func TestRoleListScopesToTheOperationsCallersOwnTenant(t *testing.T) {
 	}
 }
 
-// seedScopeTestUser creates a user in tenantID with the AllAccess role, so an
-// HTTP-level test exercises the tenant-scope behavior itself rather than
-// authorization.
 func seedScopeTestUser(t *testing.T, db *sql.DB, tenantID, username string) string {
 	t.Helper()
 	var userID string
@@ -448,12 +373,6 @@ func seedScopeTestUser(t *testing.T, db *sql.DB, tenantID, username string) stri
 	return userID
 }
 
-// TestListEnvironmentsHTTPScopesToRequestedTenantForOperationsCaller drives
-// GET /v1/environments?tenantId=<target> over HTTP: an operations
-// caller naming another tenant sees exactly that tenant's environments, and
-// a company caller making the identical request is refused before any row
-// is read, proving the boundary is enforced server-side rather than by the
-// caller's own good behavior.
 func TestListEnvironmentsHTTPScopesToRequestedTenantForOperationsCaller(t *testing.T) {
 	_, strangerCtx, opsTenantID, strangerTenantID, db := operationsScopeDatabase(t)
 	environments := repository.NewEnvironmentRepository(repository.NewTxManager(db, repository.DialectPostgres))
@@ -490,12 +409,6 @@ func TestListEnvironmentsHTTPScopesToRequestedTenantForOperationsCaller(t *testi
 	}
 }
 
-// TestGetQuotaHTTPScopesToRequestedTenantForOperationsCaller drives
-// GET /v1/quota?tenantId=<target> over HTTP: an operations caller naming
-// another tenant sees exactly that tenant's quota row — the read half of the
-// same operations-only write TestSetTenantQuotaHTTPCrossTenantSetsTheTargetTenantsQuotaAndAudits
-// proves below, so a quota can be seen before it is set — and a company
-// caller making the identical request is refused before any row is read.
 func TestGetQuotaHTTPScopesToRequestedTenantForOperationsCaller(t *testing.T) {
 	opsCtx, _, opsTenantID, strangerTenantID, db := operationsScopeDatabase(t)
 	quotas := repository.NewTenantQuotaRepository(repository.NewTxManager(db, repository.DialectPostgres))
@@ -535,9 +448,7 @@ func TestGetQuotaHTTPScopesToRequestedTenantForOperationsCaller(t *testing.T) {
 	}
 }
 
-// auditParametersColumn reads api_parameters back directly: the audit read
-// API never selects it (see model.AuditEvent's own comment on why), so a
-// test proving what was recorded has to go straight to the table.
+// The audit read API never selects api_parameters, so read the table directly.
 func auditParametersColumn(t *testing.T, db *sql.DB, tenantID, apiPath string) string {
 	t.Helper()
 	var parameters sql.NullString
@@ -548,13 +459,8 @@ func auditParametersColumn(t *testing.T, db *sql.DB, tenantID, apiPath string) s
 	return parameters.String
 }
 
-// TestCreateEnvironmentHTTPCrossTenantCreatesInTargetTenantAndAudits proves
-// the write half server-side, end to end: an operations caller's POST
-// /v1/environments naming tenantId places the row in the target tenant (read
-// back directly, not trusted from the response), and a distinct audit event
-// records the operator's home tenant plus the target in api_parameters —
-// the attribution a cross-tenant write needs, since the environment row
-// itself, once persisted, only ever names the target.
+// TestCreateEnvironmentHTTPCrossTenantCreatesInTargetTenantAndAudits: the persisted row names only
+// the target, so the audit event carries the operator's home tenant.
 func TestCreateEnvironmentHTTPCrossTenantCreatesInTargetTenantAndAudits(t *testing.T) {
 	opsCtx, _, opsTenantID, strangerTenantID, db := operationsScopeDatabase(t)
 	opsSecurity, _ := security.FromContext(opsCtx)
@@ -590,15 +496,9 @@ func TestCreateEnvironmentHTTPCrossTenantCreatesInTargetTenantAndAudits(t *testi
 	}
 }
 
-// TestCreateEnvironmentHTTPCrossTenantRuntimeAutoPlacementTargetsTheTargetTenantsOwnContext
-// proves the composition this PR's summary claims: now that
-// ContextRepository.List is scoped explicitly to the security context's
-// TenantID, autoSelectPlacement's list read depends on which tenant's
-// context scopedContextForTenant put in the request context. A runtime
-// create with no explicit contextId must auto-select the *target* tenant's
-// own running context, never the operator's own — even though the operator
-// has a running context of its own that would otherwise be the only
-// candidate.
+// TestCreateEnvironmentHTTPCrossTenantRuntimeAutoPlacementTargetsTheTargetTenantsOwnContext:
+// ContextRepository.List is scoped to the security context, so auto-placement must pick the target
+// tenant's context, never the operator's.
 func TestCreateEnvironmentHTTPCrossTenantRuntimeAutoPlacementTargetsTheTargetTenantsOwnContext(t *testing.T) {
 	opsCtx, strangerCtx, opsTenantID, strangerTenantID, db := operationsScopeDatabase(t)
 	contexts := repository.NewContextRepository(repository.NewTxManager(db, repository.DialectPostgres))
@@ -627,11 +527,6 @@ func TestCreateEnvironmentHTTPCrossTenantRuntimeAutoPlacementTargetsTheTargetTen
 	}
 }
 
-// TestCreateEnvironmentHTTPCrossTenantIsRefusedForNonOperationsCaller is the
-// unentitled-write refusal test: a company caller naming another
-// tenant on create is refused server-side with 403, and — the property that
-// actually matters — no row is created anywhere, not even in the caller's
-// own tenant, proving the refusal happens before any write is attempted.
 func TestCreateEnvironmentHTTPCrossTenantIsRefusedForNonOperationsCaller(t *testing.T) {
 	_, _, _, strangerTenantID, db := operationsScopeDatabase(t)
 	strangerUserID := seedScopeTestUser(t, db, strangerTenantID, "stranger-caller")
@@ -658,14 +553,6 @@ func TestCreateEnvironmentHTTPCrossTenantIsRefusedForNonOperationsCaller(t *test
 	}
 }
 
-// TestSetTenantQuotaHTTPCrossTenantSetsTheTargetTenantsQuotaAndAudits proves
-// the quota write's audit-before-write, mirroring
-// TestCreateEnvironmentHTTPCrossTenantCreatesInTargetTenantAndAudits: an
-// operations caller's PUT /v1/tenants/{tenant_id}/quota lands in the target
-// tenant (read back directly, not trusted from the response), and a distinct
-// audit event records the operator's home tenant plus the target in
-// api_parameters — the attribution this write needs, since the quota row
-// itself, once persisted, only ever names the target.
 func TestSetTenantQuotaHTTPCrossTenantSetsTheTargetTenantsQuotaAndAudits(t *testing.T) {
 	opsCtx, _, opsTenantID, strangerTenantID, db := operationsScopeDatabase(t)
 	opsSecurity, _ := security.FromContext(opsCtx)

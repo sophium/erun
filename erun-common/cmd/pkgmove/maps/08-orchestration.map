@@ -1,0 +1,26 @@
+# orchestration keeps only the compositions of primitives; the cluster read
+# models, the doctor composition, config, remote-init state and single-command
+# code it had collected move to their own packages.
+orchestration/clusterread orchestration/observe*.go
+orchestration/clusterread orchestration/expose_list*.go
+orchestration/diagnosis orchestration/doctor.go
+orchestration/diagnosis orchestration/doctor_test.go
+base/config orchestration/doctor_root_config*.go
+base/config orchestration/doctor_sync_config*.go
+infra/remoteinit orchestration/init.go
+infra/remoteinit orchestration/init_remote*.go
+infra/remoteinit orchestration/remote_init_marker*.go
+infra/codesign orchestration/host_codesign*.go
+infra/gitx orchestration/job_worktree*.go
+base/core orchestration/job_supervisor*.go
+base/core orchestration/outputs*.go
+base/core orchestration/runtime_entrypoint*.go
+base/core orchestration/contribute*.go
+base/core orchestration/diff*.go
+primitive/deploy orchestration/runtime_usage_history*.go
+primitive/shared orchestration/work_clone_reclaim*.go
+command/orchestrator orchestration/ai_launch*.go
+command/podruntime orchestration/ai_session_hooks*.go
+command/lifecycle orchestration/orphaned_ssh_alias*.go
+command/setup orchestration/hosted_registry*.go
+orchestration/clusterread orchestration/expose_services*.go

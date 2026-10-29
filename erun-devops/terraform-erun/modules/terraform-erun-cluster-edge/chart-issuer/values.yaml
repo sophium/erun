@@ -1,44 +1,29 @@
-# Defaults; the terraform-erun-cluster-edge module overrides every field via
-# helm `set`. Listed here so the chart renders standalone (e.g. `helm template`).
+# The module overrides every field; these keep the chart renderable standalone.
 issuerName: erun-cloudflare
-# Namespace the (namespaced) Issuer, its certs, and the DNS-01 credential Secret
-# live in — the env namespace. The module sets this; the default keeps the chart
-# renderable standalone.
 issuerNamespace: cert-manager
 acmeEmail: ""
 acmeServer: https://acme-v02.api.letsencrypt.org/directory
 servicesZone: ""
 cloudflareTokenSecret: erun-cloudflare-cloudflare-token
-# Apex-wildcard cert namespace — must equal issuerNamespace so it can reference
-# the namespaced Issuer (a Certificate can only use an Issuer in its own namespace).
+# Must equal issuerNamespace: a Certificate can only use an Issuer in its own namespace.
 certNamespace: cert-manager
-# Pass-through as a string ("true"/"false"): the Terraform helm provider's
-# `set.value` is always a string, and Go templates treat any non-empty string
-# (including "false") as truthy, so the template compares against "true".
+# A string: helm `set.value` is always one, so the template compares against "true".
 wildcardCertificateEnabled: "true"
 wildcardCertName: erun-cloudflare-wildcard
 wildcardSecretName: erun-cloudflare-wildcard-tls
-# DNS-01 solver provider: "cloudflare" (default), "powerdns-rfc2136" (DNS UPDATE
-# + TSIG direct to the self-hosted PowerDNS), or "powerdns-broker" (the
-# multi-tenant-safe path: a per-tenant Issuer whose challenges are brokered
-# through the DNS-01 broker via the cluster's webhook shim, authorized against
-# this env's subzone). The provider-specific fields are set by the module only
-# in the matching mode.
+# "cloudflare", "powerdns-rfc2136", or "powerdns-broker" (the multi-tenant-safe path).
 dns01Provider: cloudflare
 rfc2136Nameserver: ""
 rfc2136TsigKeyName: ""
 rfc2136TsigAlgorithm: HMACSHA256
 rfc2136TsigSecretName: ""
 rfc2136TsigSecretKey: tsig-secret
-# powerdns-broker: the webhook API group the cluster's shim registers under, the
-# broker base URL the shim forwards to, and the Secret (in this Issuer's
-# namespace) holding this env's DNS-01 token the broker authenticates.
+# powerdns-broker only.
 dns01WebhookGroupName: acme.erun.io
 brokerURL: ""
 dns01TokenSecretName: ""
 dns01TokenSecretKey: token
-# Per-env wildcard cert *.<envLabel>.<servicesZone> issued into the env namespace;
-# its Secret is what `erun expose` references. Off by default.
+# *.<envLabel>.<servicesZone>; `erun expose` references its Secret.
 perEnvCertificateEnabled: "false"
 perEnvCertName: ""
 perEnvCertNamespace: ""

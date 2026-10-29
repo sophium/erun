@@ -10,14 +10,13 @@ import (
 	"testing"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-ui/internal/terminal"
+	"github.com/sophium/erun/erun-ui/internal/uimodel"
 )
 
-// TestListRemoteAppSessionsRebuildsOnlyRunningSessions pins the read-model that
-// lets a fresh ERun window rebuild tabs for sessions another window created —
-// and only for sessions that still have a live program. A socket whose master
-// is gone is a leftover: rebuilding a tab for it would present a dead pane as a
-// running session, which is the disagreement the heartbeat exists to prevent.
+// A socket whose program is gone is a leftover and must not be rebuilt as a tab.
 func TestListRemoteAppSessionsRebuildsOnlyRunningSessions(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("PATH-stub kubectl uses a shell script; skipping on Windows")
@@ -31,37 +30,35 @@ func TestListRemoteAppSessionsRebuildsOnlyRunningSessions(t *testing.T) {
 	t.Setenv("PATH", stubDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	app := NewApp(erunUIDeps{store: stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]config.EnvConfig{
 			"erun/remote": {Name: "remote", KubernetesContext: "ctx"},
 		},
 	}})
 
-	got := app.ListRemoteAppSessions(uiSelection{Tenant: "erun", Environment: "remote"})
+	got := app.ListRemoteAppSessions(uimodel.Selection{Tenant: "erun", Environment: "remote"})
 	want := []string{"open-1", "ai"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("ListRemoteAppSessions = %v, want %v", got, want)
 	}
 }
 
-// TestListRemoteAppSessionsFailsSoft pins the contract that detection never
-// surfaces an error into the open flow.
 func TestListRemoteAppSessionsFailsSoft(t *testing.T) {
 	app := NewApp(erunUIDeps{store: stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "local"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]config.EnvConfig{
 			"erun/local": {Name: "local"}, // no kubernetes context
 		},
 	}})
 
-	if got := app.ListRemoteAppSessions(uiSelection{Tenant: "erun", Environment: "local"}); got != nil {
+	if got := app.ListRemoteAppSessions(uimodel.Selection{Tenant: "erun", Environment: "local"}); got != nil {
 		t.Fatalf("env without kubernetes context must yield nil, got %v", got)
 	}
-	if got := app.ListRemoteAppSessions(uiSelection{Tenant: "erun", Environment: "missing"}); got != nil {
+	if got := app.ListRemoteAppSessions(uimodel.Selection{Tenant: "erun", Environment: "missing"}); got != nil {
 		t.Fatalf("unknown env must yield nil, got %v", got)
 	}
 }
@@ -82,16 +79,16 @@ func newEndAISessionsTestApp(t *testing.T, aiTool string) (*App, string) {
 	projectRoot := t.TempDir()
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{
-			tenants: map[string]eruncommon.TenantConfig{
+			tenants: map[string]model.TenantConfig{
 				"erun": {Name: "erun", DefaultEnvironment: "remote"},
 			},
-			envs: map[string]eruncommon.EnvConfig{
+			envs: map[string]config.EnvConfig{
 				"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx", AITool: aiTool},
 			},
 		},
 		findProjectRoot: func() (string, string, error) { return "erun", projectRoot, nil },
 		resolveCLIPath:  func() string { return "/tmp/erun" },
-		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+		startTerminal: func(terminal.StartParams) (terminal.PTY, error) {
 			return newStubTerminalSession(), nil
 		},
 	})
@@ -100,14 +97,11 @@ func newEndAISessionsTestApp(t *testing.T, aiTool string) (*App, string) {
 	return app, captureFile
 }
 
-// TestEndAISessionsEndsBothPodSessions pins the relaunch contract behind a
-// Claude launch-flag save: both AI pod sessions must be ended so a changed
-// launch flag can apply (`dtach -A` would otherwise reattach to the running
-// claude), and contribute-ai is ended even with no tab open so a detached
-// claude cannot keep stale flags.
+// Both AI sessions are ended so changed launch flags apply; contribute-ai is
+// ended even with no tab open.
 func TestEndAISessionsEndsBothPodSessions(t *testing.T) {
 	app, captureFile := newEndAISessionsTestApp(t, "")
-	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 	if _, err := app.StartAISession(selection, 0, 80, 24, false); err != nil {
 		t.Fatalf("StartAISession: %v", err)
 	}
@@ -127,13 +121,11 @@ func TestEndAISessionsEndsBothPodSessions(t *testing.T) {
 	}
 }
 
-// TestEndAISessionsSpawnsFreshAIAndLeavesShellAttached pins the desktop side
-// of the relaunch contract: the next AI session must be fresh so it re-resolves
-// the env's launch flags, while the ERun tab stays attached because its launch
-// command never changes.
+// The next AI session is fresh; the ERun tab's command never changes, so it
+// stays attached.
 func TestEndAISessionsSpawnsFreshAIAndLeavesShellAttached(t *testing.T) {
 	app, _ := newEndAISessionsTestApp(t, "")
-	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 	ai, err := app.StartAISession(selection, 0, 80, 24, false)
 	if err != nil {
 		t.Fatalf("StartAISession: %v", err)
@@ -161,12 +153,10 @@ func TestEndAISessionsSpawnsFreshAIAndLeavesShellAttached(t *testing.T) {
 	}
 }
 
-// TestEndAISessionsSkipsVerbatimAITool pins the guard for envs whose AI tool
-// launches verbatim (e.g. codex): a Claude launch-flag save must not discard a
-// running session that never used those flags.
+// Verbatim AI tools (e.g. codex) never used the flags, so their session stays.
 func TestEndAISessionsSkipsVerbatimAITool(t *testing.T) {
 	app, _ := newEndAISessionsTestApp(t, "codex")
-	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 	ai, err := app.StartAISession(selection, 0, 80, 24, false)
 	if err != nil {
 		t.Fatalf("StartAISession: %v", err)
@@ -187,10 +177,8 @@ func TestEndAISessionsSkipsVerbatimAITool(t *testing.T) {
 	}
 }
 
-// TestCloseSessionEndsRemoteCustomTerminal pins the explicit-close contract:
-// closing a custom terminal tab (slot > 0) must end its pod session, or
-// detection resurrects the tab on the next env open, while a default tab close
-// (slot 0) must not — long-running default sessions are the feature.
+// Closing a custom tab (slot > 0) ends its pod session; a default tab (slot 0)
+// does not.
 func TestCloseSessionEndsRemoteCustomTerminal(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("PATH-stub kubectl uses a shell script; skipping on Windows")
@@ -206,23 +194,23 @@ func TestCloseSessionEndsRemoteCustomTerminal(t *testing.T) {
 	projectRoot := t.TempDir()
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{
-			tenants: map[string]eruncommon.TenantConfig{
+			tenants: map[string]model.TenantConfig{
 				"erun": {Name: "erun", DefaultEnvironment: "remote"},
 			},
-			envs: map[string]eruncommon.EnvConfig{
+			envs: map[string]config.EnvConfig{
 				"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
 			},
 		},
 		findProjectRoot: func() (string, string, error) { return "erun", projectRoot, nil },
 		resolveCLIPath:  func() string { return "/tmp/erun" },
-		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+		startTerminal: func(terminal.StartParams) (terminal.PTY, error) {
 			return newStubTerminalSession(), nil
 		},
 	})
 	defer app.shutdown(context.Background())
 	app.SetEmitter(func(string, ...any) {})
 
-	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	selection := uimodel.Selection{Tenant: "erun", Environment: "remote"}
 	extra, err := app.StartSession(selection, 2, 80, 24)
 	if err != nil {
 		t.Fatalf("StartSession(slot 2): %v", err)

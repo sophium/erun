@@ -11,9 +11,7 @@ type RolePermission struct {
 	RolePermissionID string `json:"rolePermissionId" bun:"role_permission_id,pk,scanonly"`
 	TenantID         string `json:"tenantId" bun:"tenant_id,scanonly"`
 	RoleID           string `json:"roleId" bun:"role_id"`
-	// APIMethod/APIPath are set together for an exact grant; APIMethodPattern/
-	// APIPathPattern are set together for a regex grant. Exactly one pair is
-	// non-empty, enforced by role_permissions_exact_or_pattern_check.
+	// Exactly one of the exact or pattern pairs is set (role_permissions_exact_or_pattern_check).
 	APIMethod        string    `json:"apiMethod,omitempty" bun:"api_method,nullzero"`
 	APIPath          string    `json:"apiPath,omitempty" bun:"api_path,nullzero"`
 	APIMethodPattern string    `json:"apiMethodPattern,omitempty" bun:"api_method_pattern,nullzero"`

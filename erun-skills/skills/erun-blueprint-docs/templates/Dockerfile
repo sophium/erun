@@ -1,51 +1,40 @@
-# Blueprint: builds the Docusaurus site, checks it, then ships it in a tiny
-# image with a pinned wrangler that pushes it to Cloudflare Pages. Substitute
-# __MODULE__ with the docs module directory name (e.g. acme-docs). Pin node +
-# wrangler so deploys stay reproducible.
-#
-# Stages: `build` builds the site, `test` runs the site's own checks on top of
-# it, and `runtime` copies the built site from `test`. Because the shipped site
-# comes through `test`, BuildKit cannot skip the checks: no image exists
-# unless they passed.
+# Blueprint: substitute __MODULE__ with the docs module directory name.
 ARG ERUN_VERSION=1.0.0
 
-FROM node:20.18.1-alpine AS build
+FROM node:24.22.1-alpine AS build
 
 WORKDIR /src
 
-# Install deps first so source edits don't bust the cache.
 COPY __MODULE__/package.json __MODULE__/yarn.lock /src/__MODULE__/
 
 WORKDIR /src/__MODULE__
 
-# YARN_CACHE_FOLDER: this stage runs as root with no HOME override, so yarn
-# classic's own default cache dir is $HOME/.cache/yarn (/root/.cache/yarn),
-# never the /usr/local/share/.cache/yarn mounted below. Redirecting via env
-# var keeps the mount target every other yarn-using Dockerfile in the repo
-# already uses.
+# Root's yarn cache defaults to $HOME/.cache/yarn, not the cache mount below.
 ENV YARN_CACHE_FOLDER=/usr/local/share/.cache/yarn
 
 RUN --mount=type=cache,target=/usr/local/share/.cache/yarn \
     yarn install --frozen-lockfile --non-interactive
 
-# Copy the rest and build. `onBrokenLinks: throw` makes a broken link fail
-# here.
+# `onBrokenLinks: throw` makes a broken link fail the build.
 COPY __MODULE__ /src/__MODULE__
 
 RUN yarn build
 
-# The site's own checks, run against the built site above.
+# The runtime stage copies from `test`, so no image exists unless checks pass.
 FROM build AS test
 
 RUN yarn typecheck
 
-# Tiny image with pinned wrangler that pushes /site/ to Cloudflare Pages.
-FROM node:20.18.1-alpine AS runtime
+FROM node:24.22.1-alpine AS runtime
 
-ARG WRANGLER_VERSION=3.87.0
+ARG WRANGLER_VERSION=4.154.0
 
-RUN apk add --no-cache ca-certificates tini && \
+# Only this install runs npm, and the npm the base image bundles carries advisories
+# of its own, so neither it nor its cache ships.
+RUN --mount=type=cache,target=/root/.npm \
+    apk add --no-cache ca-certificates tini && \
     npm install -g wrangler@${WRANGLER_VERSION} && \
+    rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx && \
     addgroup -S erun && \
     adduser -S -G erun -h /home/erun erun
 

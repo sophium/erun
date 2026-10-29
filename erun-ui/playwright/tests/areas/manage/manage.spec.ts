@@ -17,8 +17,6 @@ test.describe('manage dialog', () => {
     await app.manageDialog.waitForClosed();
   });
 
-  // The Ports tab's Service column names the user-facing purpose of each
-  // port, not the internal protocol/service key (#1218).
   test('Ports tab labels services by purpose, not internal name', async ({ app }) => {
     await app.sidebar.openManageDialogFor(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
@@ -35,9 +33,6 @@ test.describe('manage dialog', () => {
     await app.manageDialog.waitForClosed();
   });
 
-  // Workspace sync is a distinct concept from SSH shell access (#1218): it
-  // gets its own titled section on the Access tab instead of hiding as an
-  // unlabeled checkbox nested inside "SSH access".
   test('Access tab separates SSH access from workspace sync', async ({ app }) => {
     await app.sidebar.openManageDialogFor(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
@@ -49,8 +44,6 @@ test.describe('manage dialog', () => {
 
     const syncCheckbox = dialog.getByRole('checkbox', { name: 'Enable workspace sync' });
     await expect(syncCheckbox).toBeVisible();
-    // The seeded env has SSHD disabled, so workspace sync stays disabled and
-    // explains why rather than leaving the user to guess.
     await expect(syncCheckbox).toBeDisabled();
     await expect(dialog.getByText('Requires SSH access to be enabled.')).toBeVisible();
 

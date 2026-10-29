@@ -1,4 +1,4 @@
-package __MODULE__
+package __PACKAGE__
 
 import (
 	"database/sql"
@@ -33,16 +33,11 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 	identityResolver := options.IdentityResolver
 	tenantResolver := options.TenantResolver
 	userResolver := options.UserResolver
-	if options.DB != nil && (tenantResolver == nil || userResolver == nil) {
-		identities := repository.NewIdentityRepository(options.DB, options.DBDialect)
-		if identityResolver == nil && tenantResolver == nil && userResolver == nil {
-			identityResolver = identities
-		} else if tenantResolver == nil {
-			tenantResolver = identities
-		}
-		if userResolver == nil {
-			userResolver = identities
-		}
+	if options.DB != nil && identityResolver == nil && (tenantResolver == nil || userResolver == nil) {
+		// Database-backed auth uses the single identity resolver: the
+		// empty-database bootstrap must resolve or create tenant, issuer,
+		// user, and roles atomically.
+		identityResolver = repository.NewIdentityRepository(options.DB, options.DBDialect)
 	}
 
 	audit := options.AuditLogger
@@ -51,8 +46,8 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 	}
 
 	authorizer := options.Authorizer
-	if authorizer == nil && options.DB != nil {
-		authorizer = repository.NewPermissionAuthorizerForDialect(options.DB, options.DBDialect)
+	if authorizer == nil && txManager != nil {
+		authorizer = repository.NewPermissionAuthorizer(txManager)
 	}
 
 	auth, err := NewAuthMiddleware(AuthMiddlewareOptions{

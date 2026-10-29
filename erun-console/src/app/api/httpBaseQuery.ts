@@ -1,23 +1,10 @@
-// httpBaseQuery is the console's transport for the shared `PlatformBaseQuery`
-// contract (erun-kit): a real `fetch` against erun-backend-api, carrying the
-// caller's bearer token and the endpoint's own "X request failed (status)"
-// wording as a fallback. It is the console's counterpart to the desktop's
-// wailsBaseQuery (erun-ui/frontend/src/app/api/wailsBaseQuery.ts) — same
-// contract, a different transport underneath.
+// httpBaseQuery is the console's fetch transport for erun-kit's PlatformBaseQuery contract.
 import { isRecord, type PlatformApiRequest, type PlatformBaseQuery } from 'erun-kit';
 
-// No separate BFF in this increment — the console calls the auth-carrying
-// erun-backend-api directly. Same-origin default lets the SPA sit behind the
-// same auth edge that fronts the API.
+// Same-origin default lets the SPA sit behind the auth edge that fronts the API.
 const API_BASE = import.meta.env.VITE_API_BASE ?? '';
 
-// parsedError prefers the backend's own {code, message} envelope (see
-// erun-backend-api/internal/routes/errors.go, and auth.go's authErrorEnvelope
-// for the pre-route auth layer -- both 401 and 403 now carry it too) over the
-// generic fallback, so a caller sees why a request was rejected (e.g. which
-// field failed validation, or TENANT_UNRESOLVED vs NOT_ENROLLED) rather than
-// only its status code. Falls back to a message-only result when the body
-// isn't that envelope.
+// parsedError prefers the backend's {code, message} envelope over the generic fallback.
 async function parsedError(
   response: Response,
   label: string | undefined,

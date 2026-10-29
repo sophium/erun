@@ -5,8 +5,7 @@ import (
 	"strings"
 )
 
-// shimHeader stands in for Wails' injected runtime so the headless React bundle
-// can import wailsjs files unchanged.
+// shimHeader stands in for Wails' injected runtime.
 const shimHeader = `(function(){
   if (window.__erunHeadlessInstalled) { return; }
   window.__erunHeadlessInstalled = true;
@@ -199,8 +198,6 @@ func buildShimJS(methods []string) string {
 	return b.String()
 }
 
-// injectShim inserts the shim before the app bundle runs so modules importing
-// wailsjs resolve to our shim with no rewriting.
 func injectShim(html, shim string) string {
 	tag := "<script>" + shim + "</script>"
 	lower := strings.ToLower(html)

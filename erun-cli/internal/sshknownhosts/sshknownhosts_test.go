@@ -25,8 +25,7 @@ func TestParseHostKeyScanOutput_ReturnsOnlyTheRealKey(t *testing.T) {
 }
 
 func TestParseHostKeyScanOutput_DiagnosticOnlyFailsRatherThanReturningLines(t *testing.T) {
-	// A merged-stream regression would put this diagnostic on stdout; guard against
-	// that by asserting the failure case even when it lands where a key would.
+	// A diagnostic on stdout must still fail, even where a key line would be.
 	stdout := "erun-validationagent-review unsupported KEX method sntrup761x25519-sha512@openssh.com"
 
 	lines, err := parseHostKeyScanOutput(stdout, "", errors.New("exit status 1"))

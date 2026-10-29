@@ -48,17 +48,11 @@ export function CloudAliasesSection({
   const providers = dialog.config.cloudProviders ?? [];
   return (
     <div className="grid gap-2">
-      {/* Three labelled add actions plus Refresh do not fit beside the label in
-          a narrow dialog, so the row wraps rather than spilling past the card.
-          min-w-0 lets the label shrink instead of pinning the row wider than
-          its container. */}
+      {/* min-w-0 lets the label shrink so the wrapping row stays within the card. */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <Label className="min-w-0">Cloud aliases</Label>
         <div className="flex flex-wrap justify-end gap-1.5">
-          {/* Once at least one alias exists, the header is the add affordance;
-              the empty state below owns it while there are none, so the two
-              surfaces never both offer the same action at once (see
-              CloudAddActions, the one definition both render). */}
+          {/* The empty state owns the add actions until an alias exists. */}
           {providers.length > 0 && <CloudAddActions dialog={dialog} />}
           <Button
             type="button"
@@ -81,13 +75,7 @@ export function CloudAliasesSection({
   );
 }
 
-// CloudAddActions is the single definition of every "add a cloud alias"
-// action. Both the header (once aliases exist) and the empty state (before
-// any do) render this same list, so a provider type can never be added to one
-// surface and forgotten in the other. AWS and Cloudflare hand off to the
-// CLI's own guided `erun cloud init` terminal flow; erun collects its one
-// required field (the platform API URL) in-app and reaches the same
-// connect-and-sign-in code path the tenant dashboard's Connect panel uses.
+// CloudAddActions is shared by the header and the empty state so they cannot drift.
 function CloudAddActions({ dialog }: { dialog: GlobalConfigDialog }): React.ReactElement {
   return (
     <>
@@ -138,10 +126,6 @@ function AddCloudflareButton({ dialog }: { dialog: GlobalConfigDialog }): React.
   );
 }
 
-// AddERunButton is the one in-app add form on this surface: unlike AWS and
-// Cloudflare (which hand off to a guided CLI terminal), attaching a hosted
-// erun platform needs exactly one value the operator already knows — the
-// platform's API URL — so a popover collects it without leaving Settings.
 function AddERunButton({ dialog }: { dialog: GlobalConfigDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
   const [open, setOpen] = React.useState(false);
@@ -301,8 +285,7 @@ function CloudAliasRow({
           dialog.busyAction === 'cloud-provider-switch' && dialog.busyTarget === provider.alias
         }
         canSwitchIdentity={!isCloudflare}
-        // Cloudflare has no browser SSO — its "login" re-verifies the stored
-        // token — so the action reads "Verify token" rather than "Login".
+        // Cloudflare has no browser SSO; its login re-verifies the stored token.
         loginLabel={isCloudflare ? 'Verify token' : undefined}
         loadingLabel={isCloudflare ? 'Verifying...' : undefined}
         onLogin={() => void dispatch(loginGlobalCloudProvider(provider.alias))}

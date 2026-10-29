@@ -14,9 +14,7 @@ var (
 	errDefinitionNotAnObject    = errors.New("definition must be a JSON object")
 )
 
-// EnvironmentDefinitionRepository is the persistence access
-// EnvironmentDefinitionRoutes needs: storing an environment's current
-// definition and reading it back.
+// EnvironmentDefinitionRepository stores and reads an environment's definition.
 type EnvironmentDefinitionRepository interface {
 	Upsert(ctx context.Context, environmentID string, definition json.RawMessage) (model.EnvironmentDefinition, error)
 	Get(ctx context.Context, environmentID string) (model.EnvironmentDefinition, error)
@@ -27,32 +25,20 @@ type EnvironmentDefinitionRoutes struct {
 	environments EnvironmentGetter
 }
 
-// RegisterEnvironmentDefinitionRoutes wires the environment definition store:
-// the portable subset of an environment's config, uploaded from the machine
-// that authored it and read back by a machine pulling the environment down.
-//
-// The platform stores the payload and hands it back without interpreting it.
-// Deciding what may travel is the authoring client's job — erun-common's
-// allowlist — because the field classes belong to the config type the client
-// owns, and a second opinion here would be a second place for the two to
-// disagree. What this layer does enforce is that the payload is a JSON object:
-// a definition that is a bare array or scalar is not a definition, and a pull
-// reading one would fail far from the write that stored it.
+// RegisterEnvironmentDefinitionRoutes wires the environment definition store.
+// The payload is opaque here: what may travel is the client allowlist's call. Only
+// "is a JSON object" is enforced, so a bad definition fails at write, not at pull.
 func RegisterEnvironmentDefinitionRoutes(register ProtectedRouteRegistrar, definitions EnvironmentDefinitionRepository, environments EnvironmentGetter) {
 	routes := EnvironmentDefinitionRoutes{definitions: definitions, environments: environments}
 	register(http.MethodPut, "/v1/environments/{environment_id}/definition", http.HandlerFunc(routes.putEnvironmentDefinition))
 	register(http.MethodGet, "/v1/environments/{environment_id}/definition", http.HandlerFunc(routes.getEnvironmentDefinition))
 }
 
-// putEnvironmentDefinitionRequest carries the payload as raw JSON so the
-// platform never has to model it. Absent is refused rather than stored as
-// null: an upload with no definition has nothing to say.
 type putEnvironmentDefinitionRequest struct {
 	Definition json.RawMessage `json:"definition"`
 }
 
-// putEnvironmentDefinition stores this environment's current definition,
-// advancing its revision by one.
+// putEnvironmentDefinition stores the definition, advancing its revision by one.
 func (r EnvironmentDefinitionRoutes) putEnvironmentDefinition(w http.ResponseWriter, req *http.Request) {
 	environmentID := req.PathValue("environment_id")
 	if _, err := r.environments.Get(req.Context(), environmentID); err != nil {
@@ -79,10 +65,7 @@ func (r EnvironmentDefinitionRoutes) putEnvironmentDefinition(w http.ResponseWri
 	writeJSON(w, http.StatusOK, stored)
 }
 
-// getEnvironmentDefinition returns the environment's stored definition and the
-// revision it carries. A missing definition is a 404 naming that, not an empty
-// payload: a caller that has never uploaded one and a caller whose upload was
-// lost are different situations, and only one of them is answered by uploading.
+// getEnvironmentDefinition returns 404 for a missing definition, not an empty payload.
 func (r EnvironmentDefinitionRoutes) getEnvironmentDefinition(w http.ResponseWriter, req *http.Request) {
 	environmentID := req.PathValue("environment_id")
 	if _, err := r.environments.Get(req.Context(), environmentID); err != nil {
@@ -98,8 +81,6 @@ func (r EnvironmentDefinitionRoutes) getEnvironmentDefinition(w http.ResponseWri
 	writeJSON(w, http.StatusOK, stored)
 }
 
-// normalizeDefinitionPayload accepts only a JSON object, and normalizes absent
-// to the same refusal as malformed.
 func normalizeDefinitionPayload(raw json.RawMessage) (json.RawMessage, error) {
 	if len(raw) == 0 {
 		return nil, errMissingDefinitionPayload

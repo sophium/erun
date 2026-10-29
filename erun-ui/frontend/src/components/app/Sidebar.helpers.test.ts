@@ -11,12 +11,6 @@ import {
   sidebarCloudAliases,
 } from './Sidebar.helpers';
 
-// One derived row state from three inputs: the sticky condition the desktop set,
-// what the environment reports about itself, and whether the desktop owns tabs.
-// The cases below are the five an operator has to be able to tell apart —
-// stopped, unhealthy, busy, reachable-but-not-opened, and opened-and-quiet —
-// plus the never-opened row, which must stay blank.
-
 const base = {
   name: 'team / dev',
   envState: '',
@@ -31,14 +25,11 @@ test('a never-opened, unreachable environment renders no indicator', () => {
   const indicator = environmentIndicator(base);
   assert.equal(indicator.visible, false);
   assert.equal(indicator.opened, false);
-  // The hover card still has a row to fill, and it must not claim the
-  // environment is idle — a never-opened env has no pod to be idle.
+  // A never-opened env has no pod to be idle.
   assert.equal(indicator.activity, 'Not open');
 });
 
 test('an environment reachable from the CLI is visible without being opened here', () => {
-  // The half of the bug that made a CLI-driven env render blank: its forwards
-  // are up and its edge answers, but the desktop owns no tabs for it.
   const indicator = environmentIndicator({ ...base, reachable: true });
   assert.equal(indicator.visible, true);
   assert.equal(indicator.dot, 'running');
@@ -63,8 +54,6 @@ test('a busy environment says what is keeping it busy', () => {
     detail: 'holding: gradle-build',
   });
   assert.equal(indicator.dot, 'busy');
-  // The indicator's label is read out of context and names the env; the hover
-  // card's row sits under a heading that already does.
   assert.equal(indicator.condition, 'team / dev is busy — holding: gradle-build');
   assert.equal(indicator.activity, 'Busy — holding: gradle-build');
 });
@@ -76,8 +65,7 @@ test('a busy environment with no detail still reads busy', () => {
 });
 
 test('a stopped environment reads stopped even if its last observation was busy', () => {
-  // The observation is a poll result that can arrive after the stop; the sticky
-  // condition has to win or a stopped row would animate as if it were working.
+  // A late poll result must not override the sticky stopped condition.
   for (const envState of ['stopped', 'runtime-stopped']) {
     const indicator = environmentIndicator({ ...base, envState, isOpen: true, busy: true });
     assert.equal(indicator.dot, 'stopped', envState);
@@ -100,10 +88,6 @@ test('an unhealthy environment reads failed, never busy', () => {
 });
 
 test('a stopped sticky condition does not outlive the session that produced it', () => {
-  // Closing an environment can leave a last-known condition behind. With no
-  // tabs there is no session for it to describe and no way to act on it, so the
-  // row goes quiet rather than flying a stale stopped ring. A failed deploy is
-  // the exception — see the next test.
   for (const envState of ['stopped', 'runtime-stopped']) {
     const indicator = environmentIndicator({ ...base, envState });
     assert.equal(indicator.visible, false, envState);
@@ -111,11 +95,6 @@ test('a stopped sticky condition does not outlive the session that produced it',
 });
 
 test('a failed deploy stays visible after its session closes, unless the environment is reachable again', () => {
-  // Unlike stopped/runtime-stopped, a failed deploy describes the environment
-  // itself (its runtime is broken), not the session that watched it fail —
-  // closing the tabs that observed the failure does not fix it. Before this,
-  // the row went silently blank, indistinguishable from one nobody had ever
-  // opened.
   const stillBroken = environmentIndicator({ ...base, envState: 'failed' });
   assert.equal(stillBroken.visible, true);
   assert.equal(stillBroken.dot, 'failed');
@@ -123,17 +102,12 @@ test('a failed deploy stays visible after its session closes, unless the environ
   assert.match(stillBroken.condition, /deploy failed — /);
   assert.equal(stillBroken.activity, 'Deploy failed — recover from Activities');
 
-  // Once the environment answers again, the stale flag no longer wins — see
-  // 'a reachable environment is reported on its own terms' below.
   const recovered = environmentIndicator({ ...base, envState: 'failed', reachable: true });
   assert.equal(recovered.dot, 'running');
 });
 
 test('a bound-but-dead forward is reported as an outage, not as a quiet row', () => {
-  // The bound-but-dead row: the environment's port-forward still holds its
-  // local port, so every check that stops at the listener calls it reachable,
-  // and the desktop has no tabs for it. Rendered from reachable alone it is a
-  // green "in use elsewhere" light on an environment no client can talk to.
+  // The port-forward still holds its local port, so the listener looks reachable.
   const indicator = environmentIndicator({ ...base, reachable: true, outage: true });
   assert.equal(indicator.visible, true);
   assert.equal(indicator.dot, 'failed');
@@ -148,11 +122,6 @@ test('a bound-but-dead forward is reported as an outage, not as a quiet row', ()
 });
 
 test('a dropped forward is an outage, not the blank row of an environment nobody opened', () => {
-  // The ordinary shape: a pod replacement makes kubectl exit, so the port is
-  // free and the environment is not reachable at all. Every field except this
-  // one then reads exactly like an environment nobody ever opened, so the row
-  // has to be carried by the diagnosis alone — and it must still name the
-  // recovery, since being unreachable is the whole of what the operator sees.
   const indicator = environmentIndicator({ ...base, reachable: false, outage: true });
   assert.equal(indicator.visible, true);
   assert.equal(indicator.dot, 'failed');
@@ -173,16 +142,6 @@ test('a reachable environment is reported on its own terms, not a sticky conditi
   assert.equal(indicator.activity, 'In use elsewhere — not opened here');
 });
 
-// The row's spinner is a separate question from the status dot: the dot carries
-// the environment's condition, the spinner carries whether it is working.
-//
-// Four of the five inputs are desktop-local — they report what this desktop
-// launched. The fifth is what the environment says about itself, and it is the
-// only one true regardless of who started the work. It was selected,
-// destructured, and then not passed in, so an environment driven from a
-// terminal, by an orchestrator over MCP, or by a detached job did real work
-// behind a row that looked idle.
-
 function rowArgs(overrides: {
   isOpening?: boolean;
   runningCommand?: string;
@@ -199,8 +158,6 @@ function rowArgs(overrides: {
     reconnecting: false,
     envBusy: false,
     envBusyDetail: '',
-    // Unobserved by default: no answer from the environment must not clear
-    // anything, so a test that says nothing about it gets the old behaviour.
     envObserved: false,
     ...overrides,
   };
@@ -226,8 +183,6 @@ function row(overrides: Parameters<typeof rowArgs>[0]) {
 test('an environment working for reasons this desktop did not start still spins', () => {
   const derived = row({ envBusy: true, envBusyDetail: 'erun release 1.0.176' });
   assert.equal(derived.busy, true);
-  // The lease names the work, and that is the only signal saying what is
-  // actually running — so it belongs in the label rather than a generic "busy".
   assert.equal(derived.busyLabel, 'team / dev is busy — erun release 1.0.176');
 });
 
@@ -244,8 +199,6 @@ test('a quiet environment nobody is driving does not spin', () => {
 });
 
 test('a command this desktop started keeps its own more specific label', () => {
-  // The desktop knows what it launched; the environment only knows that
-  // something holds it. The specific answer wins when both are true.
   const derived = row({ runningCommand: 'deploy', envBusy: true, envBusyDetail: 'a lease' });
   assert.equal(derived.busy, true);
   assert.match(derived.busyLabel, /team \/ dev$/);
@@ -263,10 +216,6 @@ test('each desktop-local reason still spins its own row on its own', () => {
   }
 });
 
-// The defect: every other input is desktop-local, set when this desktop starts
-// something and cleared when it sees it end. A command driven from a terminal or
-// over MCP, or a session that goes away, leaves a latch nobody can clear — one
-// row span for six hours while the environment reported every marker idle.
 test('an environment that reports itself idle clears a stale desktop latch', () => {
   const stuckCommand = row({ runningCommand: 'deploy', envObserved: true, envBusy: false });
   assert.equal(stuckCommand.busy, false);
@@ -275,31 +224,20 @@ test('an environment that reports itself idle clears a stale desktop latch', () 
   assert.equal(stuckAI.busy, false);
 });
 
-// Silence is not an answer. This covers both an environment nobody reached and
-// one whose port answers while its edge has wedged — the poller reports no work
-// in both cases because nobody got a verdict, and neither may clear a latch.
 test('an environment that gave no verdict keeps its desktop latch', () => {
   assert.equal(row({ runningCommand: 'deploy', envObserved: false }).busy, true);
   assert.equal(row({ aiBusy: true, envObserved: false }).busy, true);
 });
 
-// The environment's own answer still wins upward, whoever started the work.
 test('an environment that reports work spins even when the desktop started nothing', () => {
   assert.equal(row({ envBusy: true, envObserved: true }).busy, true);
 });
 
-// This desktop's own in-flight operations answer for themselves: the operator
-// clicked a moment ago and the environment cannot yet have observed it, so a
-// reachable-idle report must not swallow the feedback for the click.
 test("an idle report does not swallow this desktop's in-flight operation", () => {
   assert.equal(row({ isOpening: true, envObserved: true, envBusy: false }).busy, true);
   assert.equal(row({ reconnecting: true, envObserved: true, envBusy: false }).busy, true);
 });
 
-// The row's spinner label names its environment because a screen reader has no
-// other context for it. A hover card headed with that same environment does, so
-// it needs to know which kind of label it was handed rather than repeating
-// "<env> is busy — X" under a heading that already says "<env>".
 test('a label describing the environment is marked as the environment own', () => {
   const derived = row({ envBusy: true, envBusyDetail: 'holding: gradle-build', envObserved: true });
   assert.equal(derived.busyLabel, 'team / dev is busy — holding: gradle-build');
@@ -307,8 +245,6 @@ test('a label describing the environment is marked as the environment own', () =
 });
 
 test('a label describing an operation this desktop is running is not', () => {
-  // A command this desktop is running names the row, so the label is about the
-  // desktop even when the environment reports busy at the same moment.
   const withCommand = row({ runningCommand: 'build', envBusy: true, envObserved: true });
   assert.equal(withCommand.busyLabel, 'Building team / dev');
   assert.equal(withCommand.busyFromEnvironment, false);
@@ -317,10 +253,6 @@ test('a label describing an operation this desktop is running is not', () => {
   assert.equal(row({ reconnecting: true, envBusy: true }).busyFromEnvironment, false);
 });
 
-// The card either repeats the row's busy reason or defers to the condition
-// indicator — never neither. busyFromEnvironment blanks the row's own label on
-// the assumption the indicator will say 'busy' on its own, which is only true
-// when no sticky condition outranks it.
 function indicatorDot(envState: string, busy: boolean) {
   return environmentIndicator({
     name: 'team / dev',
@@ -350,13 +282,8 @@ test('environmentCardActivityLabel repeats the row label unless the indicator al
   );
 });
 
-// The defect: the activity poller that sets envBusy and the lifecycle
-// event that sets the sticky envState run on separate cycles, so a fresh
-// "the environment is busy" observation can land while envState still reads
-// stopped/failed from before. environmentStatusDot gives that sticky
-// condition priority over busy, so the indicator alone would say "Stopped" —
-// and blanking the row's own label handed that stale answer to the card while
-// the row kept spinning for a real, current reason right beside it.
+// envBusy and the sticky envState are set by separate pollers, so a fresh busy
+// can land while envState still reads stopped/failed.
 test('the card never asserts a bare Stopped/Failed while the row spins from a fresh envBusy', () => {
   for (const envState of ['stopped', 'runtime-stopped', 'failed']) {
     const derived = row({
@@ -377,16 +304,6 @@ test('the card never asserts a bare Stopped/Failed while the row spins from a fr
   }
 });
 
-// isOpening/reconnecting were suspected of the same class of bug (an
-// envObserved-stopped row with a lingering desktop-local flag), but they
-// cannot reproduce it: environmentRowCommandLabel always names them directly,
-// so the label handed to the row's spinner and the card is the same string
-// whether or not the flag is stale. They are also, independently, always
-// cleared on the failure path rather than left stale — openSelection's
-// `finally` clears openingByEnv even when StartSession throws
-// (sessionThunks.ts), and confirmReconnect's catch moves reconnect.status to
-// 'error' rather than leaving it on 'running' (reviewThunks.ts) — so this
-// pins the agreement rather than a hypothetical staleness fix.
 test('a lingering isOpening/reconnecting flag never disagrees with the card', () => {
   for (const overrides of [{ isOpening: true }, { reconnecting: true }]) {
     const derived = row({ ...overrides, envObserved: true });
@@ -401,11 +318,6 @@ test('a lingering isOpening/reconnecting flag never disagrees with the card', ()
     assert.equal(cardLabel, derived.busyLabel, JSON.stringify(overrides));
   }
 });
-
-// sidebarCloudAliases: an erun-hosted-platform alias that no local tenant
-// attaches previously never appeared in the sidebar at all, regardless of
-// which tenant was selected -- the ordinary shape for a hosted platform
-// reached from a machine whose tenants are all local.
 
 function tenant(overrides: Partial<UITenant> = {}): UITenant {
   return { name: 'acme', environments: [], ...overrides };

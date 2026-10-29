@@ -451,12 +451,10 @@ The gate cannot decide whether the named test genuinely reproduces the reported 
 - Preserve dependency direction: shared logic may move into `erun-common`;
   transport-specific logic must not. Keep moved symbols package-private unless
   an existing external caller requires them to be exported.
-- The layered split of `erun-common`, `erun-cli` and `erun-mcp` in
-  https://github.com/sophium/erun/issues/2741 is the declared intended design
-  for those package boundaries (layer map in `erun-common/AGENTS.md`). Until it
-  lands, add no new upward coupling: orchestration goes in orchestration-shaped
-  files, never in a primitive's files, and types/config code never calls into
-  build, deploy or release.
+- `erun-common`, `erun-cli` and `erun-mcp` are split into layers (layer map in
+  `erun-common/AGENTS.md`). Move declarations between packages with
+  `erun-common/cmd/pkgmove`, add no upward coupling, and declare every new
+  import in the module's `.go-arch-lint.yml`.
 - Reuse matching shared interfaces from `erun-common` directly rather than
   duplicating them locally. Move meaningful coverage to the module that now owns
   the behavior and remove test-only production shims where possible.

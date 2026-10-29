@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -94,7 +95,8 @@ func TestCallSetsHostHeaderAndNeverLeaksPATOnError(t *testing.T) {
 	if gotHost != "auth.example.com" {
 		t.Fatalf("request Host = %q, want the configured external domain", gotHost)
 	}
-	apiErr, ok := err.(*APIError)
+	var apiErr *APIError
+	ok := errors.As(err, &apiErr)
 	if !ok {
 		t.Fatalf("err = %T, want *APIError", err)
 	}
@@ -120,8 +122,15 @@ func TestListUsers(t *testing.T) {
 		if r.Method != http.MethodPost || r.URL.Path != "/management/v1/users/_search" {
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
 		}
+		// Oldest first, as the ascending query asks; ListUsers returns newest first.
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"result": []map[string]any{
+				{
+					"id":       "svc1",
+					"userName": "admin-sa",
+					"state":    "USER_STATE_ACTIVE",
+					"machine":  map[string]any{"name": "admin-sa"},
+				},
 				{
 					"id":       "u1",
 					"userName": "alice",
@@ -130,12 +139,6 @@ func TestListUsers(t *testing.T) {
 						"profile": map[string]any{"firstName": "Alice", "lastName": "Operator"},
 						"email":   map[string]any{"email": "alice@example.com"},
 					},
-				},
-				{
-					"id":       "svc1",
-					"userName": "admin-sa",
-					"state":    "USER_STATE_ACTIVE",
-					"machine":  map[string]any{"name": "admin-sa"},
 				},
 			},
 		})
@@ -196,13 +199,8 @@ func TestCreateHumanUserSendsInviteWithNoPassword(t *testing.T) {
 	}
 }
 
-// TestCreateHumanUserWithInitialPasswordSkipsTheEmailFlow locks the
-// no-SMTP fallback (issue #1168): Zitadel only skips its initialization
-// email when the email is marked verified AND a password is set (confirmed
-// live -- either alone still leaves the account in USER_STATE_INITIAL
-// waiting on a link nothing will ever send), so a caller-supplied
-// InitialPassword must mark the email verified too, and the returned user
-// must report USER_STATE_ACTIVE, not the invite-flow INITIAL state.
+// Zitadel skips its initialization email only when the email is verified AND a
+// password is set; either alone leaves the user in USER_STATE_INITIAL.
 func TestCreateHumanUserWithInitialPasswordSkipsTheEmailFlow(t *testing.T) {
 	var gotBody map[string]any
 	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -229,13 +227,6 @@ func TestCreateHumanUserWithInitialPasswordSkipsTheEmailFlow(t *testing.T) {
 	}
 }
 
-// TestCreateHumanUserReportsATakenUsernameAsErrUsernameTaken is the
-// reproduction of the reported failure: a login name the instance already
-// holds reached the caller as Zitadel's own AlreadyExists text, which names
-// the account rather than the one thing the caller can change, so an invitee
-// accepting an invite at that moment was told something they could not act
-// on. The instance signals the case with the message key
-// Errors.User.AlreadyExists.
 func TestCreateHumanUserReportsATakenUsernameAsErrUsernameTaken(t *testing.T) {
 	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusConflict)
@@ -259,11 +250,6 @@ func TestCreateHumanUserReportsATakenUsernameAsErrUsernameTaken(t *testing.T) {
 	}
 }
 
-// TestCreateHumanUserLeavesAnUnrelatedConflictAsItself is the crossed state
-// of the test above: a conflict on this endpoint that is not the
-// user-already-exists collision must not be relabelled as a username
-// collision, or the caller is sent to change a name that was never the
-// problem.
 func TestCreateHumanUserLeavesAnUnrelatedConflictAsItself(t *testing.T) {
 	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusConflict)
@@ -307,17 +293,14 @@ func TestDeactivateUserPropagatesNotFound(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	})
 	err := client.DeactivateUser(context.Background(), "", "missing")
-	apiErr, ok := err.(*APIError)
+	var apiErr *APIError
+	ok := errors.As(err, &apiErr)
 	if !ok || !apiErr.NotFound() {
 		t.Fatalf("err = %v, want a not-found *APIError", err)
 	}
 }
 
-// TestListUsersOrgIDSetsHeaderOnlyWhenGiven locks the org-targeting fix
-// itself: a non-empty orgID must reach Zitadel as x-zitadel-orgid (the
-// header Zitadel scopes a Management API call by), and an empty one must
-// send no override at all -- not an empty header value -- so existing
-// callers keep resolving to the credential's own org exactly as before.
+// An empty orgID must send no header at all, not an empty one.
 func TestListUsersOrgIDSetsHeaderOnlyWhenGiven(t *testing.T) {
 	var sawHeader bool
 	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -346,11 +329,6 @@ func TestListUsersOrgIDSetsHeaderOnlyWhenGiven(t *testing.T) {
 	}
 }
 
-// TestDeactivateAndReactivateUserSetOrgHeader is the same proof as
-// TestListUsersOrgIDSetsHeaderOnlyWhenGiven for the other two Zitadel calls
-// this issue's reproduction named directly: deactivate/reactivate must
-// reach the org the identity actually lives in, not only the credential's
-// own.
 func TestDeactivateAndReactivateUserSetOrgHeader(t *testing.T) {
 	var gotHeaders []string
 	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -365,5 +343,38 @@ func TestDeactivateAndReactivateUserSetOrgHeader(t *testing.T) {
 	}
 	if len(gotHeaders) != 2 || gotHeaders[0] != "org-tenant-x" || gotHeaders[1] != "org-tenant-x" {
 		t.Fatalf("x-zitadel-orgid headers = %v, want both requests scoped to org-tenant-x", gotHeaders)
+	}
+}
+
+// Zitadel v4.19.5+ caps an unpaged v1 search at its MaxQueryLimit; a user list
+// longer than that cap must still come back whole, newest first as an unpaged
+// search (ORDER BY id DESC) returned it.
+func TestListUsersPagesPastTheServerRowCap(t *testing.T) {
+	names := []string{"alice", "bob", "carol"}
+	const rowCap = 2
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Query struct {
+				Offset string `json:"offset"`
+			} `json:"query"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		offset, _ := strconv.Atoi(body.Query.Offset)
+		page := []map[string]any{}
+		for i := offset; i < len(names) && i < offset+rowCap; i++ {
+			page = append(page, map[string]any{"id": "id-" + names[i], "userName": names[i]})
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": page, "details": map[string]any{"totalResult": strconv.Itoa(len(names))}})
+	})
+	users, err := client.ListUsers(context.Background(), "")
+	if err != nil {
+		t.Fatalf("ListUsers: %v", err)
+	}
+	got := make([]string, 0, len(users))
+	for _, user := range users {
+		got = append(got, user.Username)
+	}
+	if want := "carol,bob,alice"; strings.Join(got, ",") != want {
+		t.Fatalf("ListUsers returned %v, want every user across the capped pages, newest first: %s", got, want)
 	}
 }

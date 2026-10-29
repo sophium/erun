@@ -5,11 +5,7 @@ import { useSetInviteRequestRateLimitMutation } from '../app/api/requestsApi';
 import { queryErrorMessage } from '../app/queryError';
 import { describeRateLimitWindow } from './describeRateLimitWindow';
 
-// RateLimitPanel is the operations-only editor for POST /v1/invite-requests'
-// admission window: the platform's first rate limiter and the first config
-// write route. Read-only for every other tenant type --
-// RequestsPanel only renders this for an OPERATIONS tenant, the same gate
-// TenantsPanel/UsersPanel use for their own operations-only actions.
+// Rendered only for an OPERATIONS tenant.
 export function RateLimitPanel({
   token,
   currentWindowSeconds,
@@ -21,10 +17,7 @@ export function RateLimitPanel({
   const [setRateLimit, setRateLimitState] = useSetInviteRequestRateLimitMutation();
   const busy = setRateLimitState.isLoading;
 
-  // Resyncs the field once the write's own invalidation refetches
-  // GET /v1/config -- but only while the operator isn't mid-edit is not
-  // tracked separately here; a fresh currentWindowSeconds always wins,
-  // matching the save's own outcome rather than a stale local draft.
+  // A fresh currentWindowSeconds always overwrites the local draft.
   React.useEffect(() => {
     setValue(String(currentWindowSeconds));
   }, [currentWindowSeconds]);

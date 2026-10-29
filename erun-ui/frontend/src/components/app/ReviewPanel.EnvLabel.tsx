@@ -2,14 +2,7 @@ import * as React from 'react';
 
 import type { ReviewTarget } from '@/app/selectors';
 
-// ReviewEnvLabel is the one label treatment shared by the review-layers block
-// (ReviewPanel.tsx) and the changed-files tree section (ReviewPanel.ChangedFiles.tsx)
-// for the same environment (#1314): both render this exact component when
-// more than one environment is in scope, so the two read as one group instead
-// of two independently-labelled lists. "tenant / environment" (spaced) reads
-// as the app's existing environment presentation, matching the format
-// sidebar/aria-label text already uses, rather than the raw
-// `tenant/environment` envKey.
+// ReviewEnvLabel is shared by the layers block and the changed-files tree so they read as one group.
 export function ReviewEnvLabel({
   tenant,
   environment,
@@ -24,11 +17,7 @@ export function ReviewEnvLabel({
   );
 }
 
-// ReviewTargetLabel is that same treatment for either kind of target: an
-// environment's "tenant / environment", or a directory's path. A directory has
-// no tenant or environment to render, and showing its path is what tells the
-// operator which checkout this section is, so the two read as one group without
-// one pretending to be the other.
+// ReviewTargetLabel shows "tenant / environment" or a directory's path.
 export function ReviewTargetLabel({ target }: { target: ReviewTarget }): React.ReactElement {
   if (target.kind === 'directory') {
     return (
