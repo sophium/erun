@@ -51,6 +51,11 @@ with the matching `indexes/` and `rls/` files, rather than from that
 skill's generic table template: `user_roles` is keyed by
 `(tenant_id, user_id, role_id)`, and `audit_events` is append-only (no
 `updated_at`; its policies and grant allow only `SELECT` and `INSERT`).
+Give `audit_events` no `<table>_set_timestamps` trigger, although that
+step adds one to every other table: `erun_set_timestamps()` assigns
+`NEW.updated_at`, so with the trigger every audit insert fails with
+`record "new" has no field "updated_at"`. Its `created_at` defaults to
+`NOW()`, as in the reference.
 
 If the database side is not present, run `erun-blueprint-rls-db` first
 or confirm with the user that they have an equivalent.
