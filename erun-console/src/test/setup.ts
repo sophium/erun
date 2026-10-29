@@ -1,6 +1,8 @@
 import '@testing-library/jest-dom/vitest';
 
 import { configure } from '@testing-library/dom';
+import { cleanup } from '@testing-library/react';
+import { afterEach } from 'vitest';
 
 // findBy*/waitFor use their own timeout (default 1000ms), which flakes under
 // gate CPU contention; it stays well under vite.config.ts's testTimeout.
@@ -81,3 +83,12 @@ if (typeof window.sessionStorage === 'undefined') {
     configurable: true,
   });
 }
+
+// Radix's FocusScope dispatches its unmount event from a 0ms timer. Unmount, then let
+// that timer run while this file's jsdom is alive: fired after teardown, it throws.
+export async function unmountAndFlushTimers(): Promise<void> {
+  cleanup();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+afterEach(unmountAndFlushTimers);
